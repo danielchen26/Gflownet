@@ -1,0 +1,5 @@
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+GFlowNet = "f8593e25-8506-4e78-9057-74d697b6ff5b"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
