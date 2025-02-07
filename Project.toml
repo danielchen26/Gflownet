@@ -1,16 +1,20 @@
 name = "GFlowNet"
 uuid = "f8593e25-8506-4e78-9057-74d697b6ff5b"
-authors = ["danielchen <chentianchi@gmail.com>"]
+authors = ["Your Name <your.email@example.com>"]
 version = "0.1.0"
 
 [deps]
-Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+ComponentArrays = "b0b7db55-cfe3-40fc-9ded-d10e2dbeff66"
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+
+[compat]
+Lux = "1.6.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [targets]
-test = ["Test", "StatsBase"]
+test = ["Test"]
