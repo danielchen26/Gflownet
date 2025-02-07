@@ -51,15 +51,12 @@ GFlowNet.train!(model, data, opt, loss_fn, epochs)
 # ...
 ```
 
-For more detailed examples, see the `examples/basic_usage.jl` file.
+For more detailed examples, see the `examples/` folder.
 
 ## Contributing
 
-Contributions to GFlowNet are welcome! Please read the `CONTRIBUTING.md` file for guidelines on how to contribute to this project.
+Contributions to GFlowNet are welcome!
 
-## License
-
-This project is licensed under the MIT License - see the `LICENSE` file for details.
 
 ## Acknowledgments
 
@@ -68,8 +65,5 @@ This project is licensed under the MIT License - see the `LICENSE` file for deta
 
 ## Contact
 
-For any questions or suggestions, please contact the authors at `your.email@example.com`.
+For any questions or suggestions, please contact the authors at `tianchi.chen@merck.com`.
 
-## Disclaimer
-
-This is a sample README and the contact email is a placeholder. Please replace it with your actual contact information.
