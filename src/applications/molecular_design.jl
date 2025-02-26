@@ -3,289 +3,393 @@ using ..GFlowNet: AbstractState, AbstractAction, state_to_features, is_applicabl
 """
     MoleculeState <: AbstractState
 
-State representation for molecular graphs in GFlowNets.
+A state representing a molecule in construction.
 """
 struct MoleculeState <: AbstractState
-    atoms::Vector{Symbol}  # Atom types
-    bonds::Vector{Tuple{Int, Int, Int}}  # (atom1, atom2, bond_type)
-    is_terminal::Bool
+    data::MoleculeData
+    complete::Bool
 end
 
 """
-    MoleculeAction <: AbstractAction
+    AddAtomAction <: AbstractAction
 
-Action representation for molecular graph building.
+An action that adds an atom to the molecule.
 """
-abstract type MoleculeAction <: AbstractAction end
-
-"""
-    AddAtomAction <: MoleculeAction
-
-Action to add an atom to a molecule.
-"""
-struct AddAtomAction <: MoleculeAction
-    atom_type::Symbol  # Type of atom to add (e.g., :C, :N, :O)
+struct AddAtomAction <: AbstractAction
+    atom_type::Symbol
+    position::Tuple{Float64, Float64, Float64}
 end
 
 """
-    AddBondAction <: MoleculeAction
+    AddBondAction <: AbstractAction
 
-Action to add a bond between two atoms.
+An action that adds a bond between two atoms in the molecule.
 """
-struct AddBondAction <: MoleculeAction
-    atom1::Int  # Index of first atom
-    atom2::Int  # Index of second atom
-    bond_type::Int  # Bond type (1: single, 2: double, 3: triple)
+struct AddBondAction <: AbstractAction
+    atom1_idx::Int
+    atom2_idx::Int
+    bond_type::Int  # 1 = single, 2 = double, 3 = triple
 end
 
 """
-    TerminateAction <: MoleculeAction
+    TerminateMoleculeAction <: AbstractAction
 
-Action to terminate molecule construction.
+An action that marks the molecule as complete.
 """
-struct TerminateAction <: MoleculeAction end
+struct TerminateMoleculeAction <: AbstractAction end
 
-# Implementation of required interface functions
-
-"""
-    is_applicable(action::AddAtomAction, state::MoleculeState)
-
-Check if adding an atom is valid.
-"""
-function is_applicable(action::AddAtomAction, state::MoleculeState)
-    # Can add an atom if the state is not terminal and molecule size is within limits
-    return !state.is_terminal && length(state.atoms) < 50  # Arbitrary limit
-end
-
-"""
-    is_applicable(action::AddBondAction, state::MoleculeState)
-
-Check if adding a bond is valid.
-"""
-function is_applicable(action::AddBondAction, state::MoleculeState)
-    # Cannot add bonds to a terminal state
-    if state.is_terminal
-        return false
-    end
-    
-    # Check if atom indices are valid
-    if action.atom1 > length(state.atoms) || action.atom2 > length(state.atoms)
-        return false
-    end
-    
-    # Check if atoms are different
-    if action.atom1 == action.atom2
-        return false
-    end
-    
-    # Check if bond already exists
-    for (a1, a2, _) in state.bonds
-        if (a1 == action.atom1 && a2 == action.atom2) || 
-           (a1 == action.atom2 && a2 == action.atom1)
-            return false
-        end
-    end
-    
-    # Check valence constraints (simplified)
-    # Count existing bonds for each atom
-    atom1_bonds = count(b -> b[1] == action.atom1 || b[2] == action.atom1, state.bonds)
-    atom2_bonds = count(b -> b[1] == action.atom2 || b[2] == action.atom2, state.bonds)
-    
-    # Get maximum valence based on atom type
-    max_valence1 = get_max_valence(state.atoms[action.atom1])
-    max_valence2 = get_max_valence(state.atoms[action.atom2])
-    
-    # Check if adding this bond would exceed valence limits
-    return (atom1_bonds + action.bond_type <= max_valence1) && 
-           (atom2_bonds + action.bond_type <= max_valence2)
-end
-
-"""
-    is_applicable(action::TerminateAction, state::MoleculeState)
-
-Check if termination is valid.
-"""
-function is_applicable(action::TerminateAction, state::MoleculeState)
-    # Can terminate if there's at least one atom and not already terminated
-    return !state.is_terminal && !isempty(state.atoms)
-end
-
-"""
-    apply_action(action::AddAtomAction, state::MoleculeState)
-
-Apply the action to add an atom.
-"""
-function apply_action(action::AddAtomAction, state::MoleculeState)
-    # Create new state with added atom
-    new_atoms = copy(state.atoms)
-    push!(new_atoms, action.atom_type)
-    
-    return MoleculeState(new_atoms, copy(state.bonds), false)
-end
-
-"""
-    apply_action(action::AddBondAction, state::MoleculeState)
-
-Apply the action to add a bond.
-"""
-function apply_action(action::AddBondAction, state::MoleculeState)
-    # Create new state with added bond
-    new_bonds = copy(state.bonds)
-    
-    # Ensure atom1 < atom2 for consistency
-    atom1, atom2 = minmax(action.atom1, action.atom2)
-    
-    push!(new_bonds, (atom1, atom2, action.bond_type))
-    
-    return MoleculeState(copy(state.atoms), new_bonds, false)
-end
-
-"""
-    apply_action(action::TerminateAction, state::MoleculeState)
-
-Apply the action to terminate molecule construction.
-"""
-function apply_action(action::TerminateAction, state::MoleculeState)
-    # Create a new terminal state
-    return MoleculeState(copy(state.atoms), copy(state.bonds), true)
-end
+# Implementation of required methods for the GFlowNet framework
 
 """
     state_to_features(state::MoleculeState)
 
-Convert a molecule state to a feature vector.
+Convert a molecule state to a feature vector for neural network inputs.
 """
 function state_to_features(state::MoleculeState)
-    # This is a simplified representation
-    # In practice, you would use more sophisticated molecular featurization
+    # This is a simple implementation - in a real application,
+    # you would use more sophisticated molecular featurization
     
-    # Count atom types
-    atom_counts = Dict{Symbol, Int}()
-    for atom in state.atoms
-        atom_counts[atom] = get(atom_counts, atom, 0) + 1
-    end
-    
-    # Count bond types
-    bond_counts = Dict{Int, Int}()
-    for (_, _, bond_type) in state.bonds
-        bond_counts[bond_type] = get(bond_counts, bond_type, 0) + 1
-    end
-    
-    # Create feature vector
-    # [C count, N count, O count, H count, single bonds, double bonds, triple bonds, is_terminal]
-    features = [
-        get(atom_counts, :C, 0),
-        get(atom_counts, :N, 0),
-        get(atom_counts, :O, 0),
-        get(atom_counts, :H, 0),
-        get(bond_counts, 1, 0),  # single bonds
-        get(bond_counts, 2, 0),  # double bonds
-        get(bond_counts, 3, 0),  # triple bonds
-        Int(state.is_terminal)
+    # Basic features: number of atoms, number of bonds, is_complete
+    features = Float32[
+        length(state.data.atoms),
+        length(state.data.bonds),
+        state.complete ? 1.0 : 0.0
     ]
     
-    return Float32.(features)
+    # Atom type counts
+    atom_types = [:C, :H, :O, :N, :S, :P, :F, :Cl, :Br, :I]
+    for atom_type in atom_types
+        count_val = Base.count(a -> a == atom_type, state.data.atoms)
+        push!(features, count_val)
+    end
+    
+    return features
 end
 
 """
     reward(state::MoleculeState)
 
-Calculate the reward for a molecule state.
-This would typically be based on properties like drug-likeness, 
-synthetic accessibility, binding affinity, etc.
+Calculate the reward for a molecule state based on its properties.
 """
 function reward(state::MoleculeState)
-    if !state.is_terminal
+    if !state.complete
         return 0.0
     end
     
-    # Mock reward function - in practice, this would involve predictions from 
-    # property predictors, docking scores, etc.
+    # In a real application, you would compute molecular properties
+    # like drug-likeness, binding affinity, etc.
     
-    # Simple heuristic: reward based on molecule size, presence of key features
-    # Number of atoms
-    n_atoms = length(state.atoms)
-    
-    # Checks for specific elements
-    has_nitrogen = :N in state.atoms
-    has_oxygen = :O in state.atoms
-    
-    # Check for aromatic rings (very simplified)
-    has_ring = false
-    if length(state.bonds) >= 6
-        # More sophisticated ring detection would be needed in practice
-        has_ring = true
+    # Simple example reward: prefer molecules with 5-20 atoms
+    n_atoms = length(state.data.atoms)
+    if n_atoms < 5
+        return 0.1
+    elseif n_atoms > 20
+        return 0.1
+    else
+        # Higher reward for medium-sized molecules
+        return 1.0 - 0.05 * abs(n_atoms - 12.5)
     end
-    
-    # Basic Lipinski's Rule of 5 check (extremely simplified)
-    # In practice, you would compute actual molecular weight, logP, etc.
-    rule_of_5_score = 0
-    if 10 <= n_atoms <= 50  # Simple proxy for molecular weight
-        rule_of_5_score += 1
-    end
-    
-    # Combine factors
-    base_score = 1.0
-    size_factor = exp(-(n_atoms - 20)^2 / 100)  # Prefer ~20 atoms
-    element_bonus = (has_nitrogen ? 1.2 : 1.0) * (has_oxygen ? 1.2 : 1.0)
-    structure_bonus = has_ring ? 1.5 : 1.0
-    
-    return base_score * size_factor * element_bonus * structure_bonus * (1.0 + 0.2 * rule_of_5_score)
 end
 
 """
-    get_max_valence(atom_type::Symbol)
+    is_applicable(action::AddAtomAction, state::MoleculeState)
 
-Get the maximum valence for an atom type.
+Check if adding an atom is valid for the current molecule state.
 """
-function get_max_valence(atom_type::Symbol)
-    valences = Dict(
-        :H => 1,
-        :C => 4,
-        :N => 3,
-        :O => 2,
-        :F => 1,
-        :Cl => 1,
-        :Br => 1,
-        :I => 1,
-        :S => 6,
-        :P => 5
+function is_applicable(action::AddAtomAction, state::MoleculeState)
+    # Can't add atoms to a completed molecule
+    if state.complete
+        return false
+    end
+    
+    # Limit the total number of atoms
+    if length(state.data.atoms) >= 20
+        return false
+    end
+    
+    # Additional checks could include:
+    # - Spatial constraints
+    # - Valence rules
+    # - Chemical feasibility
+    
+    return true
+end
+
+"""
+    is_applicable(action::AddBondAction, state::MoleculeState)
+
+Check if adding a bond is valid for the current molecule state.
+"""
+function is_applicable(action::AddBondAction, state::MoleculeState)
+    # Can't add bonds to a completed molecule
+    if state.complete
+        return false
+    end
+    
+    # Check if the atom indices are valid
+    if action.atom1_idx <= 0 || action.atom2_idx <= 0 ||
+       action.atom1_idx > length(state.data.atoms) ||
+       action.atom2_idx > length(state.data.atoms) ||
+       action.atom1_idx == action.atom2_idx
+        return false
+    end
+    
+    # Check if the bond already exists
+    for (a1, a2, _) in state.data.bonds
+        if (a1 == action.atom1_idx && a2 == action.atom2_idx) ||
+           (a1 == action.atom2_idx && a2 == action.atom1_idx)
+            return false
+        end
+    end
+    
+    # Additional checks could include:
+    # - Valence rules
+    # - Distance between atoms
+    # - Chemical feasibility
+    
+    return true
+end
+
+"""
+    is_applicable(action::TerminateMoleculeAction, state::MoleculeState)
+
+Check if terminating the molecule is valid for the current state.
+"""
+function is_applicable(action::TerminateMoleculeAction, state::MoleculeState)
+    # Can't terminate an already completed molecule
+    if state.complete
+        return false
+    end
+    
+    # Check if the molecule is valid for termination
+    # In a real application, you would check for:
+    # - Valid valence for all atoms
+    # - Chemical stability
+    # - Structural integrity
+    
+    # Simple check: must have at least one atom
+    return length(state.data.atoms) > 0
+end
+
+"""
+    apply_action(action::AddAtomAction, state::MoleculeState)
+
+Apply an AddAtomAction to the current state, returning a new state.
+"""
+function apply_action(action::AddAtomAction, state::MoleculeState)
+    # Create a new state with the atom added
+    new_atoms = copy(state.data.atoms)
+    push!(new_atoms, action.atom_type)
+    
+    new_data = MoleculeData(
+        new_atoms,
+        copy(state.data.bonds)
     )
     
-    return get(valences, atom_type, 4)  # Default to 4 if unknown
+    return MoleculeState(new_data, false)
 end
 
 """
-    create_molecule_actions()
+    apply_action(action::AddBondAction, state::MoleculeState)
 
-Create a set of possible molecule building actions.
+Apply an AddBondAction to the current state, returning a new state.
 """
-function create_molecule_actions()
-    actions = MoleculeAction[]
+function apply_action(action::AddBondAction, state::MoleculeState)
+    # Create a new state with the bond added
+    new_bonds = copy(state.data.bonds)
+    push!(new_bonds, (action.atom1_idx, action.atom2_idx, action.bond_type))
     
-    # Add atom actions
-    for atom_type in [:C, :N, :O, :H, :F, :Cl, :S]
-        push!(actions, AddAtomAction(atom_type))
-    end
+    new_data = MoleculeData(
+        copy(state.data.atoms),
+        new_bonds
+    )
     
-    # Add bond actions - these will be filtered for validity at runtime
-    # In a real implementation, we would generate these dynamically based on
-    # the current molecule state
-    for i in 1:10, j in i+1:10, bond_type in 1:3
-        push!(actions, AddBondAction(i, j, bond_type))
-    end
-    
-    # Add terminate action
-    push!(actions, TerminateAction())
-    
-    return actions
+    return MoleculeState(new_data, false)
+end
+
+"""
+    apply_action(action::TerminateMoleculeAction, state::MoleculeState)
+
+Apply a TerminateMoleculeAction to the current state, returning a new state.
+"""
+function apply_action(action::TerminateMoleculeAction, state::MoleculeState)
+    # Create a new state marked as complete
+    return MoleculeState(
+        MoleculeData(copy(state.data.atoms), copy(state.data.bonds)),
+        true
+    )
 end
 
 """
     create_initial_molecule_state()
 
-Create the initial state for molecule building.
+Create an empty initial molecule state.
 """
 function create_initial_molecule_state()
-    return MoleculeState(Symbol[], Tuple{Int, Int, Int}[], false)
+    return MoleculeState(
+        MoleculeData(Symbol[], Tuple{Int, Int, Int}[]),
+        false
+    )
+end
+
+"""
+    create_molecular_design_model(atom_types, max_atoms, max_bonds)
+
+Create a GFlowNet model for molecular design.
+"""
+function create_molecular_design_model(atom_types=[:C, :H, :O, :N], max_atoms=10, max_bonds=15)
+    # Create the initial state
+    initial_state = create_initial_molecule_state()
+    
+    # Create actions
+    actions = AbstractAction[]
+    
+    # Add atom actions
+    for atom_type in atom_types
+        for x in 1:3, y in 1:3, z in 1:3
+            push!(actions, AddAtomAction(atom_type, (Float64(x), Float64(y), Float64(z))))
+        end
+    end
+    
+    # Add bond actions (will be filtered by is_applicable)
+    for i in 1:max_atoms
+        for j in (i+1):max_atoms
+            for bond_type in 1:3
+                push!(actions, AddBondAction(i, j, bond_type))
+            end
+        end
+    end
+    
+    # Add terminate action
+    push!(actions, TerminateMoleculeAction())
+    
+    # The terminal states are empty at first - they'll be discovered during sampling
+    terminal_states = MoleculeState[]
+    
+    # Create a special terminal sink state
+    terminal_sink = MoleculeState(
+        MoleculeData(Symbol[:SINK], Tuple{Int, Int, Int}[]),
+        true
+    )
+    
+    # Create the DAG
+    dag = create_dag(initial_state, terminal_states, terminal_sink, actions)
+    
+    # Create a simple neural network for the forward policy
+    # In a real application, you would use a more sophisticated model
+    # that could handle molecular graphs
+    
+    # For demonstration purposes only:
+    forward_policy = ForwardPolicy(identity) # Placeholder
+    
+    # Create the GFlowNet model
+    return GFlowNetModel(
+        dag,
+        forward_policy,
+        nothing,  # No backward policy
+        nothing,  # No flow estimator
+        nothing,  # No partition function
+        [TrajectoryBalanceObjective(1.0)],
+        nothing  # No optimizer
+    )
+end
+
+# Function to visualize molecules using the composition-based approach
+function visualize_molecule(data::MoleculeData)
+    println("Molecule Visualization:")
+    println("  Atoms ($(length(data.atoms))): ", join(data.atoms, ", "))
+    
+    if !isempty(data.bonds)
+        println("  Bonds ($(length(data.bonds))):")
+        for (a1, a2, type) in data.bonds
+            bond_symbol = type == 1 ? "-" : (type == 2 ? "=" : "≡")
+            println("    $(data.atoms[a1]) $bond_symbol $(data.atoms[a2])")
+        end
+    else
+        println("  No bonds")
+    end
+end
+
+function visualize_molecule(state::MoleculeState)
+    visualize_molecule(state.data)
+    println("  Status: ", state.complete ? "Complete" : "In Progress")
+end
+
+# Add equality methods for proper comparison in DAG creation
+import Base: ==
+
+function ==(a::MoleculeState, b::MoleculeState)
+    return a.complete == b.complete &&
+           length(a.data.atoms) == length(b.data.atoms) &&
+           all(a.data.atoms .== b.data.atoms) &&
+           length(a.data.bonds) == length(b.data.bonds) &&
+           all(a.data.bonds .== b.data.bonds)
+end
+
+function ==(a::MoleculeData, b::MoleculeData)
+    return length(a.atoms) == length(b.atoms) &&
+           all(a.atoms .== b.atoms) &&
+           length(a.bonds) == length(b.bonds) &&
+           all(a.bonds .== b.bonds)
+end
+
+function ==(a::AddAtomAction, b::AddAtomAction)
+    return a.atom_type == b.atom_type && a.position == b.position
+end
+
+function ==(a::AddBondAction, b::AddBondAction)
+    return a.atom1_idx == b.atom1_idx && 
+           a.atom2_idx == b.atom2_idx && 
+           a.bond_type == b.bond_type
+end
+
+function ==(a::TerminateMoleculeAction, b::TerminateMoleculeAction)
+    return true  # All terminate actions are equivalent
+end
+
+# Add hash methods for our types to allow them to be used in dictionaries/sets
+import Base: hash
+
+function hash(state::MoleculeState, h::UInt)
+    h = hash(:MoleculeState, h)
+    h = hash(state.complete, h)
+    for atom in state.data.atoms
+        h = hash(atom, h)
+    end
+    for bond in state.data.bonds
+        h = hash(bond, h)
+    end
+    return h
+end
+
+function hash(action::AddAtomAction, h::UInt)
+    return hash((:AddAtomAction, action.atom_type, action.position), h)
+end
+
+function hash(action::AddBondAction, h::UInt)
+    return hash((:AddBondAction, action.atom1_idx, action.atom2_idx, action.bond_type), h)
+end
+
+function hash(action::TerminateMoleculeAction, h::UInt)
+    return hash(:TerminateMoleculeAction, h)
+end
+
+# Add display methods for prettier printing
+import Base: show
+
+function show(io::IO, state::MoleculeState)
+    status = state.complete ? "complete" : "in progress"
+    print(io, "MoleculeState($(length(state.data.atoms)) atoms, $(length(state.data.bonds)) bonds, $status)")
+end
+
+function show(io::IO, action::AddAtomAction)
+    print(io, "AddAtomAction($(action.atom_type) at $(action.position))")
+end
+
+function show(io::IO, action::AddBondAction)
+    print(io, "AddBondAction($(action.atom1_idx)-$(action.atom2_idx) type:$(action.bond_type))")
+end
+
+function show(io::IO, action::TerminateMoleculeAction)
+    print(io, "TerminateMoleculeAction()")
 end 

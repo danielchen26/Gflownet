@@ -1,6 +1,6 @@
 module GFlowNet
 
-# Import required packages
+# External dependencies
 using Graphs
 using Distributions
 using LinearAlgebra
@@ -12,45 +12,52 @@ using Random
 using Statistics
 using StatsBase
 using Zygote
+using Dates
+using GraphRecipes
 
-# Re-export
-export AbstractState, AbstractAction
-export DirectedAcyclicGraph, create_dag
-export GFlowNetModel, FlowMatchingObjective, DetailedBalanceObjective, TrajectoryBalanceObjective
-export ForwardPolicy, BackwardPolicy, FlowEstimator, Trajectory
-export flow, edge_flow, reward, sample_trajectory, state_to_features
-export forward_transition_prob, backward_transition_prob
-export is_applicable, apply_action, get_next_states, get_previous_states
-export compute_loss_and_grad, apply_optimizer!, train!
-
-# Include base type definitions
+# Type definitions first
 include("types.jl")
 
-# Include DAG construction
+# Core functionality
 include("directed_acyclic_graph.jl")
-
-# Include flow network functionality
 include("flow_networks.jl")
 
-# Include policy definitions
+# Policies and training
 include("policies/forward_policy.jl")
 include("policies/backward_policy.jl")
-include("policies/flow_estimator.jl")
+include("training/flow_matching.jl")
+include("training/detailed_balance.jl")
+include("training/trajectory_balance.jl")
 
-# Include training methods
-include("training/training.jl")
-
-# Include extensions
-include("extensions/continuous.jl")
-include("extensions/non_acyclic.jl")
-include("extensions/information.jl")
-
-# Include applications
+# Applications
 include("applications/molecular_design.jl")
 include("applications/causal_discovery.jl")
 include("applications/active_learning.jl")
 
-# Include utilities
+# Extensions
+include("extensions/continuous.jl")
+include("extensions/information.jl")
+include("extensions/non_acyclic.jl")
+
+# Utilities (last, since they depend on other components)
 include("utils/utils.jl")
+
+# Export public API
+export AbstractState, AbstractAction
+export DirectedAcyclicGraph, Trajectory
+export MoleculeData, DAGData, ExperimentData
+export GFlowNetModel, FlowEstimator
+export ForwardPolicy, BackwardPolicy
+export FlowMatchingObjective, DetailedBalanceObjective, TrajectoryBalanceObjective
+export create_dag, flow, edge_flow, state_to_features, reward
+export forward_transition_prob, backward_transition_prob
+export sample_trajectory, train!, compute_loss_and_grad
+export is_applicable, apply_action, apply_optimizer!
+export get_next_states, get_previous_states
+export get_incoming_edges, get_outgoing_edges
+export MoleculeState
+export AddAtomAction, AddBondAction, TerminateMoleculeAction
+export create_initial_molecule_state, create_molecular_design_model
+export visualize_molecule
 
 end # module
