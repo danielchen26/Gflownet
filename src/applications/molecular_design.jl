@@ -290,7 +290,9 @@ function create_molecular_design_model(atom_types=[:C, :H, :O, :N], max_atoms=10
         nothing,  # No flow estimator
         nothing,  # No partition function
         [TrajectoryBalanceObjective(1.0)],
-        nothing  # No optimizer
+        nothing,  # No optimizer
+        (forward = nothing, backward = nothing, flow = nothing),  # No parameters
+        (forward = nothing, backward = nothing, flow = nothing)   # No states
     )
 end
 

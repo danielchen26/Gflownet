@@ -1,7 +1,14 @@
 #!/usr/bin/env julia
 
-# Example demonstrating GFlowNet for active learning and experiment design
-# This shows how GFlowNets can be used to select informative experiments.
+# Example script for active learning using GFlowNets
+# This demonstrates how GFlowNets can be used for experimental design
+# and selecting informative experiments
+
+# IMPORTANT: This script must be run from the project root directory
+# Run with: julia examples/active_learning.jl
+
+using Pkg
+Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
 
 using GFlowNet
 using GFlowNet.GFlowNetUtils
@@ -9,6 +16,8 @@ using Plots
 using Random
 using LinearAlgebra
 using Statistics
+using Lux, Optimisers, NNlib
+using MultivariateStats
 
 # Main function to run the example
 function main()
@@ -56,8 +65,6 @@ function main()
     dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
     
     # Create neural network models for policies
-    using Lux, Random, Optimisers, NNlib
-    
     rng = Random.default_rng()
     
     # Get feature dimension from a state (using experiment_features)
@@ -93,7 +100,9 @@ function main()
         flow_estimator,
         nothing,  # Will be estimated during training
         [GFlowNet.TrajectoryBalanceObjective(1.0)],
-        optimizer
+        optimizer,
+        (forward = forward_ps, backward = nothing, flow = flow_ps),  # Parameters
+        (forward = forward_st, backward = nothing, flow = flow_st)   # States
     )
     
     # Define the reward function that captures the state_to_features and experiment data
@@ -226,8 +235,6 @@ function main()
     println("- Mean diversity: $mean_diversity")
     
     # PCA plot of experiment features and selection
-    using MultivariateStats
-    
     # Perform PCA
     X = experiment_features'
     M = fit(PCA, X; maxoutdim=2)

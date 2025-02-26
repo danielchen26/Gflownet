@@ -1,6 +1,8 @@
 using Distributions: Categorical
 using StatsBase: sample, Weights
 using NNlib: softmax
+using Random
+using Lux
 
 """
     state_to_features(state::AbstractState)
@@ -23,8 +25,18 @@ Compute the flow value for a given state.
 """
 function flow(model::GFlowNetModel, state::AbstractState)
     if !isnothing(model.flow_estimator)
-        # Use direct flow estimation
-        return model.flow_estimator.model(state_to_features(state))[1]
+        # Use direct flow estimation with safe model call
+        features = state_to_features(state)
+        
+        # Use safe model call helper
+        flow_values, _ = safe_model_call(
+            model.flow_estimator.model,
+            features,
+            model.parameters.flow,
+            model.states.flow
+        )
+        
+        return flow_values[1]
     else
         # Compute flow by summing incoming edge flows
         incoming_edges = get_incoming_edges(model.dag, state)
@@ -69,7 +81,14 @@ Compute the forward transition probability from source to target state.
 function forward_transition_prob(model::GFlowNetModel, source::AbstractState, target::AbstractState)
     # Use the forward policy to compute transition probability
     features = state_to_features(source)
-    logits = model.forward_policy.model(features)
+    
+    # Use safe model call helper
+    logits, _ = safe_model_call(
+        model.forward_policy.model,
+        features,
+        model.parameters.forward,
+        model.states.forward
+    )
     
     # Get all possible next states from source
     next_states = get_next_states(model.dag, source)
@@ -113,7 +132,14 @@ function backward_transition_prob(model::GFlowNetModel, target::AbstractState, s
     else
         # Use the backward policy to compute transition probability
         features = state_to_features(target)
-        logits = model.backward_policy.model(features)
+        
+        # Use safe model call helper
+        logits, _ = safe_model_call(
+            model.backward_policy.model,
+            features,
+            model.parameters.backward,
+            model.states.backward
+        )
         
         # Get all possible previous states from target
         prev_states = get_previous_states(model.dag, target)
@@ -151,18 +177,63 @@ function estimate_partition_function(model::GFlowNetModel)
 end
 
 """
-    sample_trajectory(model::GFlowNetModel)
+    safe_model_call(model, features, parameters, states)
+
+Helper function to safely call a Lux model with proper feature formatting.
+Ensures features are properly shaped for Lux models and handles batch dimensions.
+"""
+function safe_model_call(model, features, parameters, states)
+    # Convert to Float32 to ensure type stability
+    features = convert(Array{Float32}, features)
+    
+    # Reshape features to ensure they're a matrix with correct dimensions
+    # Lux expects input in the format [features, batch]
+    if features isa Vector
+        features = reshape(features, :, 1)
+    end
+    
+    # Call the model using Lux's explicit function call format
+    # This is safer than relying on functor behavior
+    if model isa Lux.Chain
+        outputs, new_states = Lux.apply(model, features, parameters, states)
+    else
+        outputs, new_states = model(features, parameters, states)
+    end
+    
+    # If outputs have batch dimension of 1, flatten to a vector
+    if size(outputs, 2) == 1
+        outputs = vec(outputs)
+    end
+    
+    return outputs, new_states
+end
+
+"""
+    sample_trajectory(model::GFlowNetModel, rng=nothing)
 
 Sample a complete trajectory from the GFlowNet.
 """
-function sample_trajectory(model::GFlowNetModel)
-    trajectory = [model.dag.initial_state]
+function sample_trajectory(model::GFlowNetModel, rng=nothing)
+    if isnothing(rng)
+        rng = Random.default_rng()
+    end
+    
+    states = [model.dag.initial_state]
+    actions = []
+    
     current_state = model.dag.initial_state
     
     while current_state ∉ model.dag.terminal_states
         # Get next state probabilities
         features = state_to_features(current_state)
-        logits = model.forward_policy.model(features)
+        
+        # Use safe model call to get logits
+        logits, _ = safe_model_call(
+            model.forward_policy.model,
+            features,
+            model.parameters.forward,
+            model.states.forward
+        )
         
         # Get all possible next states
         next_states = get_next_states(model.dag, current_state)
@@ -178,9 +249,9 @@ function sample_trajectory(model::GFlowNetModel)
         next_state_idx = sample(1:length(next_states), Weights(probs))
         next_state = next_states[next_state_idx]
         
-        push!(trajectory, next_state)
+        push!(states, next_state)
         current_state = next_state
     end
     
-    return Trajectory(trajectory)
+    return Trajectory(states)
 end 

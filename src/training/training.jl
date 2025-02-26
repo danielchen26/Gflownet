@@ -1,5 +1,6 @@
 using ..GFlowNet: GFlowNetModel, AbstractGFlowNetObjective, FlowMatchingObjective, 
-                 DetailedBalanceObjective, TrajectoryBalanceObjective, sample_trajectory
+                 DetailedBalanceObjective, TrajectoryBalanceObjective, sample_trajectory,
+                 compute_loss_and_grad, estimate_partition_function, apply_optimizer!
 
 """
     train!(model::GFlowNetModel, n_iterations::Int; 
@@ -84,32 +85,6 @@ function update_gradient(total_grad, grad, weight)
         return grad .* weight
     else
         return total_grad .+ grad .* weight
-    end
-end
-
-"""
-    apply_optimizer!(model::GFlowNetModel, grad)
-
-Apply the optimizer to update model parameters using the gradient.
-"""
-function apply_optimizer!(model::GFlowNetModel, grad)
-    # This depends on the specific optimizer and parameter structure
-    # For Lux + Optimisers.jl, something like:
-    
-    # Update forward policy
-    model.forward_policy.model, model.optimizer.forward = 
-        Optimisers.update(model.optimizer.forward, model.forward_policy.model, grad.forward)
-    
-    # Update backward policy if it exists
-    if !isnothing(model.backward_policy)
-        model.backward_policy.model, model.optimizer.backward = 
-            Optimisers.update(model.optimizer.backward, model.backward_policy.model, grad.backward)
-    end
-    
-    # Update flow estimator if it exists
-    if !isnothing(model.flow_estimator)
-        model.flow_estimator.model, model.optimizer.flow = 
-            Optimisers.update(model.optimizer.flow, model.flow_estimator.model, grad.flow)
     end
 end
 

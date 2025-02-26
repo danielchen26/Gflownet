@@ -205,6 +205,8 @@ Complete GFlowNet model integrating all components needed for sampling and train
 - `partition_function`: Optional estimate of the partition function
 - `objectives`: Training objectives
 - `optimizer`: Optimizer for training
+- `parameters`: NamedTuple containing model parameters for forward, backward, and flow
+- `states`: NamedTuple containing model states for forward, backward, and flow
 """
 mutable struct GFlowNetModel
     dag::DirectedAcyclicGraph
@@ -214,4 +216,6 @@ mutable struct GFlowNetModel
     partition_function::Union{Nothing, Float64}
     objectives::Vector{AbstractGFlowNetObjective}
     optimizer
+    parameters::NamedTuple
+    states::NamedTuple
 end 

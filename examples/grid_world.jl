@@ -1,12 +1,19 @@
 #!/usr/bin/env julia
 
-# Example demonstrating GFlowNet on a simple grid world navigation task
-# This shows how to set up and train a GFlowNet to find rewarding paths
-# in a 2D grid environment.
+# Example script for grid world navigation using GFlowNets
+# This demonstrates the basic concepts of GFlowNets in a simple environment
+
+# IMPORTANT: This script must be run from the project root directory
+# Run with: julia examples/grid_world.jl
+
+using Pkg
+Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
 
 using GFlowNet
 using GFlowNet.GFlowNetUtils
 using Plots
+using Lux, Random, Optimisers, NNlib
+using Statistics  # Add Statistics for mean and std functions
 
 # Define the grid world state and action types
 struct GridState <: GFlowNet.AbstractState
@@ -69,17 +76,18 @@ function GFlowNet.apply_action(action::TerminateAction, state::GridState)
 end
 
 function GFlowNet.state_to_features(state::GridState)
-    # One-hot encoding of position + is_terminal flag
-    features = zeros(Float32, GRID_SIZE * GRID_SIZE + 1)
+    # Calculate the position index
+    pos_idx = (state.x - 1) * GRID_SIZE + state.y
+    grid_size_sq = GRID_SIZE * GRID_SIZE
     
-    # Position encoding (if not terminal)
-    if !state.is_terminal
-        idx = (state.y - 1) * GRID_SIZE + state.x
-        features[idx] = 1.0
-    end
-    
-    # Terminal flag
-    features[end] = Float32(state.is_terminal)
+    # Use vcat and zeros to create features (completely non-mutating)
+    # Create a one-hot vector for position
+    features = vcat(
+        # Position feature (one hot)
+        Float32.([(i == pos_idx) for i in 1:grid_size_sq]),
+        # Terminal state feature
+        Float32[state.is_terminal]
+    )
     
     return features
 end
@@ -89,9 +97,15 @@ function GFlowNet.reward(state::GridState)
         return 0.0
     end
     
-    # Return predefined rewards for specific positions
-    pos = (state.x, state.y)
-    return get(REWARD_POSITIONS, pos, 0.5)  # Default small reward
+    # Return the reward for the current position if it's in REWARD_POSITIONS
+    for (pos, reward_value) in REWARD_POSITIONS
+        if (state.x, state.y) == pos
+            return reward_value
+        end
+    end
+    
+    # Default reward for terminal states not in REWARD_POSITIONS
+    return 0.0
 end
 
 # Create grid world actions
@@ -169,8 +183,6 @@ function main()
     dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
     
     # Create neural network models for policies
-    using Lux, Random, Optimisers, NNlib
-    
     rng = Random.default_rng()
     
     # Feature dimension is grid_size^2 + 1 (for terminal flag)
@@ -206,7 +218,9 @@ function main()
         flow_estimator,
         nothing,  # Will be estimated during training
         [GFlowNet.TrajectoryBalanceObjective(1.0)],
-        optimizer
+        optimizer,
+        (forward = forward_ps, backward = nothing, flow = flow_ps),  # Parameters
+        (forward = forward_st, backward = nothing, flow = flow_st)   # States
     )
     
     # Create logger

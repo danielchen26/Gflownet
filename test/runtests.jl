@@ -90,7 +90,7 @@ using Graphs
         @test length(next_states) > 0
         
         # Test that the graph is properly acyclic
-        @test is_acyclic(dag.graph)
+        @test !is_cyclic(dag.graph)
     end
     
     @testset "Flow Functions" begin

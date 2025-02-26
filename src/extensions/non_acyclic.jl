@@ -140,7 +140,7 @@ function sample_cyclic_trajectory(model, rng=nothing)
         
         # Get next state probabilities
         features = state_to_features(current_state)
-        logits = model.forward_policy.model(features)
+        logits, _ = model.forward_policy.model(features, model.parameters.forward, model.states.forward)
         
         # Get all possible next states
         next_states = get_next_states(model.dag, current_state)

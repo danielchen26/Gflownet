@@ -1,5 +1,8 @@
 module GFlowNetUtils
 
+using Optimisers  # Add Optimisers package
+using ..GFlowNet  # Import the parent module to access GFlowNetModel
+
 export GFlowNetLogger
 export log_metric!, log_iteration!, get_metric, get_last_metric, reset!, save_metrics
 export summarize_performance, time_execution, benchmark_sampling

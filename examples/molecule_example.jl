@@ -3,8 +3,11 @@
 # Example script for molecular design using GFlowNets
 # This demonstrates the composition-based approach to defining domain-specific types
 
+# IMPORTANT: This script must be run from the project root directory
+# Run with: julia examples/molecule_example.jl
+
 using Pkg
-Pkg.activate(".")  # Activate the project in the current directory
+Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
 
 using GFlowNet
 using Random

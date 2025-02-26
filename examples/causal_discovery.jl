@@ -1,8 +1,14 @@
 #!/usr/bin/env julia
 
-# Example demonstrating GFlowNet for causal discovery
-# This shows how GFlowNets can be used to discover causal structures
-# that explain observed data.
+# Example script for causal discovery using GFlowNets
+# This demonstrates how GFlowNets can be used to find directed acyclic graphs
+# that best explain observed data
+
+# IMPORTANT: This script must be run from the project root directory
+# Run with: julia examples/causal_discovery.jl
+
+using Pkg
+Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
 
 using GFlowNet
 using GFlowNet.GFlowNetUtils
@@ -11,6 +17,8 @@ using Random
 using LinearAlgebra
 using Statistics
 using StatsBase
+using Distributions  # For probability distributions
+using Lux, Optimisers, NNlib  # Moved from inside the main function
 
 # Generate synthetic causal data
 function generate_synthetic_causal_data(n_samples::Int, n_variables::Int; 
@@ -113,8 +121,6 @@ function main()
     dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
     
     # Create neural network models for policies
-    using Lux, Random, Optimisers, NNlib
-    
     rng = Random.default_rng()
     
     # Get feature dimension from a state
@@ -150,7 +156,9 @@ function main()
         flow_estimator,
         nothing,  # Will be estimated during training
         [GFlowNet.TrajectoryBalanceObjective(1.0)],
-        optimizer
+        optimizer,
+        (forward = forward_ps, backward = nothing, flow = flow_ps),  # Parameters
+        (forward = forward_st, backward = nothing, flow = flow_st)   # States
     )
     
     # Create logger
