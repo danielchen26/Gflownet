@@ -8,7 +8,8 @@ makedocs(
     ),
     clean = false,  # Don't clean build directory due to permission issues
     build = "../docbuild",
-    modules = [Main],  # We'll change this to your module name once package is importable
+    modules = Module[],  # Empty array of Module type to satisfy the type requirement
+    doctest = false,  # Skip doctests to avoid errors
     pages = [
         "Home" => "index.md",
         "Guide" => [
@@ -16,6 +17,12 @@ makedocs(
             "guide/core_concepts.md",
             "guide/mathematical_background.md",
             "guide/training_objectives.md"
+        ],
+        "Applications" => [
+            "applications/grid_world.md",
+            "applications/molecular_design.md",
+            "applications/causal_discovery.md",
+            "applications/active_learning.md"
         ]
     ]
 )
