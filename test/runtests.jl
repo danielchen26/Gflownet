@@ -2,96 +2,107 @@
 
 using Test
 using GFlowNet
-using Flux
-using StatsBase
-using StaticArrays
+using Lux
+using Random
+using Statistics
+using Optimisers
+using Graphs
 
-# Load the module which includes the GFlowNetModel, train!, and other functions
-include("../src/GFlowNet.jl")
-
-@testset "All Tests" begin
-    include("test_model.jl")
-    include("test_training.jl")
-    include("test_environment.jl")
-end
-
-# Test the GFlowNetModel structure
-@testset "GFlowNetModel Structure" begin
-    input_dim = 10
-    hidden_dim = 64
-    output_dim = 2
-    model = GFlowNetModel(input_dim, hidden_dim, output_dim)
-
-    @test model.encoder isa Chain
-    @test model.policy_head isa Chain
-    @test length(Flux.params(model)) > 0
-end
-
-# Test the training process
-@testset "Training Process" begin
-    input_dim = 10
-    hidden_dim = 64
-    output_dim = 2
-    model = GFlowNetModel(input_dim, hidden_dim, output_dim)
-    data = [(Float32.(rand(input_dim)), Float32.(rand(output_dim))) for _ in 1:10]
-    opt = Flux.Adam(0.001)
-    loss_fn = (x, y, m) -> Flux.mse(m(x), y)
-    epochs = 5
-
-    initial_loss = evaluate_model(model, data)
-    train!(model, data, opt, loss_fn, epochs)
-    final_loss = evaluate_model(model, data)
-
-    @test final_loss ≤ initial_loss
-end
-
-# Test the utility functions
-@testset "Utility Functions" begin
-    data = [(Float32.(rand(10)), Float32.(rand(2))) for _ in 1:100]
-    train_data, val_data = split_data(data, 0.8)
-
-    @test length(train_data) == 80
-    @test length(val_data) == 20
-end
-
-# Comprehensive test cases
-@testset "Core Functionality" begin
-    # Create environment
-    env = DiscreteEnvironment(
-        [Float32[0], Float32[1]],  # states
-        1:2,                        # actions
-        (s, a) -> Float32[s[1] + a], # transition
-        (s, a, s′) -> Float32(a),    # reward
-        s -> s[1] > 5               # terminal
-    )
-    
-    # Initialize policies
-    forward = ForwardPolicy(1, 4, 2)
-    backward = BackwardPolicy(Chain(Dense(1, 4, relu), Dense(4, 2, softmax)))
-    
-    # Generate trajectory
-    traj = generate_trajectory(forward, env)
-    @test length(traj.actions) > 0
-    
-    # Test training
-    train!(forward, backward, env, Flux.Adam(0.01), epochs=3)
-end
-
-@testset "Training Components" begin
-    env = (
-        initial_state = () -> Float32(0),
-        is_terminal = s -> s > 5,
-        step = (s, a) -> (s + a, Float32(a))
-    )
-    
-    @testset "Trajectory Generation" begin
-        model = GFlowNetModel(1, 4, 3)
-        trajectory = generate_trajectory(model, env)
+@testset "GFlowNet.jl" begin
+    @testset "Types" begin
+        # Test the abstract types
+        @test GFlowNet.AbstractState isa Type
+        @test GFlowNet.AbstractAction isa Type
         
-        @test length(trajectory.states) > 0
-        @test length(trajectory.actions) == length(trajectory.rewards)
-        @test trajectory.states[end] > 5  # Should reach terminal state
+        # Test DirectedAcyclicGraph
+        @test GFlowNet.DirectedAcyclicGraph isa Type
+    end
+    
+    @testset "Grid World Example" begin
+        # Define a simple grid world
+        struct GridState <: GFlowNet.AbstractState
+            x::Int
+            y::Int
+            is_terminal::Bool
+        end
+        
+        struct MoveAction <: GFlowNet.AbstractAction
+            direction::Symbol # :up, :down, :left, :right
+        end
+        
+        struct TerminateAction <: GFlowNet.AbstractAction end
+        
+        # Define is_applicable and apply_action methods
+        function GFlowNet.is_applicable(action::MoveAction, state::GridState)
+            !state.is_terminal
+        end
+        
+        function GFlowNet.is_applicable(action::TerminateAction, state::GridState)
+            !state.is_terminal
+        end
+        
+        function GFlowNet.apply_action(action::MoveAction, state::GridState)
+            if action.direction == :up
+                return GridState(state.x, state.y + 1, false)
+            elseif action.direction == :down
+                return GridState(state.x, state.y - 1, false)
+            elseif action.direction == :left
+                return GridState(state.x - 1, state.y, false)
+            elseif action.direction == :right
+                return GridState(state.x + 1, state.y, false)
+            end
+        end
+        
+        function GFlowNet.apply_action(action::TerminateAction, state::GridState)
+            return GridState(state.x, state.y, true)
+        end
+        
+        function GFlowNet.state_to_features(state::GridState)
+            return Float32[state.x, state.y, state.is_terminal ? 1.0 : 0.0]
+        end
+        
+        function GFlowNet.reward(state::GridState)
+            if !state.is_terminal
+                return 0.0
+            end
+            return Float32(state.x + state.y) / 10.0
+        end
+        
+        # Create a simple DAG
+        initial_state = GridState(0, 0, false)
+        terminal_states = [GridState(x, y, true) for x in 0:2 for y in 0:2]
+        terminal_sink = GridState(-1, -1, true)
+        actions = [
+            MoveAction(:up), MoveAction(:down), MoveAction(:left), MoveAction(:right),
+            TerminateAction()
+        ]
+        
+        # Test DAG creation
+        dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
+        @test dag isa GFlowNet.DirectedAcyclicGraph
+        @test dag.initial_state == initial_state
+        @test length(dag.terminal_states) == length(terminal_states)
+        @test dag.terminal_sink == terminal_sink
+        @test dag.actions == actions
+        
+        # Test next/previous state functions
+        next_states = GFlowNet.get_next_states(dag, initial_state)
+        @test length(next_states) > 0
+        
+        # Test that the graph is properly acyclic
+        @test is_acyclic(dag.graph)
+    end
+    
+    @testset "Flow Functions" begin
+        # Create simple neural networks for testing
+        rng = Random.default_rng()
+        
+        # Forward policy with a simple network
+        forward_policy, ps, st = GFlowNet.create_forward_policy(3, 10, 5, rng)
+        @test forward_policy isa GFlowNet.ForwardPolicy
+        
+        # Flow estimator
+        flow_estimator, ps, st = GFlowNet.create_flow_estimator(3, 10, rng)
+        @test flow_estimator isa GFlowNet.FlowEstimator
     end
 end
-
-# Include additional test sets as necessary
