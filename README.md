@@ -1,5 +1,66 @@
 # GFlowNet - Generative Flow Networks in Julia
 
+This repository contains a Julia implementation of Generative Flow Networks (GFlowNets), a class of generative models for generating compositional objects by learning a stochastic policy for sequential construction.
+
+## Project Structure
+
+- `src/`: Core GFlowNet implementation
+- `examples/`: Example applications in different domains
+  - `grid_world/`: Simple grid navigation example
+  - `molecule_design/`: Molecular design application
+  - `causal_discovery/`: Discovering causal structures
+  - `active_learning/`: Experimental design and active learning
+
+## Running Examples
+
+All examples should be run from the project root directory. For example:
+
+```bash
+julia examples/grid_world/grid_world.jl
+```
+
+Each example directory contains a README with more details about the specific implementation.
+
+## Dependencies
+
+This project uses several Julia packages:
+- Lux.jl for neural networks
+- Plots.jl for visualization
+- StatsBase.jl for statistical utilities
+- And others specified in the Project.toml file
+
+## Getting Started
+
+1. Clone this repository
+2. Start Julia in the project directory 
+3. Activate the project environment:
+   ```julia
+   using Pkg
+   Pkg.activate(".")
+   Pkg.instantiate()
+   ```
+4. Run one of the examples as described above
+
+## Example Applications
+
+### Grid World Navigation
+
+A simple grid world example that demonstrates the basic concepts of GFlowNets in a 2D grid environment.
+
+### Molecular Design
+
+Shows how GFlowNets can be used for molecular design tasks by sequentially building molecular structures.
+
+### Causal Discovery
+
+Demonstrates how GFlowNets can discover causal structures (directed acyclic graphs) that explain observed data.
+
+### Active Learning
+
+Uses GFlowNets for experimental design and selecting informative experiments.
+
+# GFlowNet - Generative Flow Networks in Julia
+
 This repository contains an implementation of Generative Flow Networks (GFlowNets) in Julia. GFlowNets are a novel approach to generative modeling, particularly useful for generating samples from complex, high-dimensional distributions.
 
 ## Overview

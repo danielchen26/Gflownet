@@ -193,12 +193,7 @@ function safe_model_call(model, features, parameters, states)
     end
     
     # Call the model using Lux's explicit function call format
-    # This is safer than relying on functor behavior
-    if model isa Lux.Chain
-        outputs, new_states = Lux.apply(model, features, parameters, states)
-    else
-        outputs, new_states = model(features, parameters, states)
-    end
+    outputs, new_states = Lux.apply(model, features, parameters, states)
     
     # If outputs have batch dimension of 1, flatten to a vector
     if size(outputs, 2) == 1

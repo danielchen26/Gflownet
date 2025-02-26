@@ -5,7 +5,7 @@
 # and selecting informative experiments
 
 # IMPORTANT: This script must be run from the project root directory
-# Run with: julia examples/active_learning.jl
+# Run with: julia examples/active_learning/active_learning.jl
 
 using Pkg
 Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
@@ -158,10 +158,13 @@ function main()
     # Visualize results
     println("Visualizing results...")
     
+    # Create output directory if it doesn't exist
+    output_dir = "examples/active_learning"
+    
     # Plot loss curve
     losses = get_metric(logger, "loss")
     loss_plot = visualize_training_progress(losses)
-    savefig(loss_plot, "active_learning_loss.png")
+    savefig(loss_plot, joinpath(output_dir, "active_learning_loss.png"))
     
     # Sample experiment selections and visualize them
     n_samples = 10
@@ -180,7 +183,7 @@ function main()
     
     # Visualize the best experiment selection
     exp_plot = visualize_experiment_selection(best_state, experiment_features, experiment_values)
-    savefig(exp_plot, "active_learning_best_selection.png")
+    savefig(exp_plot, joinpath(output_dir, "active_learning_best_selection.png"))
     
     # Plot experiment values
     values_plot = scatter(1:n_experiments, experiment_values, 
@@ -198,11 +201,11 @@ function main()
             markercolor=:red,
             label="Selected")
     
-    savefig(values_plot, "active_learning_values.png")
+    savefig(values_plot, joinpath(output_dir, "active_learning_values.png"))
     
     # Plot reward distribution
     reward_plot = visualize_reward_distribution(model, 100)
-    savefig(reward_plot, "active_learning_rewards.png")
+    savefig(reward_plot, joinpath(output_dir, "active_learning_rewards.png"))
     
     # Analyze the diversity of selected experiments
     function experiment_diversity(state)
@@ -258,7 +261,7 @@ function main()
             markercolor=:red,
             label="Selected")
     
-    savefig(pca_plot, "active_learning_pca.png")
+    savefig(pca_plot, joinpath(output_dir, "active_learning_pca.png"))
     
     println("Example completed. Results saved to active_learning_*.png")
 end

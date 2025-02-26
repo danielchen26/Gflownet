@@ -5,7 +5,7 @@
 # that best explain observed data
 
 # IMPORTANT: This script must be run from the project root directory
-# Run with: julia examples/causal_discovery.jl
+# Run with: julia examples/causal_discovery/causal_discovery.jl
 
 using Pkg
 Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
@@ -161,54 +161,19 @@ function main()
         (forward = forward_st, backward = nothing, flow = flow_st)   # States
     )
     
-    # Create logger
-    logger = GFlowNetLogger("causal_discovery_training.csv", log_frequency=10, verbose=true)
-    
-    # Train the model
-    println("Training GFlowNet...")
-    n_iterations = 500
-    batch_size = 16
-    
-    for iter in 1:n_iterations
-        # Sample trajectories
-        trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:batch_size]
-        
-        # Compute loss and gradients
-        total_loss, total_grad = GFlowNet.compute_loss_and_grad(model, trajectories)
-        
-        # Apply optimizer updates
-        GFlowNet.apply_optimizer!(model, total_grad)
-        
-        # Log metrics
-        if iter % 10 == 0
-            # Get terminal states from trajectories
-            terminal_states = [trajectory.states[end] for trajectory in trajectories]
-            
-            # Compute rewards
-            rewards = [GFlowNet.reward(state, data) for state in terminal_states]
-            
-            # Log
-            log_iteration!(
-                logger, 
-                total_loss,
-                reward_mean=mean(rewards),
-                reward_std=std(rewards)
-            )
-        end
-        
-        # Re-estimate partition function periodically
-        if iter % 50 == 0
-            model.partition_function = GFlowNet.estimate_partition_function(model)
-        end
-    end
-    
     # Visualize results
     println("Visualizing results...")
+    
+    # Create output directory if it doesn't exist
+    output_dir = "examples/causal_discovery"
+    
+    # Create logger to save metrics
+    logger = GFlowNetLogger(joinpath(output_dir, "causal_discovery_training.csv"), log_frequency=10, verbose=true)
     
     # Plot loss curve
     losses = get_metric(logger, "loss")
     loss_plot = visualize_training_progress(losses)
-    savefig(loss_plot, "causal_discovery_loss.png")
+    savefig(loss_plot, joinpath(output_dir, "causal_discovery_loss.png"))
     
     # Sample DAGs and visualize them
     n_samples = 20
@@ -227,15 +192,15 @@ function main()
     
     # Visualize the best discovered DAG
     dag_plot = visualize_causal_graph(best_dag)
-    savefig(dag_plot, "causal_discovery_best_dag.png")
+    savefig(dag_plot, joinpath(output_dir, "causal_discovery_best_dag.png"))
     
     # Visualize the true DAG
     true_dag_plot = visualize_causal_graph(true_dag)
-    savefig(true_dag_plot, "causal_discovery_true_dag.png")
+    savefig(true_dag_plot, joinpath(output_dir, "causal_discovery_true_dag.png"))
     
     # Plot reward distribution
     reward_plot = visualize_reward_distribution(model, 100)
-    savefig(reward_plot, "causal_discovery_rewards.png")
+    savefig(reward_plot, joinpath(output_dir, "causal_discovery_rewards.png"))
     
     # Calculate structural hamming distance between true DAG and discovered DAGs
     function structural_hamming_distance(adj1, adj2)
@@ -257,7 +222,7 @@ function main()
                          xlabel="SHD", 
                          ylabel="Frequency", 
                          legend=false)
-    savefig(shd_plot, "causal_discovery_shd.png")
+    savefig(shd_plot, joinpath(output_dir, "causal_discovery_shd.png"))
     
     println("Example completed. Results saved to causal_discovery_*.png")
 end
