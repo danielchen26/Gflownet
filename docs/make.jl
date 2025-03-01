@@ -1,4 +1,5 @@
 using Documenter
+using GFlowNet
 
 makedocs(
     sitename = "GFlowNet.jl",
@@ -8,8 +9,9 @@ makedocs(
     ),
     clean = false,  # Don't clean build directory due to permission issues
     build = "../docbuild",
-    modules = Module[],  # Empty array of Module type to satisfy the type requirement
+    modules = [GFlowNet],  # Include the GFlowNet module here
     doctest = false,  # Skip doctests to avoid errors
+    warnonly = [:missing_docs],  # Only warn about missing docs instead of failing
     pages = [
         "Home" => "index.md",
         "Guide" => [
@@ -17,6 +19,13 @@ makedocs(
             "guide/core_concepts.md",
             "guide/mathematical_background.md",
             "guide/training_objectives.md"
+        ],
+        "API Reference" => [
+            "api/core_types.md",
+            "api/flow_networks.md",
+            "api/directed_acyclic_graph.md",
+            "api/policies.md",
+            "api/training.md"
         ],
         "Applications" => [
             "applications/grid_world.md",
