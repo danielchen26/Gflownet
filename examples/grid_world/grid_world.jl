@@ -3,11 +3,11 @@
 # Example script for grid world navigation using GFlowNets
 # This demonstrates the basic concepts of GFlowNets in a simple grid environment
 
-# IMPORTANT: This script must be run from the project root directory
-# Run with: julia examples/grid_world/grid_world.jl
+# IMPORTANT: This script must be run from the example directory
+# Run with: julia grid_world.jl
 
 using Pkg
-Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
+Pkg.activate(@__DIR__)  # Activate the project in the current directory (the example directory)
 
 using GFlowNet
 using GFlowNet.GFlowNetUtils
@@ -268,7 +268,7 @@ function main()
     println("Visualizing results...")
     
     # Create output directory if it doesn't exist
-    output_dir = "examples/grid_world"
+    output_dir = "."
     
     # Plot loss curve
     losses = get_metric(logger, "loss")

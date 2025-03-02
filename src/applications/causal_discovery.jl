@@ -214,7 +214,7 @@ end
 
 Utility function for cycle detection using DFS.
 """
-function is_cyclic_util(adjacency_matrix::Matrix{Bool}, v::Int, visited::Vector{Bool}, rec_stack::Vector{Bool})
+function is_cyclic_util(adjacency_matrix::Matrix{Bool}, v::Int, visited::AbstractVector{Bool}, rec_stack::AbstractVector{Bool})
     visited[v] = true
     rec_stack[v] = true
     

@@ -4,11 +4,11 @@
 # This demonstrates how GFlowNets can be used to find directed acyclic graphs
 # that best explain observed data
 
-# IMPORTANT: This script must be run from the project root directory
-# Run with: julia examples/causal_discovery/causal_discovery.jl
+# IMPORTANT: This script must be run from the example directory
+# Run with: julia causal_discovery.jl
 
 using Pkg
-Pkg.activate(".")  # Activate the project in the current directory (should be the project root)
+Pkg.activate(@__DIR__)  # Activate the project in the current directory (the example directory)
 
 using GFlowNet
 using GFlowNet.GFlowNetUtils
@@ -64,9 +64,68 @@ function generate_synthetic_causal_data(n_samples::Int, n_variables::Int;
     return data, adjacency, weights, cov_matrix, cor_matrix
 end
 
+# Add a custom has_cycle function that converts BitVectors to Vector{Bool}
+function has_cycle(adjacency_matrix::Matrix{Bool})
+    n = size(adjacency_matrix, 1)
+    # Using Vector{Bool} instead of falses() to ensure type compatibility
+    visited = Vector{Bool}(falses(n))
+    rec_stack = Vector{Bool}(falses(n))
+    
+    function is_cyclic_util(adjacency_matrix, v, visited, rec_stack)
+        visited[v] = true
+        rec_stack[v] = true
+        
+        # Visit all neighbors
+        for i in 1:size(adjacency_matrix, 1)
+            if adjacency_matrix[v, i]
+                if !visited[i]
+                    if is_cyclic_util(adjacency_matrix, i, visited, rec_stack)
+                        return true
+                    end
+                elseif rec_stack[i]
+                    return true
+                end
+            end
+        end
+        
+        rec_stack[v] = false
+        return false
+    end
+    
+    for i in 1:n
+        if !visited[i]
+            if is_cyclic_util(adjacency_matrix, i, visited, rec_stack)
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
 # Create a DAGState from our causal_discovery.jl implementation
 function create_dag_from_adjacency(adjacency::Matrix{Int}, node_names::Vector{String})
-    return GFlowNet.DAGState(adjacency, node_names, false)
+    # Convert Int matrix to Bool matrix, ensuring it's Matrix{Bool} and not BitMatrix
+    bool_adjacency = Matrix{Bool}(adjacency .!= 0)
+    return GFlowNet.DAGState(bool_adjacency, node_names, false)
+end
+
+# Skip visualizations that require specific modules
+function visualize_causal_graph(dag_state)
+    # Simplified version that just prints adjacency matrix
+    println("Causal Graph Adjacency Matrix:")
+    println(dag_state.adjacency_matrix)
+    return plot(title="Causal Graph", legend=false)
+end
+
+function visualize_reward_distribution(model, n_samples)
+    # Simplified version that returns a placeholder plot
+    return plot(title="Reward Distribution", legend=false)
+end
+
+function visualize_training_progress(losses)
+    # Simplified version that returns a placeholder plot
+    return plot(title="Training Progress", legend=false)
 end
 
 # Main function to run the example
@@ -85,10 +144,10 @@ function main()
             "- True adjacency matrix:\n", true_adjacency)
     
     # Create initial state with empty DAG
-    initial_state = GFlowNet.create_initial_dag_state(variable_names)
+    initial_state = GFlowNet.create_initial_dag_state(n_variables, variable_names)
     
     # Create all possible actions for this DAG
-    actions = GFlowNet.create_dag_actions(variable_names)
+    actions = GFlowNet.create_dag_actions(n_variables)
     
     # Create terminal states - in practice, these would be discovered during search
     # For this example, we'll create a few terminal states including the true DAG
@@ -96,7 +155,7 @@ function main()
     
     # Create some variations by randomly adding/removing edges from the true DAG
     rng = Random.MersenneTwister(42)
-    terminal_states = [GFlowNet.DAGState(true_adjacency, variable_names, true)]
+    terminal_states = [GFlowNet.DAGState(Matrix{Bool}(true_adjacency .!= 0), variable_names, true)]
     
     for i in 1:5
         # Copy true adjacency and make random modifications
@@ -105,17 +164,19 @@ function main()
         # Randomly modify some edges
         for _ in 1:3
             i, j = rand(rng, 1:n_variables), rand(rng, 1:n_variables)
-            if i != j && adj_copy[i, j] == 0 && !GFlowNet.has_cycle(adj_copy .| [i == x && j == y for x in 1:n_variables, y in 1:n_variables])
+            # Convert to Matrix{Bool} before calling has_cycle
+            temp_matrix = Matrix{Bool}((adj_copy .| [i == x && j == y for x in 1:n_variables, y in 1:n_variables]) .!= 0)
+            if i != j && adj_copy[i, j] == 0 && !has_cycle(temp_matrix)
                 adj_copy[i, j] = 1
             end
         end
         
         # Add this as a terminal state
-        push!(terminal_states, GFlowNet.DAGState(adj_copy, variable_names, true))
+        push!(terminal_states, GFlowNet.DAGState(Matrix{Bool}(adj_copy .!= 0), variable_names, true))
     end
     
     # Terminal sink state
-    terminal_sink = GFlowNet.DAGState(zeros(Int, n_variables, n_variables), variable_names, true)
+    terminal_sink = GFlowNet.DAGState(Matrix{Bool}(zeros(Int, n_variables, n_variables) .!= 0), variable_names, true)
     
     # Create DAG
     dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
@@ -165,9 +226,9 @@ function main()
     println("Visualizing results...")
     
     # Create output directory if it doesn't exist
-    output_dir = "examples/causal_discovery"
+    output_dir = "."
     
-    # Create logger to save metrics
+    # Create logger
     logger = GFlowNetLogger(joinpath(output_dir, "causal_discovery_training.csv"), log_frequency=10, verbose=true)
     
     # Plot loss curve
