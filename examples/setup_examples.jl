@@ -9,7 +9,8 @@ examples = [
     "grid_world",
     "molecule_design",
     "causal_discovery",
-    "active_learning"
+    "active_learning",
+    "feature_acquisition"
 ]
 
 using Pkg
@@ -82,7 +83,8 @@ if successful_setups > 0
         "grid_world" => "grid_world.jl",
         "molecule_design" => "molecule_example.jl",
         "causal_discovery" => "causal_discovery.jl",
-        "active_learning" => "active_learning.jl"
+        "active_learning" => "active_learning.jl",
+        "feature_acquisition" => "feature_acquisition.jl"
     )
     
     for example in examples

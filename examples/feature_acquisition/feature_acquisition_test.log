@@ -1,0 +1,67 @@
+=== Feature Acquisition Test Started at 2025-03-02T01:33:38.603 ===
+Working directory: /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition
+Loading feature_acquisition.jl...
+Starting Feature Acquisition with GFlowNets...
+Working directory: /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition
+  Activating project at `/Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition`
+Activated project at: /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition
+┌ Warning: Replacing docs for `GFlowNet.flow_matching_loss :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.flow_matching_loss_grad :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.flow_matching_loss :: Tuple{GFlowNet.GFlowNetModel, Any}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.detailed_balance_loss :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.detailed_balance_loss_grad :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.detailed_balance_loss :: Tuple{GFlowNet.GFlowNetModel, Any}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.trajectory_balance_loss :: Tuple{GFlowNet.GFlowNetModel, Vector{<:GFlowNet.Trajectory}}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.trajectory_balance_loss_grad :: Tuple{GFlowNet.GFlowNetModel, Vector{<:GFlowNet.Trajectory}}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.trajectory_balance_loss :: Tuple{GFlowNet.GFlowNetModel, Vector{<:GFlowNet.Trajectory}, Any}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+All packages loaded successfully
+Running main() function...
+Initializing feature acquisition experiment...
+Generating synthetic data with 10 experiments and 10 features...
+Top 5 experiments by value:
+  Experiment 3: 1.0
+  Experiment 7: 0.7296800801234543
+  Experiment 5: 0.6390680747465487
+  Experiment 8: 0.5161185966844053
+  Experiment 1: 0.4565552891620099
+Created 101 possible actions
+Creating neural network model with input dimension 102
+Creating GFlowNet model
+Training GFlowNet for 100 iterations...
+
+Analyzing best strategies...
+
+Top 5 feature acquisition strategies:
+Strategy 1: Reward = 0.5390680747465487, Cost = 0.1
+  Experiment 5 (value: 0.6390680747465487): Features [2]
+Strategy 2: Reward = 0.5296800801234542, Cost = 0.2
+  Experiment 5 (value: 0.6390680747465487): Features [10]
+  Experiment 7 (value: 0.7296800801234543): Features [7]
+Strategy 3: Reward = 0.5, Cost = 0.5
+  Experiment 3 (value: 1.0): Features [4]
+  Experiment 4 (value: 0.436096382013755): Features [5]
+  Experiment 8 (value: 0.5161185966844053): Features [1, 10]
+  Experiment 10 (value: 0.3285449350453989): Features [3]
+Strategy 4: Reward = 0.5, Cost = 0.5
+  Experiment 1 (value: 0.4565552891620099): Features [7]
+  Experiment 3 (value: 1.0): Features [9]
+  Experiment 7 (value: 0.7296800801234543): Features [1]
+  Experiment 10 (value: 0.3285449350453989): Features [6, 9]
+Strategy 5: Reward = 0.5, Cost = 0.5
+  Experiment 1 (value: 0.4565552891620099): Features [9]
+  Experiment 3 (value: 1.0): Features [2, 5]
+  Experiment 5 (value: 0.6390680747465487): Features [4]
+  Experiment 10 (value: 0.3285449350453989): Features [4]
+
+Feature acquisition experiment completed.
+Test completed successfully!
+=== Feature Acquisition Test Completed at 2025-03-02T01:33:58.663 ===
