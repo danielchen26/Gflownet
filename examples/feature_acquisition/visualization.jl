@@ -33,7 +33,10 @@ using Markdown
 println("Creating enhanced visualizations for feature acquisition results...")
 
 # Ensure figs directory exists
-figs_dir = joinpath(@__DIR__, "figs")
+if !@isdefined(figs_dir)
+    figs_dir = joinpath(@__DIR__, "figs")
+end
+
 if !isdir(figs_dir)
     mkdir(figs_dir)
     println("Created figs directory at $figs_dir")

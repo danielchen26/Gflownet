@@ -1,4 +1,3 @@
-cat: viz_run_log.txtjulia: No such file or directory
 #!/usr/bin/env julia
 
 #=
@@ -61,7 +60,7 @@ const LEARNING_RATE = 0.001       # Learning rate for optimizer
 # ==============================================================================
 
 """
-    FeatureAcquisitionState
+    FeatureAcquisitionState <: GFlowNet.AbstractState
 
 Represents the state in the feature acquisition process.
 
@@ -69,10 +68,6 @@ Represents the state in the feature acquisition process.
 - `observed_features::Matrix{Bool}`: Binary mask of observed features (N_EXPERIMENTS × FEATURE_DIM)
 - `measurements_remaining::Int`: Number of measurements remaining in the budget
 - `is_terminal::Bool`: Whether this is a terminal state
-
-A state is terminal when either:
-1. There are no measurements remaining
-2. Explicitly marked as terminal (after choosing to terminate early)
 """
 mutable struct FeatureAcquisitionState <: GFlowNet.AbstractState
     observed_features::Matrix{Bool}
@@ -81,19 +76,31 @@ mutable struct FeatureAcquisitionState <: GFlowNet.AbstractState
 end
 
 """
-    FeatureAcquisitionAction
+    FeatureAcquisitionAction <: GFlowNet.AbstractAction
 
 Represents an action in the feature acquisition process.
 
 # Fields
 - `experiment_idx::Int`: Index of the experiment to measure (0 for terminate action)
 - `feature_idx::Int`: Index of the feature to measure (0 for terminate action)
-
-A special case is (0,0) which represents the terminate action.
 """
 struct FeatureAcquisitionAction <: GFlowNet.AbstractAction
     experiment_idx::Int
     feature_idx::Int
+end
+
+"""
+    FeatureAcquisitionReward <: GFlowNet.RewardFunction
+
+Custom reward function for feature acquisition.
+
+# Fields
+- `cost_per_measurement::Float64`: Cost incurred for each measurement
+- `experiment_values::Vector{Float64}`: Values for each experiment
+"""
+struct FeatureAcquisitionReward <: GFlowNet.RewardFunction
+    cost_per_measurement::Float64
+    experiment_values::Vector{Float64}
 end
 
 # ==============================================================================
@@ -353,23 +360,25 @@ function generate_synthetic_data(n_experiments, feature_dim)
 end
 
 # ==============================================================================
-# SECTION 6: REWARD FUNCTIONS
+# SECTION 6: REWARD COMPUTATION
 # ==============================================================================
 
 """
-    calculate_reward(state::FeatureAcquisitionState)
+    GFlowNet.compute_reward(reward_fn::FeatureAcquisitionReward, context::GFlowNet.RewardContext)
 
-Calculate the reward for a state based on observed features.
+Compute the reward for a state based on observed features and measurement costs.
+Matches the original implementation exactly for consistency.
 
 # Arguments
-- `state`: The state to calculate reward for
+- `reward_fn`: The feature acquisition reward function
+- `context`: The reward context containing state and environment data
 
 # Returns
-- Reward value (higher is better)
-
-The reward is the value of the best observed experiment minus the cost of measurements.
+- Reward value (must be positive)
 """
-function calculate_reward(state::FeatureAcquisitionState)
+function GFlowNet.compute_reward(reward_fn::FeatureAcquisitionReward, context::GFlowNet.RewardContext)
+    state = context.state::FeatureAcquisitionState
+    
     if !state.is_terminal
         return 0.0
     end
@@ -378,14 +387,14 @@ function calculate_reward(state::FeatureAcquisitionState)
     measurements_used = MAX_FEATURES_TO_MEASURE - state.measurements_remaining
     
     # Cost of measurements
-    cost = measurements_used * COST_PER_MEASUREMENT
+    cost = measurements_used * reward_fn.cost_per_measurement
     
     # Calculate value based on observed features
     observed_mask = state.observed_features
     
-    # If no features observed, return negative cost
+    # If no features observed, return small positive value
     if sum(observed_mask) == 0
-        return -cost
+        return 0.01
     end
     
     # Find the experiment with highest estimated value based on observed features
@@ -395,32 +404,15 @@ function calculate_reward(state::FeatureAcquisitionState)
     for e in 1:N_EXPERIMENTS
         # If any feature is observed for this experiment
         if any(observed_mask[e, :])
-            max_value = max(max_value, global_experiment_values[e])
+            # Use the exact same reward calculation as the original version
+            max_value = max(max_value, reward_fn.experiment_values[e])
             best_experiment = e
         end
     end
     
-    # Return value minus cost
-    return max_value - cost
-end
-
-"""
-    GFlowNet.reward(state::FeatureAcquisitionState)
-
-Reward function for GFlowNet (must be positive).
-
-# Arguments
-- `state`: The state to calculate reward for
-
-# Returns
-- Positive reward value
-"""
-function GFlowNet.reward(state::FeatureAcquisitionState)
-    # Use our custom reward calculation
-    reward = calculate_reward(state)
-    
-    # Ensure reward is positive (required by GFlowNet)
-    return max(0.01, reward)
+    # Return value minus cost, ensuring it's positive (exactly like original)
+    raw_reward = max_value - cost
+    return max(0.01, raw_reward)  # Same minimum value as original
 end
 
 # ==============================================================================
@@ -581,14 +573,20 @@ end
 # ==============================================================================
 
 """
-    setup_model()
+    setup_model(features, weights, values, reward_fn)
 
 Set up the GFlowNet model with initial state, actions, and neural network.
+
+# Arguments
+- `features`: Matrix of features
+- `weights`: Vector of feature weights
+- `values`: Vector of experiment values
+- `reward_fn`: Feature acquisition reward function
 
 # Returns
 - Configured GFlowNet model
 """
-function setup_model(features, weights, values)
+function setup_model(features, weights, values, reward_fn)
     # Create initial state with no features measured
     initial_state = FeatureAcquisitionState(
         falses(N_EXPERIMENTS, FEATURE_DIM),
@@ -623,17 +621,25 @@ function setup_model(features, weights, values)
     
     # Create the GFlowNet model
     println("Creating GFlowNet model")
+    
+    # Create DAG first
+    dag = GFlowNet.create_dag(
+        initial_state,
+        terminal_states,
+        terminal_sink,
+        actions
+    )
+    
+    # Create forward policy
+    forward_policy = GFlowNet.ForwardPolicy(nn_model)
+    
+    # Create model with correct argument order
     model = GFlowNet.GFlowNetModel(
-        GFlowNet.create_dag(
-            initial_state,
-            terminal_states,
-            terminal_sink,
-            actions
-        ),
-        GFlowNet.ForwardPolicy(nn_model),
-        nothing,  # backward_policy
-        nothing,  # flow_estimator
-        nothing,  # partition_function
+        dag,                    # DirectedAcyclicGraph
+        forward_policy,         # ForwardPolicy
+        nothing,               # BackwardPolicy
+        nothing,               # FlowEstimator
+        nothing,               # partition_function
         [GFlowNet.TrajectoryBalanceObjective(1.0)],  # objectives
         Optimisers.Adam(LEARNING_RATE),  # optimizer
         (forward = ps, backward = nothing, flow = nothing),  # parameters
@@ -886,8 +892,11 @@ function main()
     # Generate synthetic data
     features, weights, values = generate_synthetic_data(N_EXPERIMENTS, FEATURE_DIM)
     
+    # Create reward function
+    reward_fn = FeatureAcquisitionReward(COST_PER_MEASUREMENT, values)
+    
     # Setup model
-    model = setup_model(features, weights, values)
+    model = setup_model(features, weights, values, reward_fn)
     
     # Train model
     model, train_data = train_model(model, N_ITERATIONS)
@@ -896,6 +905,68 @@ function main()
     best_strategies = analyze_results(model, train_data)
     
     println("\nFeature acquisition experiment completed.")
+    return model, best_strategies
+end
+
+"""
+    run_feature_acquisition(;
+        num_features=10,
+        num_experiments=10,
+        max_steps=5,
+        cost_per_measurement=0.1,
+        n_iterations=100,
+        batch_size=16,
+        output_prefix="feature_acquisition",
+        include_ground_truth=true
+    )
+
+Run the feature acquisition experiment with the specified parameters.
+
+# Arguments
+- `num_features`: Number of features per experiment
+- `num_experiments`: Number of experiments
+- `max_steps`: Maximum number of features that can be measured
+- `cost_per_measurement`: Cost incurred for each measurement
+- `n_iterations`: Number of training iterations
+- `batch_size`: Batch size for training
+- `output_prefix`: Prefix for output files
+- `include_ground_truth`: Whether to include ground truth comparison
+
+# Returns
+- Trained model
+- Best strategies found
+"""
+function run_feature_acquisition(;
+    num_features=10,
+    num_experiments=10,
+    max_steps=5,
+    cost_per_measurement=0.1,
+    n_iterations=100,
+    batch_size=16,
+    output_prefix="feature_acquisition",
+    include_ground_truth=true
+)
+    println("Starting feature acquisition with parameters:")
+    println("  Features: $num_features")
+    println("  Experiments: $num_experiments")
+    println("  Max steps: $max_steps")
+    println("  Cost per measurement: $cost_per_measurement")
+    println("  Training iterations: $n_iterations")
+    println("  Batch size: $batch_size")
+    println("  Output prefix: $output_prefix")
+    println("  Include ground truth: $include_ground_truth")
+
+    # Update global constants
+    global N_EXPERIMENTS = num_experiments
+    global FEATURE_DIM = num_features
+    global MAX_FEATURES_TO_MEASURE = max_steps
+    global COST_PER_MEASUREMENT = cost_per_measurement
+    global N_ITERATIONS = n_iterations
+    global BATCH_SIZE = batch_size
+
+    # Run the main experiment
+    model, best_strategies = main()
+
     return model, best_strategies
 end
 

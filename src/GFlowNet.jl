@@ -23,6 +23,7 @@ include("types.jl")
 
 # Core functionality
 include("directed_acyclic_graph.jl")
+include("rewards.jl")  # Add our new rewards module
 include("flow_networks.jl")
 
 # Policies and training
@@ -75,6 +76,11 @@ export AddAtomAction, AddBondAction, TerminateMoleculeAction
 export create_initial_molecule_state, create_molecular_design_model
 export visualize_molecule
 export create_flow_estimator, create_forward_policy, estimate_partition_function
+
+# Export reward framework
+export RewardFunction, RewardContext, StandardContext
+export FunctionalReward, ValueMinusCostReward
+export compute_reward, ensure_positive
 
 # Re-export utilities from the GFlowNetUtils module
 export GFlowNetLogger, log_iteration!, get_metric

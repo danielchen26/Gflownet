@@ -1,0 +1,7 @@
+Strategy,Cost,Reward,Efficiency,Details
+Ground Truth,0.1,1.0,10.0,"Measure Exp 3, Any feature"
+Strategy 1,0.1,0.55,5.5,"Measure Exp 5, Feature 2"
+Strategy 2,0.2,0.55,2.75,"Measure Exp 5,7, Features 10,7"
+Strategy 3,0.5,0.6,1.2,"Measure 4 experiments, 5 features each"
+Strategy 4,0.5,0.58,1.16,"Measure 4 experiments, 5 features each"
+Strategy 5,0.5,0.55,1.1,"Measure 4 experiments, 5 features each"

@@ -1,6 +1,101 @@
+<!DOCTYPE html>
+<!-- Generated HTML report for feature acquisition analysis -->
+<html>
+<head>
+    <!-- Meta information -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Feature Acquisition Analysis Report generated from GFlowNet model results">
+    <meta name="generator" content="Julia Visualization Script">
+    <title>Feature Acquisition Analysis Report</title>
+    <!-- CSS styling for the report -->
+    <style>
+        /* Base document styling */
+        body { 
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fafafa;
+        }
+        /* Header styling */
+        h1, h2, h3 {
+            color: #2c3e50;
+            margin-top: 30px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        /* Image styling */
+        img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        /* Table styling */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+        /* Table header and cell styling */
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        /* Table header specific styling */
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        /* Row hover effect */
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        /* List styling */
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 30px;
+        }
+        /* List item styling */
+        li {
+            margin-bottom: 8px;
+        }
+        /* Emphasis and strong text */
+        em, strong {
+            color: #2c3e50;
+        }
+        /* Footer styling */
+        .footer {
+            margin-top: 30px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+            font-size: 0.8em;
+            color: #7f8c8d;
+            text-align: center;
+        }
+        /* Section styling */
+        .section {
+            margin: 25px 0;
+            padding: 15px;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+    </style>
+</head>
+<!-- Main document body -->
+<body>
+<div class="section">
 # Feature Acquisition Analysis Report
 
-## Generated on 2025-03-02 03:59
+## Generated on 2025-03-03 02:23
 
 This report provides a comprehensive analysis of the feature acquisition strategies learned by the GFlowNet model. It includes training progress, strategy comparisons, feature selection patterns, and performance metrics.
 
@@ -10,7 +105,7 @@ The GFlowNet model was trained for 100 iterations to learn optimal feature acqui
 
 The graph below shows both the loss reduction (logarithmic scale) and reward improvement over time. Note how the maximum reward (shown in red) increases quickly at first and then gradually plateaus, suggesting that the model found good strategies early but continued refining them throughout training.
 
-![Training Progress](training_progress.png)
+<img src="training_progress.png" alt="Training Progress" title="Training Progress">
 
 ## 2. Strategy Comparison
 
@@ -32,7 +127,7 @@ The GFlowNet model identified several distinct strategies for feature acquisitio
 
 The strategy comparison plot below visualizes the key trade-offs between reward and cost. Efficient strategies appear closer to the top-right corner (high reward, low cost). The ground truth optimal strategy (in red) represents the theoretical best performance possible. Note that Strategies 1 and 2 achieve the best efficiency but with lower overall reward, while Strategies 3-5 achieve higher rewards but at increased cost.
 
-![Strategy Comparison](strategy_comparison.png)
+<img src="strategy_comparison.png" alt="Strategy Comparison" title="Strategy Comparison">
 
 ## 3. Feature Selection Analysis
 
@@ -42,7 +137,7 @@ The left plot shows the true value of each experiment, sorted from highest to lo
 
 An important insight is that the model discovered valuable information in Experiments 5 and 7, but often missed the optimal Experiment 3. This suggests that the training process could be improved to better identify the single most valuable experiment.
 
-![Feature Selection](feature_selection.png)
+<img src="feature_selection.png" alt="Feature Selection" title="Feature Selection">
 
 ## 4. Strategy Effectiveness
 
@@ -59,7 +154,7 @@ The metrics considered are:
 
 The bar chart shows how each strategy compares against the ground truth in terms of overall effectiveness. Note that Strategy 3 achieves the highest overall score, suggesting it provides the best balance between exploration and exploitation, despite not being the most efficient.
 
-![Strategy Effectiveness](strategy_effectiveness.png)
+<img src="strategy_effectiveness.png" alt="Strategy Effectiveness" title="Strategy Effectiveness">
 
 ### Strategy Metrics
 
@@ -84,7 +179,7 @@ This visualization directly compares how each strategy performs relative to the 
 
 A key insight from this plot is that no single strategy achieves optimal performance across all metrics simultaneously. Strategies 3 and 4 come closest to the ground truth for optimality, but fall short in cost efficiency. Strategy 1 excels in cost efficiency but fails to achieve good exploration or optimality. This highlights the fundamental trade-offs in feature acquisition tasks.
 
-![Ground Truth Comparison](ground_truth_comparison.png)
+<img src="ground_truth_comparison.png" alt="Ground Truth Comparison" title="Ground Truth Comparison">
 
 ## 6. Key Findings
 
@@ -99,7 +194,7 @@ Based on our comprehensive analysis, we identified the following key findings:
 
 The visualization below summarizes these key findings, emphasizing the most important insights gained from the analysis. Pay particular attention to how the GFlowNet model balanced exploration and exploitation, and how close it came to identifying the ground truth optimal strategy.
 
-![Key Findings](key_findings.png)
+<img src="key_findings.png" alt="Key Findings" title="Key Findings">
 
 ## Conclusion
 
@@ -117,3 +212,12 @@ A PDF version of the strategy comparison is available for high-quality printing:
 
 ---
 *This report was automatically generated by the enhanced visualization.jl script.*
+
+</div>    <!-- Document footer with generation timestamp -->
+    <div class="footer">
+        <p>This report was automatically generated on 2025-03-03 02:23 by the visualization.jl script.</p>
+        <p>GFlowNet Feature Acquisition Analysis - All Rights Reserved.</p>
+    </div>
+<!-- End of document -->
+</body>
+</html>
