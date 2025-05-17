@@ -1,0 +1,35 @@
+Starting Feature Acquisition Process (Version 3)...
+Working directory: /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition
+  Activating project at `/Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition`
+Project activated successfully
+┌ Warning: Replacing docs for `GFlowNet.flow_matching_loss :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.flow_matching_loss_grad :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.flow_matching_loss :: Tuple{GFlowNet.GFlowNetModel, Any}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.detailed_balance_loss :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.detailed_balance_loss_grad :: Tuple{GFlowNet.GFlowNetModel}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.detailed_balance_loss :: Tuple{GFlowNet.GFlowNetModel, Any}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.trajectory_balance_loss :: Tuple{GFlowNet.GFlowNetModel, Vector{<:GFlowNet.Trajectory}}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.trajectory_balance_loss_grad :: Tuple{GFlowNet.GFlowNetModel, Vector{<:GFlowNet.Trajectory}}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+┌ Warning: Replacing docs for `GFlowNet.trajectory_balance_loss :: Tuple{GFlowNet.GFlowNetModel, Vector{<:GFlowNet.Trajectory}, Any}` in module `GFlowNet`
+└ @ Base.Docs docs/Docs.jl:243
+ERROR: LoadError: MethodError: no method matching run_feature_acquisition_v3(; num_features::Int64, num_experiments::Int64, max_steps::Int64, cost_per_measurement::Float64, n_iterations::Int64, batch_size::Int64, observation_ratio::Float64, output_prefix::String, include_ground_truth::Bool)
+This error has been manually thrown, explicitly, so the method may exist but be intentionally marked as unimplemented.
+
+Closest candidates are:
+  run_feature_acquisition_v3(; num_features, num_experiments, max_steps, cost_per_measurement, n_iterations, batch_size, observation_ratio, output_prefix) got unsupported keyword argument "include_ground_truth"
+   @ Main /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition/main_v3.jl:360
+
+Stacktrace:
+ [1] kwerr(kw::@NamedTuple{num_features::Int64, num_experiments::Int64, max_steps::Int64, cost_per_measurement::Float64, n_iterations::Int64, batch_size::Int64, observation_ratio::Float64, output_prefix::String, include_ground_truth::Bool}, args::Function)
+   @ Base ./error.jl:165
+ [2] top-level scope
+   @ /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition/run_v3_direct.jl:19
+in expression starting at /Volumes/chetianc/Documents/Decision_science_codes/Gflownet/examples/feature_acquisition/run_v3_direct.jl:19

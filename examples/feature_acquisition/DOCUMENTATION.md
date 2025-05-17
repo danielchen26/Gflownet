@@ -168,6 +168,142 @@ We evaluate the performance using:
    - Experiment prioritization
    - Termination decisions
 
+### Handling Partially Observed Features
+
+Our system can be easily adapted to scenarios where some features are already known. For example, starting with 20% of features observed:
+
+```julia
+function create_initial_state(num_experiments::Int, num_features::Int, observation_ratio::Float64=0.2)
+    # Create initial observation matrix
+    observed_features = zeros(Bool, num_experiments, num_features)
+    
+    # Calculate number of features to pre-observe
+    features_per_experiment = floor(Int, num_features * observation_ratio)
+    
+    # Randomly select features to observe initially
+    for i in 1:num_experiments
+        initial_features = randperm(num_features)[1:features_per_experiment]
+        observed_features[i, initial_features] .= true
+    end
+    
+    return FeatureAcquisitionState(
+        observed_features,
+        max_measurements - sum(observed_features),
+        false
+    )
+end
+
+# Example usage:
+initial_state = create_initial_state(10, 10, 0.2)  # 20% features known
+```
+
+#### Adapting the Reward Function
+
+When starting with partial observations, we modify the reward calculation to account for pre-existing knowledge:
+
+```julia
+function calculate_reward(
+    state::FeatureAcquisitionState,
+    reward_fn::FeatureAcquisitionReward,
+    initial_observations::Matrix{Bool}
+)
+    if !state.is_terminal
+        return 0.0
+    end
+    
+    # Calculate value gained from new measurements only
+    initial_value = calculate_best_value(initial_observations, reward_fn)
+    final_value = calculate_best_value(state.observed_features, reward_fn)
+    value_gained = final_value - initial_value
+    
+    # Count only new measurements for cost
+    new_measurements = sum(state.observed_features .& .!initial_observations)
+    measurement_cost = new_measurements * reward_fn.cost_per_measurement
+    
+    # Combine value and cost with weights
+    reward = reward_fn.value_weight * value_gained - 
+             reward_fn.cost_weight * measurement_cost
+             
+    return max(0.0, reward)
+end
+```
+
+#### Example Scenario: Drug Discovery with Prior Data
+
+In the pharmaceutical example, this corresponds to:
+- Starting with existing test results (20% of data)
+- Some compounds already have basic assays completed
+- Need to decide which additional tests to run
+- Can leverage patterns in existing data
+
+**Benefits of Partial Observation Handling**:
+1. **Efficient Resource Use**: Build upon existing data rather than starting from scratch
+2. **Information Leverage**: Use patterns in known features to guide new measurements
+3. **Cost Optimization**: Avoid repeating already completed tests
+4. **Adaptive Strategy**: Adjust measurement plans based on prior knowledge
+
+#### Implementation Considerations
+
+When working with partially observed features:
+
+1. **State Representation**:
+```julia
+struct PartialFeatureState <: GFlowNet.AbstractState
+    observed_features::Matrix{Bool}     # Current observations
+    initial_features::Matrix{Bool}      # Initial observations
+    measurements_remaining::Int         # Remaining budget
+    is_terminal::Bool                  # Terminal state flag
+end
+```
+
+2. **Action Masking**:
+```julia
+function get_valid_actions(state::PartialFeatureState)
+    valid_actions = []
+    
+    # Can't remeasure already observed features
+    for i in 1:size(state.observed_features, 1)
+        for j in 1:size(state.observed_features, 2)
+            if !state.observed_features[i,j]
+                push!(valid_actions, MeasureFeatureAction(i, j))
+            end
+        end
+    end
+    
+    # Add terminate action if we've made at least one new measurement
+    if sum(state.observed_features .& .!state.initial_features) > 0
+        push!(valid_actions, TerminateAction())
+    end
+    
+    return valid_actions
+end
+```
+
+3. **Training Adaptation**:
+```julia
+# Modified training loop
+for iteration in 1:n_iterations
+    # Generate batch of initial states with 20% observed features
+    initial_states = [
+        create_initial_state(num_experiments, num_features, 0.2)
+        for _ in 1:batch_size
+    ]
+    
+    # Sample trajectories from partial observations
+    trajectories = sample_trajectories(model, initial_states)
+    
+    # Calculate rewards accounting for initial knowledge
+    rewards = [
+        calculate_reward(t.final_state, reward_fn, t.initial_state.initial_features)
+        for t in trajectories
+    ]
+    
+    # Update model
+    loss = gflownet_loss(trajectories, rewards)
+    update!(model, loss)
+end
+```
+
 ## Mathematical Framework
 
 ### Feature Acquisition State Space

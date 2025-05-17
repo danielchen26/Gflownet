@@ -3,6 +3,7 @@ using StatsBase: sample, Weights
 using NNlib: softmax
 using Random
 using Lux
+using Optimisers
 
 """
     state_to_features(state::AbstractState)

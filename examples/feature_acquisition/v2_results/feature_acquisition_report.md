@@ -1,6 +1,6 @@
 # Feature Acquisition Analysis Report
 
-## Generated on 2025-03-03 02:24
+## Generated on 2025-03-03 23:23
 
 This report provides a comprehensive analysis of the feature acquisition strategies learned by the GFlowNet model. It includes training progress, strategy comparisons, feature selection patterns, and performance metrics.
 
@@ -23,12 +23,12 @@ The GFlowNet model identified several distinct strategies for feature acquisitio
 
 | Strategy | Reward | Cost | Efficiency | Details |
 |----------|--------|------|------------|--------|
-| Ground Truth | 1.0 | 0.1 | 10.0 | Measure Exp 3, Any feature |
-| Strategy 1 | 0.55 | 0.1 | 5.5 | Measure Exp 5, Feature 2 |
-| Strategy 2 | 0.55 | 0.2 | 2.75 | Measure Exp 5,7, Features 10,7 |
-| Strategy 3 | 0.6 | 0.5 | 1.2 | Measure 4 experiments, 5 features each |
-| Strategy 4 | 0.58 | 0.5 | 1.16 | Measure 4 experiments, 5 features each |
-| Strategy 5 | 0.55 | 0.5 | 1.1 | Measure 4 experiments, 5 features each |
+| Ground Truth | 1.0 | 0.1 | 10.0 | Measure Exp 3, Any feature (PLACEHOLDER - NOT FROM MODEL) |
+| Strategy 1 | 0.55 | 0.1 | 5.5 | Measure Exp 5, Feature 2 (PLACEHOLDER - NOT FROM MODEL) |
+| Strategy 2 | 0.55 | 0.2 | 2.75 | Measure Exp 5,7, Features 10,7 (PLACEHOLDER - NOT FROM MODEL) |
+| Strategy 3 | 0.6 | 0.5 | 1.2 | Measure 4 experiments, 5 features each (PLACEHOLDER - NOT FROM MODEL) |
+| Strategy 4 | 0.58 | 0.5 | 1.16 | Measure 4 experiments, 5 features each (PLACEHOLDER - NOT FROM MODEL) |
+| Strategy 5 | 0.55 | 0.5 | 1.1 | Measure 4 experiments, 5 features each (PLACEHOLDER - NOT FROM MODEL) |
 
 The strategy comparison plot below visualizes the key trade-offs between reward and cost. Efficient strategies appear closer to the top-right corner (high reward, low cost). The ground truth optimal strategy (in red) represents the theoretical best performance possible. Note that Strategies 1 and 2 achieve the best efficiency but with lower overall reward, while Strategies 3-5 achieve higher rewards but at increased cost.
 
@@ -68,15 +68,15 @@ The table below provides the exact numerical values for each metric across strat
 | Strategy | Reward | Cost Efficiency | Exploration | Exploitation | Optimality | Overall Score |
 |----------|--------|----------------|-------------|--------------|------------|---------------|
 | Strategy 1
-(Focused) | 0.55 | 0.55 | 0.3 | 0.33 | 0.2 | 0.39 |
+(Focused) | 0.55 | 0.55 | 0.3 | 0.33 | 0.55 | 0.46 |
 | Strategy 2
-(Balanced) | 0.55 | 0.28 | 0.5 | 0.67 | 0.3 | 0.46 |
+(Balanced) | 0.55 | 0.28 | 0.5 | 0.67 | 0.47 | 0.49 |
 | Strategy 3
-(Exploratory) | 0.6 | 0.12 | 0.9 | 0.33 | 0.7 | 0.53 |
+(Exploratory) | 0.6 | 0.12 | 0.9 | 0.33 | 0.46 | 0.48 |
 | Strategy 4
-(Exploratory) | 0.58 | 0.12 | 0.9 | 0.33 | 0.7 | 0.53 |
+(Exploratory) | 0.58 | 0.12 | 0.9 | 0.33 | 0.44 | 0.47 |
 | Strategy 5
-(Exploratory) | 0.55 | 0.11 | 0.9 | 0.67 | 0.2 | 0.49 |
+(Exploratory) | 0.55 | 0.11 | 0.9 | 0.67 | 0.42 | 0.53 |
 
 ## 5. Ground Truth Comparison
 
