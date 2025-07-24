@@ -186,13 +186,6 @@ end
 
 Check if an action is applicable to a state. Should be implemented by concrete types.
 This function is part of the required interface for all action types.
-
-Example implementation:
-```julia
-function is_applicable(action::AddAtomAction, state::MoleculeState)
-    return !state.complete && length(state.data.atoms) < 20
-end
-```
 """
 function is_applicable end
 
@@ -201,14 +194,126 @@ function is_applicable end
 
 Apply an action to a state, returning the new state. Should be implemented by concrete types.
 This function is part of the required interface for all action types.
-
-Example implementation:
-```julia
-function apply_action(action::AddAtomAction, state::MoleculeState)
-    new_atoms = copy(state.data.atoms)
-    push!(new_atoms, action.atom_type)
-    return MoleculeState(MoleculeData(new_atoms, copy(state.data.bonds)), false)
-end
-```
 """
-function apply_action end 
+function apply_action end
+
+# =============================================================================
+# SimpleState/SimpleAction Implementation
+# =============================================================================
+
+"""
+    is_applicable(action::SimpleAction, state::SimpleState)
+
+Check if a SimpleAction is applicable to a SimpleState.
+
+For SimpleAction, we implement a simple rule-based system:
+- Action value 0: Always applicable (represents "do nothing" or "terminate")
+- Action value 1: Applicable if state data sum < 10 (represents "increment")
+- Action value 2: Applicable if state data sum > 0 (represents "decrement")
+- Action value -1: Always applicable (represents "terminate to sink")
+"""
+function is_applicable(action::SimpleAction, state::SimpleState)
+    data_sum = sum(state.data)
+
+    if action.value == 0
+        return true  # "Do nothing" always applicable
+    elseif action.value == 1
+        return data_sum < 10  # "Increment" only if sum < 10
+    elseif action.value == 2
+        return data_sum > 0   # "Decrement" only if sum > 0
+    elseif action.value == -1
+        return true  # "Terminate" always applicable
+    else
+        return false  # Unknown action
+    end
+end
+
+"""
+    apply_action(action::SimpleAction, state::SimpleState)
+
+Apply a SimpleAction to a SimpleState, returning the new state.
+
+Action semantics:
+- Action value 0: Return same state (no change)
+- Action value 1: Increment first element by 1
+- Action value 2: Decrement first element by 1
+- Action value -1: Return terminal sink state ([-1])
+"""
+function apply_action(action::SimpleAction, state::SimpleState)
+    if action.value == 0
+        # No change
+        return SimpleState(copy(state.data))
+    elseif action.value == 1
+        # Increment first element
+        new_data = copy(state.data)
+        if !isempty(new_data)
+            new_data[1] += 1
+        else
+            new_data = [1]
+        end
+        return SimpleState(new_data)
+    elseif action.value == 2
+        # Decrement first element
+        new_data = copy(state.data)
+        if !isempty(new_data)
+            new_data[1] -= 1
+        else
+            new_data = [-1]
+        end
+        return SimpleState(new_data)
+    elseif action.value == -1
+        # Terminate to sink
+        return SimpleState([-1])
+    else
+        error("Unknown SimpleAction value: $(action.value)")
+    end
+end
+
+# =============================================================================
+# Basic DAG Manipulation Functions
+# =============================================================================
+
+"""
+    add_state!(dag::DirectedAcyclicGraph, state)
+
+Add a state to the DAG if it doesn't already exist.
+This is a simple utility function for basic DAG construction.
+
+# Arguments
+- `dag`: The directed acyclic graph to modify
+- `state`: The state to add
+
+# Returns
+- Index of the state in the DAG
+"""
+function add_state!(dag::DirectedAcyclicGraph, state)
+    if state in dag.states
+        return dag.state_to_idx[state]
+    end
+
+    # Add state to the graph
+    add_vertex!(dag.graph)
+    push!(dag.states, state)
+
+    # Update mapping
+    idx = length(dag.states)
+    dag.state_to_idx[state] = idx
+
+    return idx
+end
+
+"""
+    add_action!(dag::DirectedAcyclicGraph, action)
+
+Add an action to the DAG if it doesn't already exist.
+This is a simple utility function for basic DAG construction.
+
+# Arguments
+- `dag`: The directed acyclic graph to modify
+- `action`: The action to add
+"""
+function add_action!(dag::DirectedAcyclicGraph, action)
+    if !(action in dag.actions)
+        push!(dag.actions, action)
+    end
+end

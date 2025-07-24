@@ -4,6 +4,8 @@
 using ..GFlowNet: GFlowNetModel, Trajectory
 using Zygote
 using Optimisers
+using ComponentArrays
+using Lux
 
 # Import objective functions for gradient computation
 using ..GFlowNet: trajectory_balance_loss, trajectory_balance_loss_grad, general_trajectory_balance_loss_grad
@@ -52,11 +54,9 @@ Apply gradients to update model parameters.
 function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float64)
     # Handle case where gradients is Nothing
     if isnothing(gradients)
-        println("⚠️  Gradients are Nothing, skipping parameter update")
+        @warn "Gradients are Nothing, skipping parameter update"
         return
     end
-    
-    println("🔄 Applying gradients with learning rate: $learning_rate")
     
     # Create new optimizer and parameter tuples
     new_optimizer = model.optimizer

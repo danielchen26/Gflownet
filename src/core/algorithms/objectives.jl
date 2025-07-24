@@ -1,13 +1,13 @@
 # Core GFlowNet Training Objectives
 # This file unifies all training objectives for GFlowNet models
 
-using ..GFlowNet: GFlowNetModel, Trajectory, forward_transition_prob, backward_transition_prob, reward, flow,
-                  get_next_states, get_previous_states, edge_flow, estimate_partition_function, state_to_features
-using ComponentArrays
+# Import external dependencies only - internal GFlowNet types are available in module context
 using Random
 using Zygote
 using LinearAlgebra: norm
 using NNlib: softmax
+
+# Core objective functions are defined below
 
 # =============================================================================
 # Flow Consistency Objectives (Unified detailed balance and flow matching)
@@ -136,7 +136,7 @@ end
 # =============================================================================
 
 """
-    trajectory_balance_loss(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
+    trajectory_balance_loss(model::GFlowNetModel, trajectories::Vector{Trajectory})
 
 Compute the Trajectory Balance loss for the GFlowNet.
 
@@ -145,39 +145,49 @@ to the reward of the terminal state:
     P_F(τ) = R(s_τ) / Z
 where Z is the partition function, P_F is the product of forward transition probabilities,
 and R is the reward function.
+
+This implementation requires all core functions to be properly implemented.
 """
-function trajectory_balance_loss(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
+function trajectory_balance_loss(model::GFlowNetModel, trajectories::Vector{Trajectory})
     total_loss = 0.0
     n_trajectories = length(trajectories)
-    
+
+    if n_trajectories == 0
+        return 0.0
+    end
+
     for trajectory in trajectories
         # Last state in trajectory (before sink)
         final_state = trajectory.states[end]
-        
+
         # Product of forward probabilities along the trajectory
         forward_prob_product = 1.0
         for i in 1:(length(trajectory.states)-1)
             source = trajectory.states[i]
             target = trajectory.states[i+1]
+
             prob = forward_transition_prob(model, source, target)
             forward_prob_product *= prob
         end
-        
+
         # Compute the reward of the final state
         final_reward = reward(final_state)
-        
+
         # Compute Z (partition function)
-        Z = isnothing(model.partition_function) ? 
-            estimate_partition_function(model) : model.partition_function
-        
+        Z = if isnothing(model.partition_function)
+            estimate_partition_function(model)
+        else
+            model.partition_function
+        end
+
         # Compute the ratio (should be 1 for perfect balance)
         ratio = (Z * forward_prob_product) / final_reward
-        
-        # Squared log error (can be more numerically stable than direct squared error)
+
+        # Squared log error (numerically stable)
         log_ratio = log(ratio)
         total_loss += log_ratio^2
     end
-    
+
     return total_loss / n_trajectories
 end
 
@@ -429,85 +439,69 @@ Compute the gradient of the Trajectory Balance loss for optimization using Zygot
 Following proper Lux.jl patterns with ComponentArrays for parameter handling.
 """
 function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
-    # Convert parameters to ComponentArray for efficient gradient computation
-    # Only include parameters that actually exist (not nothing)
-    ps_flat = ComponentArray(model.parameters)
-    
-    # Define loss function that works directly with flattened parameters
-    function loss_fn(ps_flat_inner)
-        # Reconstruct parameter structure from flattened parameters
-        ps_structured = NamedTuple{keys(model.parameters)}(
-            Tuple(getproperty(ps_flat_inner, k) for k in keys(model.parameters))
-        )
-        
-        # Compute forward pass with structured parameters
+    # FIXED: Simplified gradient computation without ComponentArray dependency
+
+    # Define loss function that works directly with model parameters
+    function loss_fn(params)
+        # Compute forward pass with current parameters
         loss_value = 0.0f0
-        
+
         for traj in trajectories
             # Compute trajectory balance loss for the entire trajectory
             log_prob_sum = 0.0f0
-            
+
             # Accumulate log probabilities for all transitions in the trajectory
             for i in 1:(length(traj.states)-1)
                 current_state = traj.states[i]
                 next_state = traj.states[i+1]
-                
+
                 # Get forward probability using current parameters
                 if !isnothing(model.forward_policy)
                     # Extract features for neural network
                     state_features = state_to_features(current_state)
-                    
+
                     # Forward pass through neural network with current parameters
-                    logits, _ = model.forward_policy.model(state_features, ps_structured.forward, model.states.forward)
-                    
+                    logits, _ = model.forward_policy.model(state_features, params.forward, model.states.forward)
+
                     # Compute transition probability
                     next_states = get_next_states(model.dag, current_state)
                     if !isempty(next_states)
                         next_state_indices = [model.dag.state_to_idx[s] for s in next_states]
                         relevant_logits = logits[next_state_indices]
                         relevant_logits = clamp.(relevant_logits, -20.0f0, 20.0f0)
-                        probs = softmax(relevant_logits)
-                        
+                        log_probs = logsoftmax(relevant_logits)  # Use logsoftmax for numerical stability
+
                         # Find probability of the actual transition
                         next_idx = findfirst(s -> s == next_state, next_states)
                         if !isnothing(next_idx)
-                            P_F = probs[next_idx]
-                            log_prob_sum += log(max(P_F, 1f-10))
+                            log_prob_sum += log_probs[next_idx]
                         end
                     end
                 end
             end
-            
+
             # Now compute trajectory balance loss for this complete trajectory
             R = reward(traj.states[end])
-            R_safe = R + 1f-4  # Small constant for numerical stability
-            
+            R_safe = max(R, 1f-8)  # Ensure positive reward
+
             # Trajectory balance: log(Z) + sum(log P_F) - log(R) ≈ 0
             # We minimize squared error: (log(Z) + sum(log P_F) - log(R))^2
             log_Z = 0.0f0  # log(1) = 0, will be improved with proper partition function
-            
+
             trajectory_balance = log_Z + log_prob_sum - log(R_safe)
             loss_value += trajectory_balance^2
         end
-        
+
         return loss_value / length(trajectories)
     end
-    
-    # Compute gradients using Zygote - this is the correct Lux.jl pattern
-    println("Computing gradients...")
-    gradients = gradient(loss_fn, ps_flat)
+
+    # Compute gradients using Zygote
+    gradients = gradient(loss_fn, model.parameters)
     
     if !isnothing(gradients[1])
-        println("✅ Gradients computed successfully!")
-        println("Gradient norm: $(norm(vec(gradients[1])))")
-        
-        # Convert back to structured format
-        grad_structured = NamedTuple{keys(model.parameters)}(
-            Tuple(getproperty(gradients[1], k) for k in keys(model.parameters))
-        )
-        return grad_structured
+        # Return the gradients directly (they're already in the correct structure)
+        return gradients[1]
     else
-        println("❌ Gradient computation returned nothing!")
         return nothing
     end
 end

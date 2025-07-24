@@ -82,10 +82,22 @@ Estimate partition function by summing all terminal state rewards.
 """
 function estimate_partition_function(estimator::SimplePartitionFunctionEstimator, model::GFlowNetModel)
     total = 0.0
-    for state in model.dag.terminal_states
+
+    # Find terminal states dynamically if the DAG doesn't have them explicitly listed
+    terminal_states = if isempty(model.dag.terminal_states)
+        # Find terminal states by checking all states in the DAG
+        filter(state -> is_terminal_state(state), model.dag.states)
+    else
+        model.dag.terminal_states
+    end
+
+    # Sum rewards of all terminal states
+    for state in terminal_states
         total += reward(state)
     end
-    return total
+
+    # If no terminal states found, return a reasonable default
+    return max(total, 1.0)
 end
 
 # ============================================================================

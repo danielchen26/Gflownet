@@ -1,6 +1,8 @@
 [deps]
+ComponentArrays = "b0b7db55-cfe3-40fc-9ded-d10e2dbeff66"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 GFlowNet = "2d7ca041-c8ad-46e9-a25d-4e8f55c0c8f5"
 Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"

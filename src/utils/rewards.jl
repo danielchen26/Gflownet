@@ -144,28 +144,60 @@ function compute_reward(reward_fn::ValueMinusCostReward, context::RewardContext)
 end
 
 """
-    reward(state, env_data=Dict())
+    reward(state::AbstractState, env_data=Dict())
 
-Default reward function that checks if environment data contains a reward function
-and uses it; otherwise returns a placeholder value.
+Compute the reward for a given state.
+
+This function implements domain-agnostic reward computation that works with
+different state types. For SimpleState, it uses a mathematical function
+based on the state data.
 
 # Arguments
 - `state`: The state to compute reward for
 - `env_data`: Optional environment data dictionary
 
 # Returns
-- Reward value
+- Positive reward value (always > 0 for valid terminal states)
 """
-function reward(state, env_data=Dict())
+function reward(state::AbstractState, env_data=Dict())
     if haskey(env_data, :reward_function) && env_data[:reward_function] isa RewardFunction
-        # Create context and use the new framework
+        # Use custom reward function if provided
         context = StandardContext(state, nothing, env_data)
         raw_reward = compute_reward(env_data[:reward_function], context)
         return ensure_positive(env_data[:reward_function], raw_reward)
     else
-        # Fall back to domain-specific implementation
-        return _domain_specific_reward(state, env_data)
+        # Use default reward computation based on state type
+        return _compute_default_reward(state)
     end
+end
+
+"""
+    _compute_default_reward(state::SimpleState)
+
+Default reward computation for SimpleState.
+
+The reward is based on the mathematical properties of the state:
+- For terminal sink state ([-1]): reward = 1.0
+- For other states: reward = exp(-||data||²/2) + 0.1
+
+This creates a reward landscape that encourages certain state configurations
+while ensuring all terminal states have positive rewards.
+"""
+function _compute_default_reward(state::SimpleState)
+    if state.data == [-1]
+        # Terminal sink state
+        return 1.0
+    else
+        # Gaussian-like reward based on distance from origin
+        data_norm_sq = sum(x^2 for x in state.data)
+        return exp(-data_norm_sq / 2.0) + 0.1  # Ensure minimum positive reward
+    end
+end
+
+# Generic fallback for other state types
+function _compute_default_reward(state::AbstractState)
+    error("Default reward computation not implemented for state type $(typeof(state)). " *
+          "Please provide a custom reward function in env_data or implement _compute_default_reward for this type.")
 end
 
 """

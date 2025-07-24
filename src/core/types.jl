@@ -1,4 +1,5 @@
 using Graphs
+using ComponentArrays
 
 """
     AbstractState
@@ -50,6 +51,63 @@ struct DirectedAcyclicGraph{S<:AbstractState, A<:AbstractAction}
     initial_state::S
     terminal_states::Vector{S}
     terminal_sink::S
+end
+
+# Define a simple state type for testing
+"""
+    SimpleState
+
+A simple state type for testing and basic usage.
+"""
+struct SimpleState <: AbstractState
+    data::Vector{Int}
+end
+
+# Implement equality comparison for SimpleState
+Base.:(==)(s1::SimpleState, s2::SimpleState) = s1.data == s2.data
+Base.hash(s::SimpleState, h::UInt) = hash(s.data, h)
+
+# Define a simple action type for testing
+"""
+    SimpleAction
+
+A simple action type for testing and basic usage.
+"""
+struct SimpleAction <: AbstractAction
+    value::Int
+end
+
+# Implement equality comparison for SimpleAction
+Base.:(==)(a1::SimpleAction, a2::SimpleAction) = a1.value == a2.value
+Base.hash(a::SimpleAction, h::UInt) = hash(a.value, h)
+
+# Add default constructor for simple cases
+"""
+    DirectedAcyclicGraph()
+
+Create an empty DirectedAcyclicGraph with simple state and action types.
+This is useful for testing and simple cases where specific types aren't needed.
+"""
+function DirectedAcyclicGraph()
+    # Use simple concrete state and action types
+    S = SimpleState
+    A = SimpleAction
+
+    # Create empty components
+    graph = SimpleGraph(0)
+    states = S[]
+    actions = A[]
+    state_to_idx = Dict{S, Int}()
+
+    # Create placeholder initial and terminal states
+    initial_state = SimpleState([0])  # Simple initial state
+    terminal_states = S[]
+    terminal_sink = SimpleState([-1])  # Special sink state
+
+    return DirectedAcyclicGraph{S, A}(
+        graph, states, actions, state_to_idx,
+        initial_state, terminal_states, terminal_sink
+    )
 end
 
 # Define domain-specific data structures for composition
@@ -231,7 +289,7 @@ mutable struct GFlowNetModel
     partition_function::Union{Nothing, Float64}
     objectives::Vector{AbstractGFlowNetObjective}
     optimizer
-    parameters::NamedTuple
+    parameters::Union{NamedTuple, ComponentArray}  # Support both NamedTuple and ComponentArray
     states::NamedTuple
     
     # Keyword constructor
@@ -243,7 +301,7 @@ mutable struct GFlowNetModel
         partition_function::Union{Nothing, Float64} = nothing,
         objectives::Vector{<:AbstractGFlowNetObjective} = AbstractGFlowNetObjective[],
         optimizer = nothing,
-        parameters::NamedTuple,
+        parameters::Union{NamedTuple, ComponentArray},
         states::NamedTuple
     )
         new(dag, forward_policy, backward_policy, flow_estimator, 

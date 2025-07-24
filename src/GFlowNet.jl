@@ -29,6 +29,8 @@ include("core/dag.jl")
 
 # Core algorithms
 include("core/algorithms/sampling.jl")
+include("core/algorithms/probabilities.jl")
+include("core/algorithms/flows.jl")
 include("core/algorithms/objectives.jl")
 include("core/algorithms/partition.jl")
 
@@ -43,6 +45,8 @@ include("core/policies/flow.jl")
 # =============================================================================
 
 # Training interface (loads config and optimization internally)
+include("training/config.jl")
+include("training/optimization.jl")
 include("training/trainer.jl")
 
 # =============================================================================
@@ -76,7 +80,7 @@ include("utils/visualization.jl")
 export State, Action, Trajectory, TrajectorySet
 export DAG, TerminalSink, create_dag, add_state!, add_action!
 export is_terminal, get_parents, get_children, get_actions
-export DirectedAcyclicGraph
+export DirectedAcyclicGraph, SimpleState, SimpleAction
 
 # =============================================================================
 # Exports - GFlowNet Model and Components
@@ -84,6 +88,8 @@ export DirectedAcyclicGraph
 
 export GFlowNetModel, ForwardPolicy, BackwardPolicy, FlowEstimator
 export forward_transition_prob, backward_transition_prob, flow, sample_trajectory
+export state_to_features, edge_flow, is_terminal_state
+export get_next_states, get_previous_states, get_possible_actions
 
 # =============================================================================
 # Exports - Training Interface
