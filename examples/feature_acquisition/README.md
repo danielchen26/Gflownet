@@ -2,83 +2,166 @@
 
 This example demonstrates how GFlowNets can be used for strategic feature acquisition in experimental design, optimizing which features to measure while balancing information gain and measurement costs.
 
-## Features
-- Simulates synthetic experimental data with multiple features
-- Implements a feature acquisition state space
-- Trains a GFlowNet to identify optimal feature measurement strategies
-- Visualizes feature selection patterns and their effectiveness
-- Analyzes the trade-off between information gain and measurement costs
+## 🚀 Quick Start
 
-## Running the Example
-From the project root directory:
-```julia
-# Run version 1 (original implementation)
-julia examples/feature_acquisition/run_v1.jl
+**Run the consolidated modern implementation:**
+```bash
+# From the project root
+julia --project=. examples/feature_acquisition/main.jl
 
-# Run version 2 (enhanced implementation)
-julia examples/feature_acquisition/run_v2.jl
+# Or from the feature_acquisition directory
+julia --project=../.. main.jl
 ```
 
-## Output Files
-The example generates several visualization files in the respective results directories:
-- Training metrics and loss curves
-- Strategy comparison plots
-- Feature selection heatmaps
-- Comprehensive HTML and Markdown reports
+This uses the latest modernized implementation with:
+- **Objective**: `ADAPTIVE_SUB_TB` (adaptive sub-trajectory balance)
+- **Z Method**: `ADAPTIVE_ESTIMATION` (automatic partition function estimation)
+- **Interface**: Modern `TrainingConfig` + `train_gflownet()` pattern
+- **Integration**: Full compatibility with current GFlowNet core package
 
-## Implementation Details
-The example uses:
-- Custom reward types for improved reward calculation
-- Strategic feature selection with cost considerations
-- Efficient state and action representations
-- Comprehensive visualization and analysis tools
+## 📁 Clean Directory Structure
 
-## Problem Setting
+### Current Files
+- **`main.jl`** - Modern, consolidated implementation using latest patterns
+- **`DOCUMENTATION.md`** - Comprehensive technical documentation  
+- **`README.md`** - This quick start guide
+- **`Project.toml`** / **`Manifest.toml`** - Dependencies
 
-- **State**: Which features have been measured for each experiment
-- **Actions**: Measure feature j of experiment i, or run an experiment
-- **Reward**: Value of the best experiment performed minus the measurement cost
+### Archived Materials
+- **`archive/v1/`** - Original implementation with legacy training interface
+- **`archive/v2/`** - Enhanced version with improved rewards
+- **`archive/v3/`** - Advanced version (basis for current main.jl)
+- **`archive/development_files/`** - Development utilities, duplicates, and analysis tools
+- **`archive/legacy_figs/`** - Historical visualization outputs
 
-The GFlowNet learns to efficiently allocate the measurement budget to focus on the most informative features, particularly for high-value experiments.
+## 🔬 Problem Description
 
-## Implementation Versions
+**Scenario**: You have N experiments, each with M potential features to measure. Each measurement has a cost, but reveals information about the experiment's value. The goal is to strategically decide which features to measure to maximize information gain while minimizing costs.
 
-This example provides two implementations:
+**Real-world applications**:
+- **Drug Discovery**: Deciding which assays to run on potential drug compounds
+- **Medical Diagnosis**: Selecting optimal sequence of diagnostic tests
+- **Quality Control**: Choosing which product features to test
+- **Scientific Research**: Optimizing experimental protocols
 
-### Original Implementation (feature_acquisition.jl)
+## 🎯 Key Features
 
-The original implementation demonstrates the core feature acquisition concept but may have issues with DAG creation and reward handling.
+### Modern Training Interface
+- Uses `GFlowNet.TrainingConfig` for declarative configuration
+- Supports all latest training objectives (TB, STB, Flow Consistency)
+- Automatic partition function estimation with adaptive switching
+- Built-in validation and early stopping
 
-### Version 2 Implementation (feature_acquisition_v2.jl)
+### Problem Modeling
+- **State Space**: Binary matrix tracking which features have been measured
+- **Action Space**: Measure specific feature or terminate acquisition
+- **Reward Function**: Balances discovery value against measurement costs
+- **DAG Structure**: Represents all possible measurement sequences
 
-Version 2 addresses key challenges with:
+### Advanced Capabilities
+- **Multi-experiment**: Handles multiple experiments simultaneously
+- **Budget Constraints**: Respects measurement budget limits
+- **Adaptive Strategies**: Learns when to stop measuring
+- **Comprehensive Evaluation**: Built-in metrics and visualization
 
-1. **Improved DAG Creation**: Uses a step counter in the state representation to ensure that the DAG is truly acyclic. This prevents common issues with cycle detection in the GFlowNet state transition graph.
+## 🛠 Implementation Highlights
 
-2. **Type-based Reward System**: Implements a concrete reward type `FeatureExperimentReward` that extends GFlowNet's `RewardFunction` type, providing a clean integration with the GFlowNet framework.
+### State Representation
+```julia
+# State tracks measurements across all experiments
+state.observed_features  # NUM_EXPERIMENTS × NUM_FEATURES matrix
+state.measurements_remaining  # Budget constraint
+state.is_terminal  # Termination flag
+```
 
-3. **Better Error Handling**: Includes comprehensive error handling and logging to help identify and troubleshoot issues.
+### Modern Configuration
+```julia
+config = GFlowNet.TrainingConfig(
+    objective = GFlowNet.ADAPTIVE_SUB_TB,
+    partition_function_method = GFlowNet.ADAPTIVE_ESTIMATION,
+    batch_size = 32,
+    learning_rate = 0.001,
+    n_iterations = 1000,
+    validation_frequency = 50
+)
+```
 
-## How It Works
+### Reward Function
+```julia
+# Balances value discovery vs. measurement costs
+reward = value_weight * best_experiment_value - 
+         cost_weight * total_measurement_cost
+```
 
-1. We start with a partially observed feature matrix
-2. The GFlowNet sequentially decides which feature to measure next
-3. After each measurement, we update our understanding of the experiments
-4. The process continues until the agent decides to terminate
-5. Success is measured by how well we can identify high-value experiments with the limited measurements
+## 📊 Expected Output
 
-## Visualization
+When you run the example, you'll see:
 
-The implementation includes basic visualization of training progress and results.
+1. **Synthetic Data Generation**: Creates realistic experimental setup
+2. **Training Configuration**: Shows modern interface usage
+3. **Integration Testing**: Verifies compatibility with core package
+4. **Training Simulation**: Demonstrates the training process
+5. **Strategy Analysis**: Analyzes learned measurement strategies
+6. **Visualizations**: Training progress and performance plots
 
-## Key Parameters
+## 🔧 Customization
 
-- `num_features`: Number of features per experiment
-- `num_experiments`: Number of experiments available
-- `cost_per_measurement`: Cost penalty for each feature observation
-- `n_iterations`: Number of training iterations
-- `n_trajectories`: Number of trajectories sampled per batch
+### Problem Size
+```julia
+const NUM_EXPERIMENTS = 10    # Number of experiments
+const NUM_FEATURES = 8        # Features per experiment
+const MAX_MEASUREMENTS = 5    # Budget constraint
+```
 
-## Acknowledgments
+### Training Configuration
+```julia
+# Try different objectives
+objective = GFlowNet.TRAJECTORY_BALANCE  # Standard TB
+objective = GFlowNet.SUB_TRAJECTORY_BALANCE  # Sub-trajectory balance
+objective = GFlowNet.FLOW_CONSISTENCY  # Flow consistency
 
-This example is part of the GFlowNet framework, which models generative processes as non-deterministic policies in MDPs. 
+# Try different Z estimation methods
+partition_function_method = GFlowNet.SIMPLE_ESTIMATION
+partition_function_method = GFlowNet.LEARNABLE_PARAMETER
+partition_function_method = GFlowNet.SAMPLING_BASED
+```
+
+### Reward Function
+```julia
+reward_fn = FeatureAcquisitionReward(
+    experiment_values,
+    cost_per_measurement = 0.1,  # Adjust cost
+    value_weight = 1.0,         # Importance of discovery
+    cost_weight = 0.5           # Importance of cost minimization
+)
+```
+
+## 🧪 Integration Testing
+
+The example includes built-in integration testing to verify compatibility with the core GFlowNet package:
+
+- **Enum Availability**: Checks all training objectives and Z estimation methods
+- **TrainingConfig**: Verifies configuration creation works
+- **DAG Operations**: Tests state transitions and action handling
+- **Reward Functions**: Validates reward calculation
+
+## 📚 Further Reading
+
+- **[`DOCUMENTATION.md`](DOCUMENTATION.md)** - Comprehensive technical details, mathematical framework, and advanced features
+- **[`docs/GFLOWNET_DOCUMENTATION.md`](../../docs/GFLOWNET_DOCUMENTATION.md)** - Main framework documentation
+- **[`examples/README.md`](../README.md)** - Overview of all examples
+
+## 🤝 Contributing
+
+This example follows the modern GFlowNet development patterns:
+
+- **Training System**: Uses `TrainingConfig` and `train_gflownet()`
+- **Code Organization**: Clean separation of concerns
+- **Documentation**: Comprehensive and up-to-date
+- **Testing**: Built-in integration verification
+
+For development guidelines, see the [Cursor rules](../../.cursor/rules/) and main project documentation.
+
+---
+
+*This example demonstrates the power and flexibility of GFlowNets for strategic decision-making problems. The feature acquisition domain showcases how GFlowNets can learn to balance multiple objectives (information vs. cost) while handling complex, sequential decision processes.* 

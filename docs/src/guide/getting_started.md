@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide will help you get started with GFlowNet.jl.
+This guide will help you get started with **modern** GFlowNet.jl.
 
 ## Installation
 
@@ -11,40 +11,78 @@ using Pkg
 Pkg.add(url="https://github.com/yourusername/GFlowNet.jl")
 ```
 
-## Basic Example: Grid World
+## Modern Example: Grid World
 
-A simple example using a grid world environment:
+A simple example using the **modern training interface** with grid world:
 
 ```julia
 using GFlowNet
 
-# Create a 5x5 grid world environment
-env = create_grid_world_environment(5, 5)
-
-# Define a reward function (reaching the bottom-right corner)
-function reward_fn(state)
-    if state.position == (5, 5)
-        return 1.0
-    else
-        return 0.1
-    end
+# Define state and action types
+struct GridState <: GFlowNet.AbstractState
+    x::Int
+    y::Int
+    is_terminal::Bool
 end
 
-# Set the reward function
-set_reward_function!(env, reward_fn)
+# Define actions
+abstract type GridAction <: GFlowNet.AbstractAction end
+struct MoveRightAction <: GridAction end
+struct MoveLeftAction <: GridAction end
+struct TerminateAction <: GridAction end
 
-# Create policies
-forward_policy = create_forward_policy(env)
-flow_estimator = create_flow_estimator(env)
+# Implement interface functions
+function GFlowNet.is_applicable(action::MoveRightAction, state::GridState)
+    !state.is_terminal && state.x < 5
+end
 
-# Train the GFlowNet
-train!(forward_policy, flow_estimator, env, epochs=1000)
+function GFlowNet.apply_action(action::MoveRightAction, state::GridState)
+    GridState(state.x + 1, state.y, false)
+end
 
-# Generate samples
-samples = sample(forward_policy, env, num_samples=10)
+function GFlowNet.reward(state::GridState)
+    state.is_terminal && state.x == 5 && state.y == 5 ? 10.0 : 0.0
+end
 
-# Visualize trajectories
-visualize_trajectories(samples)
+# Create model (see examples/grid_world/ for complete implementation)
+model = create_grid_world_model()
+
+# Modern training configuration
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.TRAJECTORY_BALANCE,
+    partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
+    batch_size=32,
+    learning_rate=0.001,
+    n_iterations=1000
+)
+
+# Train using modern interface
+training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+
+# Sample trajectories
+trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:10]
+```
+
+## Advanced Features
+
+The modern interface provides access to cutting-edge techniques:
+
+```julia
+# Sub-trajectory balance for better credit assignment
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.SUB_TRAJECTORY_BALANCE,
+    sub_trajectory_config=Dict(:min_length => 2, :max_length => 5)
+)
+
+# Adaptive Z estimation for complex spaces
+config = GFlowNet.TrainingConfig(
+    partition_function_method=GFlowNet.ADAPTIVE_ESTIMATION
+)
+
+# General trajectory balance for non-deterministic environments
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.GENERAL_TRAJECTORY_BALANCE
+)
 ```
 
 ## Next Steps

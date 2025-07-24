@@ -1,4 +1,6 @@
 [deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 GFlowNet = "2d7ca041-c8ad-46e9-a25d-4e8f55c0c8f5"
 Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
@@ -6,6 +8,7 @@ Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 julia = "1.11"

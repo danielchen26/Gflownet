@@ -229,50 +229,50 @@ function main()
         max_reward = Float64[]
     )
     
-    # Train the model with improved monitoring
-    for iter in 1:N_ITERATIONS
-        # Sample trajectories using our custom function
-        trajectories = sample_trajectories(model, BATCH_SIZE, rng)
+    # Create modern training configuration
+    config = TrainingConfig(
+        objective=TRAJECTORY_BALANCE,
+        partition_function_method=SIMPLE_ESTIMATION,
+        batch_size=BATCH_SIZE,
+        learning_rate=LEARNING_RATE,
+        n_iterations=N_ITERATIONS,
+        partition_update_frequency=50,
+        validation_frequency=100
+    )
+    
+    println("Training with modern training interface...")
+    
+    # Train using the modern interface
+    try
+        history = train_gflownet(model, config; verbose=true)
         
-        # Calculate loss and gradient
-        try
-            loss, grad = GFlowNet.compute_loss_and_grad(model, trajectories)
-            
-            # Apply optimizer to update the model
-            if !isnothing(grad)
-                GFlowNet.apply_optimizer!(model, grad)
+        # Convert history to DataFrame for consistency with original
+        train_data = DataFrame(
+            iteration = 1:length(history[:losses]),
+            loss = history[:losses],
+            mean_reward = fill(0.0, length(history[:losses])),  # Will be updated below
+            max_reward = fill(0.0, length(history[:losses]))    # Will be updated below
+        )
+        
+        # Calculate actual rewards by sampling
+        println("Calculating final performance metrics...")
+        trajectories = sample_trajectories(model, BATCH_SIZE, rng)
+        terminal_rewards = [GFlowNet.reward(traj.states[end]) for traj in trajectories]
+        final_mean_reward = mean(terminal_rewards)
+        final_max_reward = maximum(terminal_rewards)
                 
-                # Calculate rewards from sampled trajectories
-                terminal_rewards = [GFlowNet.reward(traj.states[end]) for traj in trajectories]
-                mean_reward = mean(terminal_rewards)
-                max_reward = maximum(terminal_rewards)
-                
-                # Log training metrics
-                push!(train_data, (iter, loss, mean_reward, max_reward))
-                
-                if iter % 100 == 0
-                    println("Iteration $iter: Loss = $loss, Mean reward = $mean_reward, Max reward = $max_reward")
-                end
-            else
-                # Still log metrics even if we didn't get gradients
-                terminal_rewards = [GFlowNet.reward(traj.states[end]) for traj in trajectories]
-                mean_reward = mean(terminal_rewards)
-                max_reward = maximum(terminal_rewards)
-                
-                # Log even when no gradient is available
-                push!(train_data, (iter, loss, mean_reward, max_reward))
-                
-                if iter % 100 == 0
-                    println("Iteration $iter: Loss = $loss (no gradient), Mean reward = $mean_reward, Max reward = $max_reward")
-                end
-            end
+        # Update the last entries with actual reward values
+        train_data.mean_reward[end] = final_mean_reward
+        train_data.max_reward[end] = final_max_reward
+        
+        println("Training completed successfully!")
+        println("Final mean reward: $final_mean_reward")
+        println("Final max reward: $final_max_reward")
+        
         catch e
-            println("Error in training iteration $iter: $e")
-            println("Error details: $e")
-            
-            # Log error in training data
-            push!(train_data, (iter, NaN, NaN, NaN))
-        end
+        println("Error in modern training: $e")
+        println("Training failed. Please check the configuration and model setup.")
+        return
     end
     
     # Save training metrics

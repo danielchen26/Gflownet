@@ -12,6 +12,7 @@ Pkg.activate(@__DIR__)  # Activate the project in the current directory (the exa
 using GFlowNet
 using Random
 using StatsBase  # Added for the sample function
+using Plots  # For visualization of training progress
 
 """
     run_molecule_example()
@@ -93,7 +94,96 @@ function run_molecule_example()
     features = state_to_features(current_state)
     println(features)
     
-    return model, current_state
+    # Now train the model using modern interface
+    println("\n" * "="^60)
+    println("TRAINING MOLECULAR DESIGN GFLOWNET")
+    println("="^60)
+    
+    # Create training configuration optimized for molecular design
+    config = GFlowNet.TrainingConfig(
+        objective=GFlowNet.HIERARCHICAL_SUB_TB,  # Multi-scale molecular structure
+        partition_function_method=GFlowNet.SIMPLE_ESTIMATION,  # Molecular spaces often enumerable
+        batch_size=32,
+        learning_rate=0.001,
+        n_iterations=1500,
+        partition_update_frequency=50,
+        validation_frequency=100,
+        early_stopping_patience=200,
+        sub_trajectory_config=Dict(
+            :scales => [2, 4, 8, 16],  # Different molecular scales (bonds, rings, motifs, molecules)
+            :n_subtrajectories => 5
+        )
+    )
+    
+    println("Training configuration for molecular design:")
+    println("  Objective: $(config.objective) (hierarchical balance for multi-scale molecular structure)")
+    println("  Partition function method: $(config.partition_function_method) (enumerable chemical spaces)")
+    println("  Batch size: $(config.batch_size)")
+    println("  Iterations: $(config.n_iterations)")
+    println("  Molecular scales: $(config.sub_trajectory_config[:scales])")
+    
+    # Train the model
+    training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+    
+    println("\nTraining completed!")
+    println("  Final loss: $(round(training_history[:losses][end], digits=6))")
+    println("  Final Z estimate: $(round(training_history[:partition_function_estimates][end], digits=6))")
+    println("  Total training iterations: $(length(training_history[:losses]))")
+    
+    # Sample diverse molecules after training
+    println("\n" * "="^60)
+    println("SAMPLING TRAINED MOLECULES")
+    println("="^60)
+    
+    n_samples = 10
+    sampled_trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:n_samples]
+    sampled_molecules = [traj.states[end] for traj in sampled_trajectories]
+    
+    println("Generated $(length(sampled_molecules)) molecules:")
+    for (i, molecule) in enumerate(sampled_molecules)
+        reward_val = GFlowNet.reward(molecule)
+        println("\nMolecule $i (Reward: $(round(reward_val, digits=4))):")
+        visualize_molecule(molecule)
+    end
+    
+    # Find best molecule
+    rewards = [GFlowNet.reward(mol) for mol in sampled_molecules]
+    best_idx = argmax(rewards)
+    best_molecule = sampled_molecules[best_idx]
+    
+    println("\n" * "="^60)
+    println("BEST DISCOVERED MOLECULE")
+    println("="^60)
+    println("Reward: $(round(rewards[best_idx], digits=4))")
+    visualize_molecule(best_molecule)
+    
+    # Plot training progress
+    
+    loss_plot = plot(
+        1:length(training_history[:losses]),
+        training_history[:losses],
+        title="Molecular Design Training Loss",
+        xlabel="Iteration",
+        ylabel="Loss",
+        lw=2,
+        legend=false
+    )
+    savefig(loss_plot, "molecule_design_loss.png")
+    
+    # Plot reward distribution
+    reward_plot = histogram(
+        rewards,
+        title="Generated Molecule Rewards",
+        xlabel="Reward",
+        ylabel="Frequency",
+        bins=10,
+        legend=false
+    )
+    savefig(reward_plot, "molecule_design_rewards.png")
+    
+    println("\nVisualization saved to molecule_design_*.png")
+    
+    return model, current_state, training_history, sampled_molecules
 end
 
 # Run the example if this script is executed directly

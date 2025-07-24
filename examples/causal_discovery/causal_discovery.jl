@@ -222,18 +222,50 @@ function main()
         (forward = forward_st, backward = nothing, flow = flow_st)   # States
     )
     
+    # Train using modern interface
+    println("Training GFlowNet with modern training interface...")
+    
+    # Create training configuration optimized for causal discovery
+    config = GFlowNet.TrainingConfig(
+        objective=GFlowNet.GENERAL_TRAJECTORY_BALANCE,  # Use general TB for non-deterministic paths
+        partition_function_method=GFlowNet.SAMPLING_BASED,  # Complex graph spaces need sampling
+        batch_size=24,
+        learning_rate=0.001,
+        n_iterations=1500,
+        partition_update_frequency=25,
+        validation_frequency=100,
+        early_stopping_patience=150
+    )
+    
+    println("Training configuration for causal discovery:")
+    println("  Objective: $(config.objective) (handles non-deterministic graph construction)")
+    println("  Partition function method: $(config.partition_function_method) (optimal for complex spaces)")
+    println("  Batch size: $(config.batch_size)")
+    println("  Iterations: $(config.n_iterations)")
+    
+    training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+    
+    println("Training completed!")
+    println("  Final loss: $(round(training_history[:losses][end], digits=6))")
+    println("  Final Z estimate: $(round(training_history[:partition_function_estimates][end], digits=6))")
+    println("  Total training iterations: $(length(training_history[:losses]))")
+    
     # Visualize results
     println("Visualizing results...")
     
     # Create output directory if it doesn't exist
     output_dir = "."
     
-    # Create logger
-    logger = GFlowNetLogger(joinpath(output_dir, "causal_discovery_training.csv"), log_frequency=10, verbose=true)
-    
-    # Plot loss curve
-    losses = get_metric(logger, "loss")
-    loss_plot = visualize_training_progress(losses)
+    # Plot loss curve from training history
+    loss_plot = plot(
+        1:length(training_history[:losses]),
+        training_history[:losses],
+        title="Causal Discovery Training Loss",
+        xlabel="Iteration",
+        ylabel="Loss",
+        lw=2,
+        legend=false
+    )
     savefig(loss_plot, joinpath(output_dir, "causal_discovery_loss.png"))
     
     # Sample DAGs and visualize them

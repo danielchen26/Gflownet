@@ -2,27 +2,9 @@ using Plots
 using GraphRecipes
 using ..GFlowNet: GFlowNetModel, DirectedAcyclicGraph, Trajectory, sample_trajectory, flow, reward, AbstractState
 
-# Define stub types to prevent errors
-"""
-    MoleculeState
-
-A placeholder for a molecule representation state.
-"""
-abstract type MoleculeState <: AbstractState end
-
-"""
-    DAGState
-
-A placeholder for a directed acyclic graph state.
-"""
-abstract type DAGState <: AbstractState end
-
-"""
-    ExperimentState
-
-A placeholder for an experiment selection state.
-"""
-abstract type ExperimentState <: AbstractState end
+# Import the concrete state types from the parent module 
+# (these are defined in their respective application files)
+import ..GFlowNet: MoleculeState, DAGState, ExperimentState
 
 """
     visualize_dag(dag::DirectedAcyclicGraph; node_color=:lightblue, colors=nothing)

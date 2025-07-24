@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Acquisition Analysis Report - Hybrid Multi/Single Experiment</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fafafa;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+            margin-top: 30px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 5px;
+            margin: 20px 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        tr:hover {
+            background-color: #e8f4f8;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #3498db;
+            font-size: 0.9em;
+            color: #7f8c8d;
+            text-align: center;
+        }
+        .metric-box {
+            display: inline-block;
+            background: #ecf0f1;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px;
+            text-align: center;
+            min-width: 120px;
+        }
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .metric-label {
+            font-size: 0.9em;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+
+<h1>🧪 Feature Acquisition Analysis Report</h1>
+<h2>Hybrid Multi-Experiment GFlowNet Benchmark</h2>
+
+<div class="highlight">
+    <strong>Report Generated:</strong> 2025-07-23 12:51 <br>
+    <strong>Problem Configuration:</strong> 10 experiments, 8 features each, 5 measurement budget<br>
+    <strong>Best Strategy:</strong> GFlowNet (Overall Score: 0.506)
+</div>
+
+<h2>📊 Key Performance Metrics</h2>
+
+<div style="text-align: center;">
+    <div class="metric-box">
+        <div class="metric-value">71.7%</div>
+        <div class="metric-label">GFlowNet Success Rate</div>
+    </div>
+    <div class="metric-box">
+        <div class="metric-value">0.53</div>
+        <div class="metric-label">GFlowNet Mean Reward</div>
+    </div>
+    <div class="metric-box">
+        <div class="metric-value">+40.2%</div>
+        <div class="metric-label">GFlowNet Improvement</div>
+    </div>
+</div>
+
+<h2>🚀 Training Progress</h2>
+
+<p>The GFlowNet model was trained to learn optimal feature acquisition strategies across 10 experiments. 
+The training showed clear improvement from 31.5% to 71.7% success rate.</p>
+
+<img src="gflownet_training.png" alt="GFlowNet Training Progress" title="Training Progress Over Time">
+
+<h2>📈 Strategy Comparison</h2>
+
+<p>We compared multiple strategies for feature acquisition, each with different approaches to balancing exploration and exploitation:</p>
+
+<table>
+    <tr>
+        <th>Strategy</th>
+        <th>Success Rate</th>
+        <th>Mean Reward</th>
+        <th>Avg Measurements</th>
+        <th>Efficiency</th>
+    </tr>
+    <tr>
+        <td><strong>Greedy</strong></td>
+        <td>100.0%</td>
+        <td>0.0</td>
+        <td>0.0</td>
+        <td>N/A</td>
+    </tr>
+    <tr>
+        <td><strong>GFlowNet</strong></td>
+        <td>71.7%</td>
+        <td>0.53</td>
+        <td>3.5</td>
+        <td>0.151</td>
+    </tr>
+    <tr>
+        <td><strong>Random</strong></td>
+        <td>83.0%</td>
+        <td>0.002</td>
+        <td>0.0</td>
+        <td>N/A</td>
+    </tr>
+    <tr>
+        <td><strong>Entropy</strong></td>
+        <td>100.0%</td>
+        <td>0.0</td>
+        <td>0.0</td>
+        <td>N/A</td>
+    </tr>
+</table>
+
+<img src="strategy_comparison.png" alt="Strategy Comparison" title="Success Rate Comparison">
+<img src="efficiency_analysis.png" alt="Efficiency Analysis" title="Reward vs Measurements Trade-off">
+
+<h2>🎯 Multi-Dimensional Strategy Analysis</h2>
+
+<p>Each strategy was evaluated across multiple dimensions to understand its strengths and weaknesses:</p>
+
+<img src="strategy_radar_comparison.png" alt="Strategy Multi-Metric Comparison" title="Normalized Performance Across Metrics">
+<img src="strategy_effectiveness_ranking.png" alt="Strategy Effectiveness Ranking" title="Overall Strategy Ranking">
+
+<h2>🔍 Feature Selection Patterns</h2>
+
+<p>The heatmap below shows which experiment-feature combinations are most valuable. 
+Higher-value experiments (particularly Experiment 6) should receive more attention:</p>
+
+<img src="feature_selection_heatmap.png" alt="Feature Selection Heatmap" title="Experiment-Feature Importance">
+<img src="ground_truth_comparison.png" alt="Ground Truth Analysis" title="Experiment Value Distribution">
+
+<h2>⚖️ Ground Truth vs Learned Strategies</h2>
+
+<p>Comparison of all strategies against the theoretical optimal (ground truth) performance:</p>
+
+<img src="ground_truth_vs_strategies.png" alt="Ground Truth vs Strategies" title="Performance Ratio to Optimal">
+
+<h2>📋 Strategy Metrics (V3-Compatible)</h2>
+
+<table>
+    <tr>
+        <th>Strategy</th>
+        <th>Reward</th>
+        <th>Cost Efficiency</th>
+        <th>Exploration</th>
+        <th>Exploitation</th>
+        <th>Optimality</th>
+        <th>Overall Score</th>
+    </tr>
+    <tr>
+        <td><strong>Greedy</strong></td>
+        <td>0.0</td>
+        <td>0.0</td>
+        <td>0.3</td>
+        <td>1.0</td>
+        <td>0.0</td>
+        <td>0.36</td>
+    </tr>
+    <tr>
+        <td><strong>GFlowNet</strong></td>
+        <td>0.53</td>
+        <td>1.473</td>
+        <td>0.7</td>
+        <td>0.717</td>
+        <td>0.53</td>
+        <td>0.506</td>
+    </tr>
+    <tr>
+        <td><strong>Random</strong></td>
+        <td>0.002</td>
+        <td>0.082</td>
+        <td>0.9</td>
+        <td>0.83</td>
+        <td>0.002</td>
+        <td>0.431</td>
+    </tr>
+    <tr>
+        <td><strong>Entropy</strong></td>
+        <td>0.0</td>
+        <td>0.0</td>
+        <td>0.7</td>
+        <td>1.0</td>
+        <td>0.0</td>
+        <td>0.44</td>
+    </tr>
+    <tr>
+        <td><strong>Ground Truth</strong></td>
+        <td>1.0</td>
+        <td>10.0</td>
+        <td>0.2</td>
+        <td>1.0</td>
+        <td>1.0</td>
+        <td>1.0</td>
+    </tr>
+</table>
+
+<h2>🔬 Problem Characteristics</h2>
+
+<div class="highlight">
+    <h3>Multi-Experiment Extension</h3>
+    <p>This implementation extends the V3 single-experiment approach to handle multiple experiments simultaneously:</p>
+    <ul>
+        <li><strong>Single Experiment Mode:</strong> Set NUM_EXPERIMENTS = 1 for V3-compatible analysis</li>
+        <li><strong>Multi-Experiment Mode:</strong> Current setup with 10 experiments</li>
+        <li><strong>Scalability:</strong> Framework supports any number of experiments and features</li>
+        <li><strong>Backward Compatibility:</strong> All V3 analysis methods work with single experiment</li>
+    </ul>
+</div>
+
+<h3>Experiment Distribution</h3>
+<ul>
+    <li><strong>Total experiments:</strong> 10</li>
+    <li><strong>Features per experiment:</strong> 8</li>
+    <li><strong>Value range:</strong> [0.002, 0.2]</li>
+    <li><strong>Best experiment:</strong> Experiment 6 (value: 0.2)</li>
+    <li><strong>Measurement budget:</strong> 5 out of 80 possible</li>
+</ul>
+
+<h2>🎯 Key Findings</h2>
+
+<ol>
+    <li><strong>GFlowNet achieved the best overall performance</strong> with a score of 0.506</li>
+    <li><strong>GFlowNet showed clear learning</strong> improving from 31.5% to 71.7% success rate</li>
+    <li><strong>Multi-experiment approach is more challenging</strong> than single-experiment V3 version</li>
+    <li><strong>Hybrid framework enables both modes</strong> - set NUM_EXPERIMENTS=1 for V3 compatibility</li>
+    <li><strong>Advanced visualizations</strong> provide V3-level analysis depth for the extended problem</li>
+</ol>
+
+<h2>🚀 Hybrid Framework Benefits</h2>
+
+<div class="highlight">
+    <h3>Best of Both Worlds</h3>
+    <p>This hybrid implementation combines:</p>
+    <ul>
+        <li><strong>V3 Analysis Depth:</strong> Detailed strategy metrics, radar plots, and comprehensive visualizations</li>
+        <li><strong>Multi-Experiment Complexity:</strong> More realistic and challenging problem formulation</li>
+        <li><strong>Backward Compatibility:</strong> Can reproduce V3 results by setting NUM_EXPERIMENTS = 1</li>
+        <li><strong>Scalable Framework:</strong> Easily configurable for different problem sizes</li>
+        <li><strong>Modern Implementation:</strong> Updated codebase with improved documentation</li>
+    </ul>
+</div>
+
+<h2>📁 Generated Files</h2>
+
+<ul>
+    <li><code>strategy_comparison.png</code> - Basic strategy comparison</li>
+    <li><code>efficiency_analysis.png</code> - Reward vs measurement trade-offs</li>
+    <li><code>gflownet_training.png</code> - Training progression</li>
+    <li><code>ground_truth_comparison.png</code> - Experiment value distribution</li>
+    <li><code>strategy_radar_comparison.png</code> - Multi-metric strategy analysis</li>
+    <li><code>feature_selection_heatmap.png</code> - Experiment-feature importance</li>
+    <li><code>strategy_effectiveness_ranking.png</code> - Overall strategy ranking</li>
+    <li><code>ground_truth_vs_strategies.png</code> - Performance vs optimal</li>
+    <li><code>strategy_metrics.csv</code> - V3-compatible strategy metrics</li>
+    <li><code>ANALYSIS_REPORT.md</code> - Detailed markdown analysis</li>
+    <li><code>BENCHMARK_SUMMARY.md</code> - Comprehensive summary</li>
+</ul>
+
+<div class="footer">
+    <p><strong>Hybrid Multi-Experiment Feature Acquisition Framework</strong></p>
+    <p>Combines V3 single-experiment depth with multi-experiment complexity</p>
+    <p>Report generated on 2025-07-23 12:51 by enhanced main.jl</p>
+</div>
+
+</body>
+</html>

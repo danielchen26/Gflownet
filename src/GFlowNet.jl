@@ -5,6 +5,7 @@ using Graphs
 using Distributions
 using LinearAlgebra
 using Lux
+using ComponentArrays
 using NNlib
 using Optimisers
 using Plots
@@ -18,73 +19,167 @@ using GraphRecipes
 # Add this line to disable precompilation until issues are resolved
 __precompile__(false)
 
-# Type definitions first
-include("types.jl")
+# =============================================================================
+# Core Components (New Structure)
+# =============================================================================
 
-# Core functionality
-include("directed_acyclic_graph.jl")
-include("rewards.jl")  # Add our new rewards module
-include("flow_networks.jl")
+# Core types and data structures
+include("core/types.jl")
+include("core/dag.jl")
 
-# Policies and training
-include("policies/forward_policy.jl")
-include("policies/backward_policy.jl")
-include("policies/flow_estimator.jl")
+# Core algorithms
+include("core/algorithms/sampling.jl")
+include("core/algorithms/objectives.jl")
+include("core/algorithms/partition.jl")
 
-# Include our custom implementation first
-include("training/compute_loss_and_grad.jl")
+# Policy implementations
+include("core/policies/base.jl")
+include("core/policies/forward.jl")
+include("core/policies/backward.jl")
+include("core/policies/flow.jl")
 
-# Then include other training files
-include("training/flow_matching.jl")
-include("training/detailed_balance.jl")
-include("training/trajectory_balance.jl")
+# =============================================================================
+# Training Infrastructure
+# =============================================================================
 
-# Training controller
-include("training/training.jl")
+# Training interface (loads config and optimization internally)
+include("training/trainer.jl")
 
-# Applications
-include("applications/molecular_design.jl")
-include("applications/causal_discovery.jl")
-include("applications/active_learning.jl")
+# =============================================================================
+# Applications and Extensions
+# =============================================================================
 
 # Extensions
 include("extensions/continuous.jl")
 include("extensions/information.jl")
 include("extensions/non_acyclic.jl")
 
-# Utilities (last, since they depend on other components)
-include("utils/utils.jl")
+# Applications (load before visualization to define concrete types)
+include("applications/active_learning.jl")
+include("applications/causal_discovery.jl")
+include("applications/molecular_design.jl")
 
-# Make sure to export apply_optimizer! which comes from utils
-export apply_optimizer!
+# =============================================================================
+# Utilities
+# =============================================================================
 
-# Export public API
-export AbstractState, AbstractAction
-export DirectedAcyclicGraph, Trajectory
-export MoleculeData, DAGData, ExperimentData
-export GFlowNetModel, FlowEstimator
-export ForwardPolicy, BackwardPolicy
-export FlowMatchingObjective, DetailedBalanceObjective, TrajectoryBalanceObjective
-export create_dag, flow, edge_flow, state_to_features, reward
-export forward_transition_prob, backward_transition_prob
-export sample_trajectory, train!, compute_loss_and_grad
-export is_applicable, apply_action
-export get_next_states, get_previous_states
-export get_incoming_edges, get_outgoing_edges
-export MoleculeState
-export AddAtomAction, AddBondAction, TerminateMoleculeAction
-export create_initial_molecule_state, create_molecular_design_model
-export visualize_molecule
-export create_flow_estimator, create_forward_policy, estimate_partition_function
+# Utility functions and helpers
+include("utils/rewards.jl")
+include("utils/logging.jl")
+include("utils/visualization.jl")
+# Note: utils.jl creates a submodule, so we need to import its exports
 
-# Export reward framework
-export RewardFunction, RewardContext, StandardContext
+# =============================================================================
+# Exports - Core Types and Data Structures
+# =============================================================================
+
+export State, Action, Trajectory, TrajectorySet
+export DAG, TerminalSink, create_dag, add_state!, add_action!
+export is_terminal, get_parents, get_children, get_actions
+export DirectedAcyclicGraph
+
+# =============================================================================
+# Exports - GFlowNet Model and Components
+# =============================================================================
+
+export GFlowNetModel, ForwardPolicy, BackwardPolicy, FlowEstimator
+export forward_transition_prob, backward_transition_prob, flow, sample_trajectory
+
+# =============================================================================
+# Exports - Training Interface
+# =============================================================================
+
+# Core training functions
+export train_gflownet, train_gflownet_simple
+export TrainingConfig, TrainingObjective, PartitionFunctionMethod
+
+# Training objectives
+export TRAJECTORY_BALANCE, GENERAL_TRAJECTORY_BALANCE, SUB_TRAJECTORY_BALANCE
+export HIERARCHICAL_SUB_TB, ADAPTIVE_SUB_TB, FLOW_CONSISTENCY
+
+# Partition function methods
+export SIMPLE_ESTIMATION, LEARNABLE_PARAMETER, SAMPLING_BASED, ADAPTIVE_ESTIMATION
+export SimplePartitionFunctionEstimator, LearnablePartitionFunctionEstimator
+export SamplingPartitionFunctionEstimator, AdaptivePartitionFunctionEstimator
+
+# =============================================================================
+# Exports - Training Objectives and Loss Functions
+# =============================================================================
+
+# Unified flow consistency functionality
+export flow_consistency_loss, FlowConsistencyMode, EDGE_LEVEL, STATE_LEVEL, MIXED_LEVEL
+export estimate_partition_function, update_partition_function!
+
+# All loss functions
+export trajectory_balance_loss, general_trajectory_balance_loss
+export sub_trajectory_balance_loss, hierarchical_sub_trajectory_balance_loss
+export adaptive_sub_trajectory_balance_loss
+
+# Legacy compatibility
+export detailed_balance_loss, flow_matching_loss
+export compute_loss_and_grad, apply_optimizer!  # Legacy functions for examples
+
+# =============================================================================
+# Exports - Policy Functions
+# =============================================================================
+
+# Policy creation and manipulation
+export create_forward_policy, create_backward_policy, create_flow_estimator
+export forward_transition_logits, backward_transition_logits
+export forward_action_probabilities, backward_action_probabilities
+export sample_action, sample_prev_state, estimate_flow, estimate_edge_flow
+
+# Policy utilities
+export state_to_features, normalize_probabilities, sample_from_probabilities
+export clamp_probabilities, validate_policy_output
+export PolicyError, PolicyMetrics
+
+# =============================================================================
+# Exports - Optimization and Training Utilities
+# =============================================================================
+
+export setup_optimizers, compute_gradient_norm, clip_gradients!
+export validate_training_config, get_config_summary
+export evaluate_model, save_training_checkpoint, load_training_checkpoint
+
+# =============================================================================
+# Exports - Reward Functions
+# =============================================================================
+
+export reward, RewardFunction, RewardContext, StandardContext
 export FunctionalReward, ValueMinusCostReward
 export compute_reward, ensure_positive
 
-# Re-export utilities from the GFlowNetUtils module
-export GFlowNetLogger, log_iteration!, get_metric
-export visualize_training_progress, visualize_reward_distribution
-export visualize_causal_graph, visualize_experiment_selection
+# =============================================================================
+# Exports - Utilities
+# =============================================================================
 
-end # module
+# Export logging utilities
+export GFlowNetLogger, log_metric!, log_iteration!, get_metric, get_last_metric, reset!, save_metrics
+export summarize_performance, time_execution, benchmark_sampling
+export log_info, log_warning, log_error
+export visualize_dag, plot_training_progress, save_trajectory_plot
+
+# =============================================================================
+# Exports - Applications
+# =============================================================================
+
+export ActiveLearningEnvironment, CausalDiscoveryEnvironment, MolecularDesignEnvironment
+export setup_active_learning, setup_causal_discovery, setup_molecular_design
+export MoleculeState, DAGState, ExperimentState  # Export concrete state types
+
+# Application-specific actions
+export SelectExperimentAction, TerminateExperimentAction
+export AddEdgeAction, RemoveEdgeAction, TerminateDAGAction
+export AddAtomAction, AddBondAction, TerminateMoleculeAction
+
+# =============================================================================
+# Exports - Extensions
+# =============================================================================
+
+export ContinuousGFlowNet, InformationGFlowNet, NonAcyclicGFlowNet
+export continuous_action_space, information_objective, handle_cycles
+export ContinuousState, ContinuousAction, GaussianPolicy
+export CyclicFlowNetwork, create_cyclic_network
+
+end # module GFlowNet

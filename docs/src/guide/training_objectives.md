@@ -14,6 +14,14 @@ At a high level, all GFlowNet training objectives aim to ensure that the network
 
 The training objectives differ in how they enforce these constraints and in their computational and statistical properties.
 
+## Current Implementation Overview
+
+**This implementation uses the Trajectory Balance objective with periodic Z estimation** for stability and simplicity. Key characteristics:
+
+- **Simplified Trajectory Balance**: Uses the form without backward probabilities `P_B(τ)`
+- **Periodic Z Estimation**: Z is re-estimated every 10 iterations by summing terminal rewards
+- **Stability Focus**: Chosen for robust training rather than theoretical generality
+
 ## Flow Matching (FM)
 
 Flow Matching is one of the most direct training objectives for GFlowNets. It explicitly enforces flow conservation at each state.
@@ -100,37 +108,87 @@ The Detailed Balance objective requires both forward and backward policies. It c
 - Can be sensitive to the flow parametrization
 - May still struggle with long trajectories
 
-## Trajectory Balance (TB)
+## Trajectory Balance (TB) - Current Implementation
 
-Trajectory Balance, introduced by Malkin et al. (2022), provides a more efficient credit assignment mechanism by considering entire trajectories.
+Trajectory Balance, introduced by Malkin et al. (2022), provides a more efficient credit assignment mechanism by considering entire trajectories. **This is the primary objective used in the current implementation.**
 
 ### Mathematical Formulation
 
-The Trajectory Balance objective enforces consistency across complete trajectories:
+#### General Form (Not Used Here)
+The complete Trajectory Balance equation is:
+$$Z \cdot P_F(\tau) = R(s_{|\tau|-1}) \cdot P_B(\tau)$$
 
-$$\frac{Z \cdot \prod_{t=0}^{|\tau|-1} P_F(s_{t+1} | s_t)}{R(s_{|\tau|-1})} = 1$$
+#### Simplified Form (Used in This Implementation)
+For problems with **deterministic backward paths** (where each state has exactly one parent), $P_B(\tau) = 1$, simplifying to:
+
+$$Z \cdot P_F(\tau) = R(s_{|\tau|-1})$$
 
 where:
 - $\tau = (s_0, s_1, \ldots, s_{|\tau|-1})$ is a trajectory from the initial state to a terminal state
 - $Z$ is the partition function (total flow)
-- $P_F(s_{t+1} | s_t)$ is the forward policy probability
+- $P_F(\tau) = \prod_{t=0}^{|\tau|-1} P_F(s_{t+1} | s_t)$ is the product of forward transition probabilities
 - $R(s_{|\tau|-1})$ is the reward of the terminal state
 
-This constraint leads to the loss function:
+This leads to the loss function:
 
 $$\mathcal{L}_{TB}(F) = \mathbb{E}_{\tau \sim \rho(\tau)} \left[ \left( \log Z + \sum_{t=0}^{|\tau|-1} \log P_F(s_{t+1} | s_t) - \log R(s_{|\tau|-1}) \right)^2 \right]$$
 
-where $\rho(\tau)$ is a sampling distribution over trajectories.
+### Implementation Details
 
-### Practical Implementation
+```julia
+# Compute the trajectory probability
+forward_prob_product = 1.0
+for i in 1:(length(trajectory.states)-1)
+    source = trajectory.states[i]
+    target = trajectory.states[i+1]
+    prob = forward_transition_prob(working_model, source, target)
+    forward_prob_product *= prob
+end
 
-Trajectory Balance can be implemented by:
+# Get Z (partition function) - estimated periodically
+Z = model.partition_function
 
-1. Sampling complete trajectories using a behavior policy
-2. Computing the product of forward probabilities along each trajectory
-3. Minimizing the squared difference between this product (scaled by $Z$) and the terminal reward
+# Compute the loss
+ratio = (Z * forward_prob_product) / final_reward
+log_ratio = log(ratio)
+total_loss += log_ratio^2
+```
 
-The partition function $Z$ can be parameterized directly or computed as the flow at the initial state.
+### Z Estimation Strategy
+
+**This implementation uses periodic estimation rather than joint learning:**
+
+```julia
+# In the training loop (every 10 iterations)
+if iter % 10 == 0
+    model.partition_function = estimate_partition_function(model)
+end
+
+# Simple estimation: sum of all terminal rewards
+function estimate_partition_function(model::GFlowNetModel)
+    total = 0.0
+    for state in model.dag.terminal_states
+        total += reward(state)
+    end
+    return total
+end
+```
+
+**Why This Approach?**
+1. **Stability**: Avoids instability from joint Z-policy optimization
+2. **Simplicity**: No additional hyperparameters or learning rates for Z
+3. **Predictability**: Deterministic Z updates based on known terminal states
+
+### When the Simplified Form is Valid
+
+The simplified Trajectory Balance (without $P_B(\tau)$) is appropriate when:
+
+1. **Sequential Construction**: Objects are built step-by-step in a deterministic manner
+2. **Unique Parents**: Each state (except initial) has exactly one possible parent
+3. **Examples**: 
+   - Building molecules atom-by-atom with specific attachment rules
+   - Grid world navigation (each position reached from one previous position)
+   - **Not suitable**: Set construction where order doesn't matter (like feature acquisition)
 
 ### Advantages and Limitations
 
@@ -139,120 +197,67 @@ The partition function $Z$ can be parameterized directly or computed as the flow
 - Often leads to faster convergence and better sample quality
 - More robust to parametrization choices
 - Works well with off-policy learning
+- **No backward policy needed** in simplified form
 
 **Limitations:**
 - Requires sampling complete trajectories
 - May have higher variance for very long trajectories
-- Sensitive to the estimation of the partition function $Z$
-
-## Sub-Trajectory Balance (SubTB)
-
-Sub-Trajectory Balance is an extension of Trajectory Balance that applies the same principle to sub-trajectories.
-
-### Mathematical Formulation
-
-For any sub-trajectory $\tau_{i:j} = (s_i, s_{i+1}, \ldots, s_j)$:
-
-$$\frac{F(s_i) \cdot \prod_{t=i}^{j-1} P_F(s_{t+1} | s_t)}{F(s_j)} = 1$$
-
-This leads to the loss function:
-
-$$\mathcal{L}_{SubTB}(F) = \mathbb{E}_{\tau \sim \rho(\tau)} \mathbb{E}_{(i,j)} \left[ \left( \log F(s_i) + \sum_{t=i}^{j-1} \log P_F(s_{t+1} | s_t) - \log F(s_j) \right)^2 \right]$$
-
-### Practical Implementation
-
-Sub-Trajectory Balance can be implemented by:
-
-1. Sampling complete trajectories
-2. Randomly selecting sub-trajectories
-3. Computing the balance condition for each sub-trajectory
-4. Minimizing the squared difference
-
-### Advantages and Limitations
-
-**Advantages:**
-- Combines benefits of Trajectory Balance with more local credit assignment
-- Can lead to more sample-efficient learning
-- Works well for very long trajectories
-
-**Limitations:**
-- More complex to implement
-- Requires estimating state flows at intermediate states
-- May be sensitive to the selection of sub-trajectories
-
-## Amortized Flow Transport (AFT)
-
-Amortized Flow Transport is a recent training objective that combines GFlowNets with ideas from optimal transport.
-
-### Mathematical Formulation
-
-AFT minimizes a transport cost between the flow distribution and the target distribution:
-
-$$\mathcal{L}_{AFT}(F) = \mathbb{E}_{s_T \sim \pi_F} [c(s_T, R)] - \lambda \cdot \mathbb{H}[\pi_F]$$
-
-where:
-- $\pi_F$ is the distribution over terminal states induced by the GFlowNet
-- $c(s_T, R)$ is a cost function measuring the discrepancy between the sampled state and the target reward
-- $\mathbb{H}[\pi_F]$ is the entropy of the induced distribution
-- $\lambda$ is a temperature parameter
-
-### Practical Implementation
-
-AFT can be implemented by:
-
-1. Sampling terminal states using the current GFlowNet
-2. Computing the transport cost and entropy terms
-3. Updating the parameters to minimize the objective
-
-### Advantages and Limitations
-
-**Advantages:**
-- Can handle continuous state spaces more naturally
-- Provides explicit control over the exploration-exploitation trade-off
-- Often more robust to reward scaling
-
-**Limitations:**
-- Requires careful choice of the cost function and temperature
-- May be more complex to implement
-- Less direct connection to the flow interpretation
+- **Simplified form only works for deterministic backward paths**
+- Periodic Z estimation may lag behind policy learning
 
 ## Comparing Training Objectives
 
 The choice of training objective depends on the specific application and constraints:
 
-| Objective | Credit Assignment | Parametrization Flexibility | Computational Complexity | Sample Efficiency |
-|-----------|-------------------|----------------------------|--------------------------|-------------------|
-| Flow Matching | Local | Moderate | Moderate | Moderate |
-| Detailed Balance | Edge-level | Low | Low | Moderate |
-| Trajectory Balance | Trajectory-level | High | Low | High |
-| Sub-Trajectory Balance | Mixed | High | Moderate | Very High |
-| Amortized Flow Transport | Global | Very High | High | High |
+| Objective | Credit Assignment | Backward Policy Required | Computational Complexity | Sample Efficiency |
+|-----------|-------------------|--------------------------|--------------------------|-------------------|
+| Flow Matching | Local | No | Moderate | Moderate |
+| Detailed Balance | Edge-level | Yes | Low | Moderate |
+| **Trajectory Balance (Current)** | **Trajectory-level** | **No** | **Low** | **High** |
 
-For most applications, Trajectory Balance offers a good balance of simplicity, efficiency, and performance, particularly for problems with long action sequences.
+## Implementation Recommendations
 
-## Practical Considerations
+### For New Domains
+
+1. **Start with Trajectory Balance** (current implementation) if:
+   - Sequential construction process
+   - Each state has a unique parent
+   - Want simple, stable training
+
+2. **Consider the general TB form** if:
+   - States can have multiple parents
+   - Order of actions doesn't matter
+   - Need theoretical completeness
+
+3. **Use Detailed Balance** if:
+   - Want local, edge-level control
+   - Have specific backward policy requirements
+   - Dealing with complex, non-tree-like state graphs
+
+### Practical Considerations
 
 When implementing GFlowNet training objectives, consider the following:
 
 1. **Off-policy learning**: All objectives can be used with off-policy learning, but they differ in their sensitivity to the behavior policy.
 
-2. **Parametrization**: The choice of parametrization for flows and policies can significantly impact performance. Options include:
-   - Direct parametrization of state flows $F(s)$
-   - Direct parametrization of edge flows $F(s \rightarrow s')$
-   - Parametrization of forward policy $P_F(s' | s)$ and backward policy $P_B(s | s')$
-   - Parametrization of forward policy and state flows
+2. **Parametrization**: The choice of parametrization for flows and policies can significantly impact performance.
 
 3. **Learning rate scheduling**: Different objectives may benefit from different learning rate schedules.
 
 4. **Reward scaling**: Some objectives (particularly TB) can be sensitive to reward scaling. Consider log-transforming rewards if they have a wide dynamic range.
 
-5. **Exploration strategies**: All objectives require adequate exploration of the state space. Consider using techniques like entropy regularization or epsilon-greedy exploration.
+5. **Exploration strategies**: All objectives require adequate exploration of the state space.
 
 ## Conclusion
 
-The choice of training objective is a critical design decision when implementing GFlowNets. The best choice depends on the specific problem characteristics, such as trajectory length, state space size, and reward structure.
+**The current implementation uses Trajectory Balance with periodic Z estimation**, chosen for its excellent balance of:
+- **Stability**: Robust training without hyperparameter sensitivity
+- **Efficiency**: Good credit assignment for sequential tasks
+- **Simplicity**: Minimal implementation complexity
 
-For beginners, Trajectory Balance is often a good starting point due to its robust performance across a wide range of problems. As you gain experience, you may want to experiment with other objectives or even combinations of objectives to optimize performance for your specific application.
+This approach works well for the domains implemented (grid world, molecular design, causal discovery, active learning) where the backward path is typically deterministic.
+
+For new domains with more complex state relationships, consider whether the simplified TB form is appropriate, or if the general form (with $P_B(\tau)$) would be more suitable.
 
 ## References
 
