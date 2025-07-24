@@ -17,7 +17,7 @@ using Dates
 using GraphRecipes
 
 # Add this line to disable precompilation until issues are resolved
-__precompile__(false)
+# CORRECTED: Removed __precompile__(false) to enable precompilation for better performance
 
 # =============================================================================
 # Core Components (New Structure)

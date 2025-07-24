@@ -160,14 +160,14 @@ function trajectory_balance_loss(model::GFlowNetModel, trajectories::Vector{Traj
         # Last state in trajectory (before sink)
         final_state = trajectory.states[end]
 
-        # Product of forward probabilities along the trajectory
-        forward_prob_product = 1.0
+        # CORRECTED: Compute forward probabilities in log-space for numerical stability
+        log_forward_prob_sum = 0.0
         for i in 1:(length(trajectory.states)-1)
             source = trajectory.states[i]
             target = trajectory.states[i+1]
 
             prob = forward_transition_prob(model, source, target)
-            forward_prob_product *= prob
+            log_forward_prob_sum += log(max(prob, 1e-10))  # Prevent log(0)
         end
 
         # Compute the reward of the final state
@@ -180,12 +180,13 @@ function trajectory_balance_loss(model::GFlowNetModel, trajectories::Vector{Traj
             model.partition_function
         end
 
-        # Compute the ratio (should be 1 for perfect balance)
-        ratio = (Z * forward_prob_product) / final_reward
+        # CORRECTED: All computations in log-space for numerical stability
+        log_Z = log(max(Z, 1e-10))
+        log_reward = log(max(final_reward, 1e-10))
 
-        # Squared log error (numerically stable)
-        log_ratio = log(ratio)
-        total_loss += log_ratio^2
+        # Trajectory balance: log(Z) + log(P_F) - log(R) should be 0
+        balance_error = log_Z + log_forward_prob_sum - log_reward
+        total_loss += balance_error^2
     end
 
     return total_loss / n_trajectories
@@ -214,37 +215,38 @@ function general_trajectory_balance_loss(model::GFlowNetModel, trajectories::Vec
         # Last state in trajectory (before sink)
         final_state = trajectory.states[end]
         
-        # Product of forward probabilities along the trajectory
-        forward_prob_product = 1.0
+        # CORRECTED: Compute forward probabilities in log-space
+        log_forward_prob_sum = 0.0
         for i in 1:(length(trajectory.states)-1)
             source = trajectory.states[i]
             target = trajectory.states[i+1]
             prob = forward_transition_prob(model, source, target)
-            forward_prob_product *= prob
+            log_forward_prob_sum += log(max(prob, 1e-10))  # Prevent log(0)
         end
-        
-        # Product of backward probabilities along the trajectory
-        backward_prob_product = 1.0
+
+        # CORRECTED: Compute backward probabilities in log-space
+        log_backward_prob_sum = 0.0
         for i in length(trajectory.states):-1:2
             source = trajectory.states[i-1]
             target = trajectory.states[i]
             prob = backward_transition_prob(model, target, source)
-            backward_prob_product *= prob
+            log_backward_prob_sum += log(max(prob, 1e-10))  # Prevent log(0)
         end
-        
+
         # Compute the reward of the final state
         final_reward = reward(final_state)
-        
+
         # Compute Z (partition function)
-        Z = isnothing(model.partition_function) ? 
+        Z = isnothing(model.partition_function) ?
             estimate_partition_function(model) : model.partition_function
-        
-        # General trajectory balance: Z * P_F(τ) = R(s_τ) * P_B(τ)
-        ratio = (Z * forward_prob_product) / (final_reward * backward_prob_product)
-        
-        # Squared log error
-        log_ratio = log(ratio)
-        total_loss += log_ratio^2
+
+        # CORRECTED: General trajectory balance in log-space
+        # log(Z) + log(P_F) = log(R) + log(P_B)
+        log_Z = log(max(Z, 1e-10))
+        log_reward = log(max(final_reward, 1e-10))
+
+        balance_error = (log_Z + log_forward_prob_sum) - (log_reward + log_backward_prob_sum)
+        total_loss += balance_error^2
     end
     
     return total_loss / n_trajectories

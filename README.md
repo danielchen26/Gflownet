@@ -360,3 +360,222 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 *Clean, modern, and production-ready Generative Flow Networks in Julia* 🚀
 
+## Package Architecture Visualization
+
+### Interactive Mermaid Diagram
+
+The following Mermaid diagram shows the complete package structure with module dependencies. Solid lines indicate hierarchical organization, while dotted lines show dependencies between modules:
+
+```mermaid
+graph TD
+    A[GFlowNet.jl<br/>Main Module] --> B[Core Foundations]
+    A --> C[Algorithms]
+    A --> D[Policies]
+    A --> E[Training]
+    A --> F[Applications]
+    A --> G[Extensions]
+    A --> H[Utils]
+    
+    B --> B1[core/types.jl<br/>AbstractState, GFlowNetModel]
+    B --> B2[core/dag.jl<br/>DAG Creation/Manipulation]
+    
+    C --> C1[core/algorithms/sampling.jl<br/>Trajectory Sampling]
+    C --> C2[core/algorithms/probabilities.jl<br/>Transition Probabilities]
+    C --> C3[core/algorithms/flows.jl<br/>Flow Computation]
+    C --> C4[core/algorithms/objectives.jl<br/>Loss Functions TB/DB/FM]
+    C --> C5[core/algorithms/partition.jl<br/>Partition Function Z]
+    
+    D --> D1[core/policies/base.jl<br/>Shared Utils]
+    D --> D2[core/policies/forward.jl<br/>Forward Policy]
+    D --> D3[core/policies/backward.jl<br/>Backward Policy]
+    D --> D4[core/policies/flow.jl<br/>Flow Estimator]
+    
+    E --> E1[training/config.jl<br/>Training Configuration]
+    E --> E2[training/optimization.jl<br/>Gradients & Updates]
+    E --> E3[training/trainer.jl<br/>Main Training Loop]
+    
+    F --> F1[applications/active_learning.jl<br/>Experiment Selection]
+    F --> F2[applications/causal_discovery.jl<br/>DAG Structure Learning]
+    F --> F3[applications/molecular_design.jl<br/>Molecule Generation]
+    
+    G --> G1[extensions/continuous.jl<br/>Continuous Spaces]
+    G --> G2[extensions/information.jl<br/>Information Theory]
+    G --> G3[extensions/non_acyclic.jl<br/>Cyclic Networks]
+    
+    H --> H1[utils/rewards.jl<br/>Reward Framework]
+    H --> H2[utils/logging.jl<br/>Training Logs]
+    H --> H3[utils/visualization.jl<br/>Plots & Graphs]
+    
+    %% Dependencies
+    B1 -.-> C1
+    B1 -.-> C2
+    B1 -.-> C3
+    B1 -.-> C4
+    B1 -.-> D2
+    B1 -.-> D3
+    B1 -.-> D4
+    B1 -.-> E3
+    B1 -.-> F1
+    B1 -.-> F2
+    B1 -.-> F3
+    
+    B2 -.-> C1
+    B2 -.-> E3
+    
+    C1 -.-> E3
+    C1 -.-> F1
+    C1 -.-> F2
+    C1 -.-> F3
+    
+    C2 -.-> C3
+    C2 -.-> C4
+    
+    C3 -.-> C4
+    C3 -.-> C5
+    C3 -.-> E3
+    
+    C4 -.-> E2
+    C4 -.-> E3
+    
+    C5 -.-> C4
+    C5 -.-> E3
+    
+    D1 -.-> D2
+    D1 -.-> D3
+    D1 -.-> D4
+    
+    D2 -.-> C1
+    D2 -.-> C2
+    
+    D3 -.-> C4
+    
+    D4 -.-> C3
+    
+    E1 -.-> E2
+    E1 -.-> E3
+    
+    E2 -.-> E3
+    
+    E3 -.-> F1
+    E3 -.-> F2
+    E3 -.-> F3
+    
+    G1 -.-> C1
+    G1 -.-> D2
+    
+    G2 -.-> C1
+    G2 -.-> C3
+    
+    G3 -.-> B2
+    G3 -.-> C1
+    
+    H1 -.-> C3
+    H1 -.-> C4
+    H1 -.-> F1
+    H1 -.-> F2
+    H1 -.-> F3
+    
+    H2 -.-> E3
+    
+    H3 -.-> E3
+    H3 -.-> F1
+    H3 -.-> F2
+    H3 -.-> F3
+    
+    classDef coreClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef algoClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef policyClass fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef trainClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef appClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef extClass fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    classDef utilClass fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef mainClass fill:#ffebee,stroke:#c62828,stroke-width:3px
+    
+    class A mainClass
+    class B,B1,B2 coreClass
+    class C,C1,C2,C3,C4,C5 algoClass
+    class D,D1,D2,D3,D4 policyClass
+    class E,E1,E2,E3 trainClass
+    class F,F1,F2,F3 appClass
+    class G,G1,G2,G3 extClass
+    class H,H1,H2,H3 utilClass
+```
+
+### Textual Mind Map
+
+For reference, here's the hierarchical organization with dependency arrows (→):
+
+```
+GFlowNet.jl (Main Module: Includes/Exports All)
+├── Core Foundations
+│   ├── core/types.jl (AbstractState, GFlowNetModel, Policies)
+│   │   → Used by: All (base types)
+│   └── core/dag.jl (DAG Creation/Manipulation)
+│       → Used by: GFlowNetModel, sampling.jl
+├── Algorithms (Core Engine)
+│   ├── core/algorithms/sampling.jl (Trajectory Sampling)
+│   │   → Depends on: policies/, dag.jl
+│   │   → Used by: trainer.jl, applications/
+│   ├── core/algorithms/probabilities.jl (Transition Probs)
+│   │   → Depends on: policies/
+│   │   → Used by: objectives.jl, flows.jl
+│   ├── core/algorithms/flows.jl (Flow Computation)
+│   │   → Depends on: probabilities.jl, policies/flow.jl
+│   │   → Used by: objectives.jl, trainer.jl
+│   ├── core/algorithms/objectives.jl (Losses like Trajectory Balance)
+│   │   → Depends on: flows.jl, probabilities.jl
+│   │   → Used by: trainer.jl, optimization.jl
+│   └── core/algorithms/partition.jl (Z Estimation)
+│       → Depends on: flows.jl
+│       → Used by: objectives.jl, trainer.jl
+├── Policies (Decision Making)
+│   ├── core/policies/base.jl (Shared Utils)
+│   │   → Used by: forward.jl, backward.jl, flow.jl
+│   ├── core/policies/forward.jl (Forward Policy)
+│   │   → Used by: sampling.jl, probabilities.jl
+│   ├── core/policies/backward.jl (Backward Policy)
+│   │   → Used by: objectives.jl (for balance losses)
+│   └── core/policies/flow.jl (Flow Estimator)
+│       → Used by: flows.jl
+├── Training (Optimization Loop)
+│   ├── training/config.jl (Enums/Configs)
+│   │   → Used by: trainer.jl, optimization.jl
+│   ├── training/optimization.jl (Gradients/Updates)
+│   │   → Depends on: objectives.jl
+│   │   → Used by: trainer.jl
+│   └── training/trainer.jl (Main Train Loop)
+│       → Depends on: All algorithms, policies, config.jl, optimization.jl
+│       → Used by: Applications, extensions
+├── Applications (Domain-Specific)
+│   ├── applications/active_learning.jl (States/Actions/Rewards)
+│   │   → Extends: types.jl, uses trainer.jl
+│   ├── applications/causal_discovery.jl (DAG Building)
+│   │   → Extends: types.jl, uses trainer.jl
+│   └── applications/molecular_design.jl (Molecule Generation)
+│       → Extends: types.jl, uses trainer.jl
+├── Extensions (Advanced Features)
+│   ├── extensions/continuous.jl (Continuous Spaces)
+│   │   → Modifies: sampling.jl, policies/
+│   ├── extensions/information.jl (Entropy/KL Metrics)
+│   │   → Uses: flows.jl, sampling.jl
+│   └── extensions/non_acyclic.jl (Cyclic Networks)
+│       → Modifies: dag.jl, sampling.jl
+└── Utils (Support Tools)
+    ├── utils/rewards.jl (Reward Framework)
+    │   → Used by: flows.jl, objectives.jl, applications/
+    ├── utils/logging.jl (Logging)
+    │   → Used by: trainer.jl
+    └── utils/visualization.jl (Plots)
+        → Used by: trainer.jl, applications/
+```
+
+### Color Legend
+- 🔴 **Main Module**: Entry point and orchestration
+- 🔵 **Core Foundations**: Basic types and DAG structures  
+- 🟣 **Algorithms**: Core computational engine
+- 🟢 **Policies**: Neural network decision making
+- 🟠 **Training**: Optimization and learning loop
+- 🟤 **Applications**: Domain-specific implementations
+- 🟡 **Extensions**: Advanced features and modifications
+- 🟨 **Utils**: Supporting tools and utilities
+

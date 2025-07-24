@@ -267,10 +267,84 @@ function sample_trajectory(model::GFlowNetModel, rng=nothing)
         # Sample next state
         next_state_idx = sample(1:length(next_states), Weights(probs))
         next_state = next_states[next_state_idx]
-        
+
         push!(states, next_state)
         current_state = next_state
     end
-    
+
     return Trajectory(states)
-end 
+end
+
+"""
+    sample_trajectory_with_exploration(model::GFlowNetModel, epsilon::Float64=0.1, temperature::Float64=1.0, rng=nothing)
+
+ENHANCED sampling function with ε-greedy exploration and temperature scaling.
+This addresses the exploration issue identified in the core framework analysis.
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model
+- `epsilon::Float64`: Probability of taking random action (exploration rate)
+- `temperature::Float64`: Temperature for softmax (higher = more exploration)
+- `rng`: Random number generator
+
+# Returns
+- `Trajectory`: Sampled trajectory with enhanced exploration
+"""
+function sample_trajectory_with_exploration(model::GFlowNetModel, epsilon::Float64=0.1, temperature::Float64=1.0, rng=nothing)
+    if isnothing(rng)
+        rng = Random.default_rng()
+    end
+
+    states = [model.dag.initial_state]
+    actions = []
+
+    current_state = model.dag.initial_state
+
+    while current_state ∉ model.dag.terminal_states
+        # Get all possible next states
+        next_states = get_next_states(model.dag, current_state)
+        if isempty(next_states)
+            break
+        end
+
+        # ε-greedy exploration
+        if rand(rng) < epsilon
+            # EXPLORATION: Random action
+            next_state_idx = rand(rng, 1:length(next_states))
+            next_state = next_states[next_state_idx]
+        else
+            # EXPLOITATION: Use neural network policy with temperature
+            features = state_to_features(current_state)
+
+            # Use safe model call to get logits
+            logits, _ = safe_model_call(
+                model.forward_policy.model,
+                features,
+                model.parameters.forward,
+                model.states.forward
+            )
+
+            next_state_indices = [model.dag.state_to_idx[s] for s in next_states]
+            relevant_logits = logits[next_state_indices]
+
+            # CORRECTED: Apply temperature scaling for exploration
+            relevant_logits = clamp.(relevant_logits ./ temperature, -20.0f0, 20.0f0)
+            probs = softmax(relevant_logits)
+
+            # Ensure probabilities are valid (no NaN/Inf)
+            if any(isnan.(probs)) || any(isinf.(probs))
+                # Fallback to uniform distribution if numerical issues
+                probs = fill(1.0f0 / length(next_states), length(next_states))
+            end
+
+            # Sample next state based on policy
+            next_state_idx = sample(1:length(next_states), Weights(probs))
+            next_state = next_states[next_state_idx]
+        end
+
+        push!(states, next_state)
+        current_state = next_state
+    end
+
+    return Trajectory(states)
+end
