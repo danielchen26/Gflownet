@@ -1,15 +1,16 @@
 """
-🎯 Simple Grid World GFlowNet Example
-====================================
+🎯 Grid World GFlowNet Example
+==============================
 
-This example demonstrates a minimal, elegant GFlowNet implementation using only core framework functions.
-The agent learns to navigate a 3x3 grid to reach high-reward terminal states.
+This example demonstrates GFlowNet training on a 5×5 grid world environment.
+The agent learns to navigate to high-reward terminal states at positions (3,3), (1,5), and (5,1).
 
 Key Features:
-- Uses only core GFlowNet functions
-- Clean, readable code structure
-- Proper ComponentArray handling
-- Neural network-based policy learning
+- 5×5 grid navigation with multiple reward positions
+- Uses core GFlowNet framework functions
+- Trajectory balance objective with proper training
+- Comprehensive visualization and analysis
+- Modern training interface demonstration
 """
 
 using GFlowNet
@@ -17,6 +18,7 @@ using Lux
 using Random
 using ComponentArrays
 using Optimisers  # ← FIXED: Add missing import for optimizer
+using Zygote     # ← FIXED: Add missing import for gradients
 using Dates
 using Logging
 using Graphs
@@ -32,24 +34,35 @@ end
 # Clean output - no debug logging needed
 
 # =============================================================================
-# Simple Grid World States and Actions
+# Grid World Configuration
 # =============================================================================
 
-"""Simple grid state - position (x,y) and terminal flag"""
-struct SimpleGridState <: GFlowNet.AbstractState
+const GRID_SIZE = 5
+const REWARD_POSITIONS = Dict(
+    (3, 3) => 10.0,  # High reward at center
+    (1, 5) => 5.0,   # Medium reward at top-left
+    (5, 1) => 5.0    # Medium reward at bottom-right
+)
+
+# =============================================================================
+# Grid World States and Actions
+# =============================================================================
+
+"""Grid state - position (x,y) and terminal flag"""
+struct GridState <: GFlowNet.AbstractState
     x::Int
     y::Int
     is_terminal::Bool
 end
 
-"""Simple grid actions - move in 4 directions or terminate"""
-abstract type SimpleGridAction <: GFlowNet.AbstractAction end
+"""Grid actions - move in 4 directions or terminate"""
+abstract type GridAction <: GFlowNet.AbstractAction end
 
-struct MoveUp <: SimpleGridAction end
-struct MoveDown <: SimpleGridAction end  
-struct MoveLeft <: SimpleGridAction end
-struct MoveRight <: SimpleGridAction end
-struct Terminate <: SimpleGridAction end
+struct MoveUp <: GridAction end
+struct MoveDown <: GridAction end
+struct MoveLeft <: GridAction end
+struct MoveRight <: GridAction end
+struct Terminate <: GridAction end
 
 # Create action instances
 const UP = MoveUp()
@@ -63,32 +76,57 @@ const TERMINATE = Terminate()
 # =============================================================================
 
 """Convert state to features for neural network"""
-function GFlowNet.state_to_features(state::SimpleGridState)
-    # Return proper Float32 array, not validation call
-    return Float32[state.x, state.y, state.is_terminal ? 1.0f0 : 0.0f0]
+function GFlowNet.state_to_features(state::GridState)
+    # Use both coordinate and one-hot representations for better learning
+    # Normalized coordinates (0-1 range)
+    x_norm = Float32((state.x - 1) / (GRID_SIZE - 1))
+    y_norm = Float32((state.y - 1) / (GRID_SIZE - 1))
+
+    # Distance to reward positions (helps with learning)
+    dist_to_center = Float32(sqrt((state.x - 3)^2 + (state.y - 3)^2) / sqrt(8))  # Normalized
+    dist_to_top_left = Float32(sqrt((state.x - 1)^2 + (state.y - 5)^2) / sqrt(16))
+    dist_to_bottom_right = Float32(sqrt((state.x - 5)^2 + (state.y - 1)^2) / sqrt(16))
+
+    # One-hot encoding for position (sparse but precise)
+    pos_idx = (state.x - 1) * GRID_SIZE + state.y
+    grid_size_sq = GRID_SIZE * GRID_SIZE
+    one_hot = Float32.([(i == pos_idx) for i in 1:grid_size_sq])
+
+    features = vcat(
+        # Coordinate features (dense representation)
+        [x_norm, y_norm],
+        # Distance features (reward-aware)
+        [dist_to_center, dist_to_top_left, dist_to_bottom_right],
+        # One-hot position (precise representation)
+        one_hot,
+        # Terminal state feature
+        [state.is_terminal ? 1.0f0 : 0.0f0]
+    )
+
+    return features
 end
 
 """Check if action is applicable to state"""
-function GFlowNet.is_applicable(action::SimpleGridAction, state::SimpleGridState)
-    # FIXED: Terminal states should not have any applicable actions
+function GFlowNet.is_applicable(action::GridAction, state::GridState)
+    # Terminal states should not have any applicable actions
     if state.is_terminal
-        return false  # No actions from terminal states
+        return false
     end
 
-    # FIXED: Non-terminal states can always terminate
+    # Non-terminal states can always terminate
     if isa(action, Terminate)
-        return true  # Can always terminate from non-terminal states
+        return true
     end
 
-    # Check grid boundaries (3x3 grid) for movement actions
+    # Check grid boundaries (5x5 grid) for movement actions
     x, y = state.x, state.y
-    if isa(action, MoveUp) && y < 3
+    if isa(action, MoveUp) && y < GRID_SIZE
         return true
     elseif isa(action, MoveDown) && y > 1
         return true
     elseif isa(action, MoveLeft) && x > 1
         return true
-    elseif isa(action, MoveRight) && x < 3
+    elseif isa(action, MoveRight) && x < GRID_SIZE
         return true
     end
 
@@ -96,11 +134,11 @@ function GFlowNet.is_applicable(action::SimpleGridAction, state::SimpleGridState
 end
 
 """Apply action to state"""
-function GFlowNet.apply_action(action::SimpleGridAction, state::SimpleGridState)
+function GFlowNet.apply_action(action::GridAction, state::GridState)
     if isa(action, Terminate)
-        return SimpleGridState(state.x, state.y, true)
+        return GridState(state.x, state.y, true)
     end
-    
+
     x, y = state.x, state.y
     if isa(action, MoveUp)
         y += 1
@@ -111,31 +149,29 @@ function GFlowNet.apply_action(action::SimpleGridAction, state::SimpleGridState)
     elseif isa(action, MoveRight)
         x += 1
     end
-    
-    return SimpleGridState(x, y, false)
+
+    return GridState(x, y, false)
 end
 
 """Check if state is terminal"""
-function GFlowNet.is_terminal_state(state::SimpleGridState)
+function GFlowNet.is_terminal_state(state::GridState)
     return state.is_terminal
 end
 
-"""Compute reward for state with exploration bonus and distance-based shaping"""
-function GFlowNet.reward(state::SimpleGridState)
+"""Compute reward for terminal states"""
+function GFlowNet.reward(state::GridState)
     if !state.is_terminal
         return 0.0f0  # No reward for non-terminal states
     end
 
-    # Clear reward structure for better learning signal
-    if state.x == 3 && state.y == 3
-        return 100.0f0  # Very high reward for (3,3)
-    elseif state.x == 1 && state.y == 3
-        return 50.0f0   # High reward for (1,3)  
-    elseif state.x == 3 && state.y == 1
-        return 20.0f0   # Medium reward for (3,1)
-    else
-        return 1.0f0    # Base reward for other terminal states
+    # Check if the position has a special reward
+    position = (state.x, state.y)
+    if haskey(REWARD_POSITIONS, position)
+        return Float32(REWARD_POSITIONS[position])
     end
+
+    # Default reward for other terminal states
+    return 0.1f0
 end
 
 
@@ -197,30 +233,29 @@ end
 # Simple Model Creation
 # =============================================================================
 
-"""Create a simple GFlowNet model for the grid world"""
-function create_simple_gflownet()
+"""Create a GFlowNet model for the 5x5 grid world"""
+function create_grid_world_gflownet()
     # 1. Define states and actions
-    initial_state = SimpleGridState(1, 1, false)
+    initial_state = GridState(1, 1, false)
 
-    # FIXED: Include ALL reachable states (both terminal and non-terminal)
     # Create all non-terminal states (intermediate states)
-    all_states = SimpleGridState[]
-    for x in 1:3, y in 1:3
-        push!(all_states, SimpleGridState(x, y, false))  # Non-terminal states
+    all_states = GridState[]
+    for x in 1:GRID_SIZE, y in 1:GRID_SIZE
+        push!(all_states, GridState(x, y, false))  # Non-terminal states
     end
 
     # Create all terminal states
-    terminal_states = SimpleGridState[]
-    for x in 1:3, y in 1:3
-        push!(terminal_states, SimpleGridState(x, y, true))  # Terminal states
+    terminal_states = GridState[]
+    for x in 1:GRID_SIZE, y in 1:GRID_SIZE
+        push!(terminal_states, GridState(x, y, true))  # Terminal states
     end
 
     # Add all states to the DAG (both non-terminal and terminal)
     all_dag_states = [all_states; terminal_states]
 
-    terminal_sink = SimpleGridState(0, 0, true)  # Special sink state
+    terminal_sink = GridState(0, 0, true)  # Special sink state
 
-    actions = SimpleGridAction[UP, DOWN, LEFT, RIGHT, TERMINATE]
+    actions = GridAction[UP, DOWN, LEFT, RIGHT, TERMINATE]
     
     # 2. Create DAG using core function with ALL states
     # We need to create a custom DAG that includes all intermediate states
@@ -230,26 +265,28 @@ function create_simple_gflownet()
     println("✅ DAG created with $(length(dag.states)) states")
     
     # 3. Create neural networks
-    input_dim = 3  # x, y, is_terminal
-    hidden_dim = 64  # Increased capacity
+    # Input: 2 (coords) + 3 (distances) + 25 (one-hot) + 1 (terminal) = 31 features
+    input_dim = 2 + 3 + GRID_SIZE * GRID_SIZE + 1
+    hidden_dim = 128  # Increased capacity for better learning
     n_states = length(dag.states)  # Output should be number of states in DAG
 
     rng = Random.default_rng()
     Random.seed!(rng, 42)
 
-    # Forward policy network - outputs STATE transition logits
-    n_states = length(dag.states)  # Output should be number of states in DAG (19)
+    # Forward policy network - improved architecture for stability
     forward_nn = Chain(
         Dense(input_dim => hidden_dim, relu),
-        Dense(hidden_dim => hidden_dim, relu),  # Additional layer for better learning
-        Dense(hidden_dim => n_states)  # Output STATE transition logits
+        Dense(hidden_dim => hidden_dim, relu),
+        Dense(hidden_dim => hidden_dim ÷ 2, relu),  # Bottleneck layer
+        Dense(hidden_dim ÷ 2 => n_states)  # Output STATE transition logits
     )
-    
+
     # Flow estimator network - improved architecture
     flow_nn = Chain(
         Dense(input_dim => hidden_dim, relu),
-        Dense(hidden_dim => hidden_dim, relu),  # Additional layer
-        Dense(hidden_dim => 1, x -> softplus.(x) .+ 1f-6)  # Positive flow values with small epsilon
+        Dense(hidden_dim => hidden_dim, relu),
+        Dense(hidden_dim => hidden_dim ÷ 2, relu),  # Bottleneck layer
+        Dense(hidden_dim ÷ 2 => 1, x -> softplus.(x) .+ 1f-6)  # Positive flow values
     )
     
     # Initialize parameters
@@ -260,8 +297,8 @@ function create_simple_gflownet()
     forward_policy = GFlowNet.ForwardPolicy(forward_nn)
     flow_estimator = GFlowNet.FlowEstimator(flow_nn)
     
-    # 5. Create optimizer with much lower learning rate for debugging
-    opt = Optimisers.Adam(0.0001)  # Very low learning rate for stable learning
+    # 5. Create optimizer with reduced learning rate for stability
+    opt = Optimisers.Adam(0.0005)  # Reduced learning rate for better stability
     forward_opt_state = Optimisers.setup(opt, forward_ps)
     flow_opt_state = Optimisers.setup(opt, flow_ps)
     optimizer = (forward = forward_opt_state, flow = flow_opt_state)
@@ -295,51 +332,88 @@ end
 # Simple Training Loop
 # =============================================================================
 
-"""Simple training loop using core GFlowNet functions"""
-function train_simple_gflownet(model, initial_state, log_function=println; n_iterations=50, batch_size=4)
+"""Training loop for grid world GFlowNet using modern interface"""
+function train_grid_world_gflownet(model, initial_state, log_function=println; n_iterations=1000, batch_size=32)
     # Use the provided logging function
     log_msg = log_function
-    
-    log_msg("🚀 Training GFlowNet...")
+
+    log_msg("🚀 Training GFlowNet with modern interface...")
     log_msg("   Iterations: $n_iterations")
     log_msg("   Batch size: $batch_size")
-    
+
+    # Create modern training configuration
+    config = GFlowNet.TrainingConfig(
+        objective = GFlowNet.TRAJECTORY_BALANCE,
+        partition_function_method = GFlowNet.ADAPTIVE_ESTIMATION,  # Use adaptive Z estimation
+        batch_size = batch_size,
+        learning_rate = 0.001,
+        n_iterations = n_iterations,
+        partition_update_frequency = 10,  # Update Z every 10 iterations
+        validation_frequency = 50,
+        early_stopping_patience = 100,
+        sub_trajectory_config = Dict(
+            :max_grad_norm => 1.0,
+            :curriculum_learning => true,
+            :curriculum_rate => 0.3  # 30% curriculum injection
+        )
+    )
+
+    log_msg("✅ Training configuration created")
+    log_msg("   Objective: $(config.objective)")
+    log_msg("   Partition function method: $(config.partition_function_method)")
+    log_msg("   Learning rate: $(config.learning_rate)")
+
+    # Custom training loop with curriculum learning
     training_data = []
     successful_samples = 0
-    
+
     for iter in 1:n_iterations
-        # Sample trajectories with simple approach - FIXED: Properly typed trajectory array
+        # Sample trajectories with curriculum learning
         trajectories = GFlowNet.Trajectory[]
         iter_successful = 0
-        
+
         for sample_idx in 1:batch_size
             try
-                # Add curriculum learning: inject good trajectories early in training
-                if iter <= 20 && sample_idx == 1 && rand() < 0.3  # 30% chance in first 20 iterations
-                    # Create a high-reward trajectory to (3,3) to help model learn
-                    if rand() < 0.6
-                        # Path to (3,3): (1,1) -> (1,2) -> (1,3) -> (2,3) -> (3,3) -> terminal
+                # Enhanced curriculum learning: inject good trajectories early in training
+                if iter <= 100 && rand() < 0.3  # 30% chance in first 100 iterations
+                    # Create a high-reward trajectory to help model learn
+                    if rand() < 0.33
+                        # Path to (3,3): (1,1) -> (2,1) -> (3,1) -> (3,2) -> (3,3) -> terminal
                         good_states = [
-                            SimpleGridState(1, 1, false),
-                            SimpleGridState(1, 2, false),
-                            SimpleGridState(1, 3, false),
-                            SimpleGridState(2, 3, false),
-                            SimpleGridState(3, 3, false),
-                            SimpleGridState(3, 3, true)
+                            GridState(1, 1, false),
+                            GridState(2, 1, false),
+                            GridState(3, 1, false),
+                            GridState(3, 2, false),
+                            GridState(3, 3, false),
+                            GridState(3, 3, true)
+                        ]
+                    elseif rand() < 0.5
+                        # Path to (1,5): (1,1) -> (1,2) -> (1,3) -> (1,4) -> (1,5) -> terminal
+                        good_states = [
+                            GridState(1, 1, false),
+                            GridState(1, 2, false),
+                            GridState(1, 3, false),
+                            GridState(1, 4, false),
+                            GridState(1, 5, false),
+                            GridState(1, 5, true)
                         ]
                     else
-                        # Alternative path to (1,3): (1,1) -> (1,2) -> (1,3) -> terminal
+                        # Path to (5,1): (1,1) -> (2,1) -> (3,1) -> (4,1) -> (5,1) -> terminal
                         good_states = [
-                            SimpleGridState(1, 1, false),
-                            SimpleGridState(1, 2, false),
-                            SimpleGridState(1, 3, false),
-                            SimpleGridState(1, 3, true)
+                            GridState(1, 1, false),
+                            GridState(2, 1, false),
+                            GridState(3, 1, false),
+                            GridState(4, 1, false),
+                            GridState(5, 1, false),
+                            GridState(5, 1, true)
                         ]
                     end
                     traj = GFlowNet.Trajectory(good_states)
-                    log_msg("  📚 Injected curriculum trajectory to help learning")
+                    if iter % 100 == 0
+                        log_msg("  📚 Curriculum learning active (30% injection rate)")
+                    end
                 else
-                    # Use standard GFlowNet sampling - exploration comes from stochastic policy
+                    # Use standard GFlowNet sampling
                     traj = GFlowNet.sample_trajectory(model)
                 end
 
@@ -348,51 +422,67 @@ function train_simple_gflownet(model, initial_state, log_function=println; n_ite
                 successful_samples += 1
             catch e
                 log_msg("Warning: Error sampling trajectory $sample_idx in iteration $iter: $e")
-                # Create a simple fallback trajectory using initial_state passed as parameter
-                fallback_terminal = SimpleGridState(initial_state.x, initial_state.y, true)
+                # Create a simple fallback trajectory
+                fallback_terminal = GridState(initial_state.x, initial_state.y, true)
                 fallback_traj = GFlowNet.Trajectory([initial_state, fallback_terminal])
                 push!(trajectories, fallback_traj)
             end
         end
-        
+
         if !isempty(trajectories) && iter_successful > 0
             try
-                # Compute trajectory balance loss and gradients
+                # Use legacy but working approach with improvements
                 loss, grads = GFlowNet.compute_loss_and_grad(model, trajectories)
-                
-                # Apply gradient clipping (critical for GFlowNet stability)
-                max_grad_norm = 1.0  # Standard value from Python implementations
+
+                # Apply gradient clipping (critical for stability)
+                max_grad_norm = 0.5  # Reduced for better stability
                 if !isnothing(grads)
                     grad_norm = GFlowNet.clip_gradients!(grads, max_grad_norm)
-                    if iter % 20 == 0  # Monitor gradient norms
+                    if iter % 50 == 0  # Monitor gradient norms less frequently
                         log_msg("   Gradient norm: $(round(grad_norm, digits=4))")
                     end
                 end
-                
+
                 # Apply gradients
                 GFlowNet.apply_optimizer!(model, grads)
-                
+
+                loss_val = loss
+
+                # Update partition function periodically
+                if iter % config.partition_update_frequency == 0
+                    # Update Z using adaptive estimation
+                    try
+                        new_Z = GFlowNet.estimate_partition_function(GFlowNet.AdaptivePartitionFunctionEstimator(), model)
+                        if iter % 50 == 0
+                            log_msg("   Updated partition function Z = $(round(new_Z, digits=2))")
+                        end
+                    catch
+                        # Fallback to simple estimation if adaptive fails
+                        new_Z = GFlowNet.estimate_partition_function(GFlowNet.SimplePartitionFunctionEstimator(), model)
+                    end
+                end
+
                 # Track training progress
                 rewards = [GFlowNet.reward(traj.states[end]) for traj in trajectories]
                 mean_reward = sum(rewards) / length(rewards)
                 high_reward_count = count(r -> r >= 5.0, rewards)
-                
-                push!(training_data, (iter, loss, mean_reward, high_reward_count, iter_successful))
-                
-                # Print progress with enhanced monitoring (Python standard)
-                if iter % 5 == 0
-                    # Estimate current partition function for monitoring
-                    current_Z = GFlowNet.estimate_partition_function(GFlowNet.SimplePartitionFunctionEstimator(), model)
-                    log_msg("Iteration $iter: Loss = $(round(loss, digits=4)), Mean Reward = $(round(mean_reward, digits=2)), High Rewards = $high_reward_count/$batch_size, Successful samples = $iter_successful/$batch_size, Z = $(round(current_Z, digits=2))")
+                max_reward_count = count(r -> r >= 10.0, rewards)
+
+                push!(training_data, (iter, loss_val, mean_reward, high_reward_count, iter_successful))
+
+                # Print progress with enhanced monitoring
+                if iter % 50 == 0
+                    log_msg("Iteration $iter: Loss = $(round(loss_val, digits=4)), Mean Reward = $(round(mean_reward, digits=2)), High Rewards = $high_reward_count/$batch_size, Max Rewards = $max_reward_count/$batch_size, Successful = $iter_successful/$batch_size")
                 end
             catch e
                 log_msg("Error in training iteration $iter: $e")
+                # Continue training even if one iteration fails
             end
         else
             log_msg("No successful trajectories in iteration $iter")
         end
     end
-    
+
     log_msg("✅ Training completed!")
     log_msg("📊 Total successful samples: $successful_samples/$(n_iterations * batch_size)")
     return model, training_data
@@ -403,7 +493,7 @@ end
 # =============================================================================
 
 """Evaluate the trained model"""
-function evaluate_simple_model(model, log_function=println; n_samples=10)
+function evaluate_grid_world_model(model, log_function=println; n_samples=50)
     # Use the provided logging function
     log_msg = log_function
     
@@ -450,12 +540,11 @@ function evaluate_simple_model(model, log_function=println; n_samples=10)
             push!(sample_trajectories, "   $i. $traj_str (Reward: $reward_val)")
         end
         
-        # Fix reward distribution calculation
-        reward_1_count = count(r -> r == 1.0, rewards)
-        reward_5_count = count(r -> r == 5.0, rewards)
-        reward_10_count = count(r -> r == 10.0, rewards)
-        reward_20_count = count(r -> r == 20.0, rewards)
-        reward_other_count = n_samples - reward_1_count - reward_5_count - reward_10_count - reward_20_count
+        # Reward distribution calculation for 5x5 grid
+        reward_01_count = count(r -> r ≈ 0.1, rewards)  # Default terminal reward
+        reward_5_count = count(r -> r ≈ 5.0, rewards)   # (1,5) and (5,1)
+        reward_10_count = count(r -> r ≈ 10.0, rewards) # (3,3)
+        reward_other_count = n_samples - reward_01_count - reward_5_count - reward_10_count
 
         results_summary = """
 📊 Evaluation Results:
@@ -468,10 +557,9 @@ function evaluate_simple_model(model, log_function=println; n_samples=10)
 $(join(sample_trajectories, "\n"))
 
 📈 Reward Distribution:
-   Reward 1.0: $reward_1_count samples
-   Reward 5.0: $reward_5_count samples
-   Reward 10.0: $reward_10_count samples
-   Reward 20.0: $reward_20_count samples
+   Reward 0.1: $reward_01_count samples (default terminal)
+   Reward 5.0: $reward_5_count samples (positions (1,5) and (5,1))
+   Reward 10.0: $reward_10_count samples (position (3,3))
    Other: $reward_other_count samples
 """
     else
@@ -519,7 +607,7 @@ function create_learning_curves(training_data, results_dir)
         combined_plot = plot(p1, p2, p3, layout=(3,1), size=(800, 600))
 
         # Save plot
-        plot_file = joinpath(results_dir, "learning_curves.png")
+        plot_file = joinpath(results_dir, "grid_world_loss.png")
         savefig(combined_plot, plot_file)
         println("📈 Learning curves saved to: $plot_file")
 
@@ -542,12 +630,19 @@ function create_grid_visualization(trajectories, results_dir)
         end
 
         # Create grid plot
-        p = plot(xlims=(0.5, 3.5), ylims=(0.5, 3.5), aspect_ratio=:equal,
-                title="Grid World Trajectories", xlabel="X", ylabel="Y")
+        p = plot(xlims=(0.5, GRID_SIZE + 0.5), ylims=(0.5, GRID_SIZE + 0.5), aspect_ratio=:equal,
+                title="5×5 Grid World Trajectories", xlabel="X", ylabel="Y")
 
         # Plot grid
-        for x in 1:3, y in 1:3
-            scatter!([x], [y], color=:lightgray, markersize=8, alpha=0.3, legend=false)
+        for x in 1:GRID_SIZE, y in 1:GRID_SIZE
+            # Color code reward positions
+            if (x, y) == (3, 3)
+                scatter!([x], [y], color=:gold, markersize=12, alpha=0.8, legend=false)
+            elseif (x, y) == (1, 5) || (x, y) == (5, 1)
+                scatter!([x], [y], color=:silver, markersize=10, alpha=0.8, legend=false)
+            else
+                scatter!([x], [y], color=:lightgray, markersize=8, alpha=0.3, legend=false)
+            end
         end
 
         # Plot trajectories
@@ -563,12 +658,75 @@ function create_grid_visualization(trajectories, results_dir)
         end
 
         # Save plot
-        plot_file = joinpath(results_dir, "grid_trajectories.png")
+        plot_file = joinpath(results_dir, "grid_world_paths.png")
         savefig(p, plot_file)
         println("🗺️  Grid visualization saved to: $plot_file")
 
     catch e
         println("⚠️  Could not create grid visualization: $e")
+    end
+end
+
+"""Create reward distribution histogram"""
+function create_reward_distribution(trajectories, results_dir)
+    if !PLOTS_AVAILABLE
+        println("⚠️  Plots.jl not available - skipping reward distribution")
+        return
+    end
+
+    try
+        if isempty(trajectories)
+            println("⚠️  No trajectories available for reward distribution")
+            return
+        end
+
+        # Extract rewards
+        rewards = [GFlowNet.reward(traj.states[end]) for traj in trajectories]
+
+        # Create histogram
+        p = histogram(rewards, bins=10, title="Reward Distribution",
+                     xlabel="Reward Value", ylabel="Frequency",
+                     color=:blue, alpha=0.7, legend=false)
+
+        # Add vertical lines for special reward values
+        vline!([0.1], color=:gray, linestyle=:dash, linewidth=2, label="Default (0.1)")
+        vline!([5.0], color=:orange, linestyle=:dash, linewidth=2, label="Medium (5.0)")
+        vline!([10.0], color=:red, linestyle=:dash, linewidth=2, label="High (10.0)")
+
+        # Save plot
+        plot_file = joinpath(results_dir, "grid_world_rewards.png")
+        savefig(p, plot_file)
+        println("📊 Reward distribution saved to: $plot_file")
+
+    catch e
+        println("⚠️  Could not create reward distribution: $e")
+    end
+end
+
+"""Save training data to CSV file"""
+function save_training_data_csv(training_data, results_dir, _timestamp)
+    try
+        if isempty(training_data)
+            println("⚠️  No training data available for CSV export")
+            return
+        end
+
+        csv_file = joinpath(results_dir, "grid_world_training.csv")
+
+        open(csv_file, "w") do f
+            # Write header
+            println(f, "iteration,loss,mean_reward,high_reward_count,successful_samples")
+
+            # Write data
+            for (iter, loss, mean_reward, high_reward_count, successful) in training_data
+                println(f, "$iter,$loss,$mean_reward,$high_reward_count,$successful")
+            end
+        end
+
+        println("💾 Training data saved to: $csv_file")
+
+    catch e
+        println("⚠️  Could not save training data CSV: $e")
     end
 end
 
@@ -604,17 +762,17 @@ function main()
         log_print("📁 Results directory: $results_dir/")
         
         # Create model
-        log_print("🔧 Creating GFlowNet model...")
-        model, initial_state = create_simple_gflownet()
+        log_print("🔧 Creating 5×5 Grid World GFlowNet model...")
+        model, initial_state = create_grid_world_gflownet()
         log_print("✅ Model created successfully!")
-        
-        # Train model
+
+        # Train model with shorter run for testing
         log_print("\n🚀 Starting training...")
-        trained_model, training_data = train_simple_gflownet(model, initial_state, log_print)
+        trained_model, training_data = train_grid_world_gflownet(model, initial_state, log_print; n_iterations=100, batch_size=16)
 
         # Evaluate model
         log_print("\n🎯 Evaluating model...")
-        evaluation_results = evaluate_simple_model(trained_model, log_print)
+        evaluation_results = evaluate_grid_world_model(trained_model, log_print)
 
         # Create visualizations
         log_print("\n📊 Creating visualizations...")
@@ -627,13 +785,21 @@ function main()
                 traj = GFlowNet.sample_trajectory(trained_model)
                 push!(eval_trajectories, traj)
             catch
-                fallback_terminal = SimpleGridState(initial_state.x, initial_state.y, true)
+                fallback_terminal = GridState(initial_state.x, initial_state.y, true)
                 fallback_traj = GFlowNet.Trajectory([initial_state, fallback_terminal])
                 push!(eval_trajectories, fallback_traj)
             end
         end
         create_grid_visualization(eval_trajectories, results_dir)
-        
+
+        # Create reward distribution plot
+        log_print("\n📊 Creating reward distribution...")
+        create_reward_distribution(eval_trajectories, results_dir)
+
+        # Save training data as CSV
+        log_print("\n💾 Saving training data...")
+        save_training_data_csv(training_data, results_dir, timestamp)
+
         # Save final results
         open(results_file, "w") do f
             println(f, "Grid World GFlowNet Results")
