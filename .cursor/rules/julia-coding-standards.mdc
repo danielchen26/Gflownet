@@ -1,0 +1,122 @@
+---
+globs: *.jl
+description: Julia coding standards and best practices for GFlowNet development
+---
+
+# Julia Coding Standards for GFlowNet
+
+## Type System Best Practices
+
+### Abstract Types and Interfaces
+- Use `AbstractState` and `AbstractAction` as base types for all domain implementations
+- Implement required interface methods for all concrete types:
+  ```julia
+  function state_to_features(state::YourState)
+  function is_applicable(action::YourAction, state::YourState)
+  function apply_action(action::YourAction, state::YourState)
+  function reward(state::YourState)
+  ```
+
+### Type Annotations
+- Always use concrete types in struct definitions
+- Use parametric types for containers: `Vector{<:Trajectory}`, `Dict{S, Vector{A}}`
+- Prefer `ComponentArray` over `NamedTuple` for gradient-compatible parameters
+
+## Numerical Stability
+
+### Float32 Consistency
+- Use `Float32` for all neural network computations
+- Convert inputs: `features = Float32.(state.data)`
+- Use explicit constructors: `Float32(1.0)` instead of `1.0f0`
+
+### Validation Requirements
+- Validate all rewards are positive (GFlowNet mathematical requirement)
+- Check for NaN/Inf values in neural network inputs/outputs
+- Clamp extreme values: `clamp.(features, Float32(-1e10), Float32(1e10))`
+
+### Numerical Safety
+```julia
+# Safe reward handling
+reward_safe = max(reward_value, 1e-8)
+log_reward = log(reward_safe)
+
+# Safe probability computation
+prob = max(prob, 1e-10)
+log_prob = log(prob)
+```
+
+## Neural Network Integration (Lux.jl)
+
+### Model Application Pattern
+```julia
+# Proper feature reshaping for batch dimension
+features_matrix = reshape(features, :, 1)
+
+# Safe model call with error handling
+try
+    outputs, new_states = model(features_matrix, parameters, states)
+    outputs = vec(outputs)  # Remove batch dimension if needed
+catch e
+    @error "Neural network failed" error=e
+    rethrow(e)
+end
+```
+
+### Parameter Structure
+- Always use `ComponentArray` for parameters
+- Structure: `ComponentArray(forward=..., backward=..., flow=...)`
+- Validate parameter consistency before model creation
+
+## Error Handling and Debugging
+
+### Comprehensive Validation
+- Validate trajectory types: `Vector{<:Trajectory}` not `Vector{Any}`
+- Check state consistency in trajectories
+- Validate parameter structures before gradient computation
+
+### Informative Error Messages
+```julia
+if !isa(trajectories, Vector{<:Trajectory})
+    error("trajectories must be Vector{<:Trajectory}, got $(typeof(trajectories))")
+end
+```
+
+## Performance Optimizations
+
+### Caching and Memoization
+- Use action caches in DAG: `action_cache::Dict{S, Vector{A}}`
+- Clear caches when parameters change: `clear_flow_cache!()`
+- Use thread-local caches to avoid locking
+
+### Memory Management
+- Prefer in-place operations where possible
+- Use `@views` for array slicing to avoid allocations
+- Pre-allocate arrays in training loops
+
+## Documentation Standards
+
+### Function Documentation
+```julia
+"""
+    function_name(arg1::Type1, arg2::Type2)
+
+Brief description of what the function does.
+
+# Arguments
+- `arg1::Type1`: Description of first argument
+- `arg2::Type2`: Description of second argument
+
+# Returns
+- Description of return value
+
+# Example
+```julia
+result = function_name(value1, value2)
+```
+"""
+```
+
+### Comments
+- Use clean, professional comments without development tags
+- Explain **why** not **what** when the code is clear
+- Document mathematical foundations for algorithms

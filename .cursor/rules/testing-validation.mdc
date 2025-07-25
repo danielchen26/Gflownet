@@ -1,0 +1,194 @@
+---
+globs: test/*.jl,examples/*/test*.jl
+description: Testing and validation practices for GFlowNet development
+---
+
+# Testing and Validation for GFlowNet
+
+## Core Functionality Testing
+
+### Mathematical Consistency Tests
+Every GFlowNet implementation must verify:
+
+```julia
+@testset "Mathematical Consistency" begin
+    # Test flow conservation
+    @test abs(total_incoming_flow - total_outgoing_flow) < 1e-6
+    
+    # Test probability normalization
+    probs = get_action_probabilities(model, state)
+    @test abs(sum(probs) - 1.0) < 1e-6
+    
+    # Test positive rewards
+    for terminal_state in terminal_states
+        @test reward(terminal_state) > 0
+    end
+end
+```
+
+### Interface Compliance Tests
+```julia
+@testset "Interface Compliance" begin
+    # Test required interface methods exist
+    @test hasmethod(state_to_features, (YourStateType,))
+    @test hasmethod(is_applicable, (YourActionType, YourStateType))
+    @test hasmethod(apply_action, (YourActionType, YourStateType))
+    @test hasmethod(reward, (YourStateType,))
+    
+    # Test feature dimensions consistency
+    features = state_to_features(test_state)
+    @test isa(features, Vector{Float32})
+    @test length(features) > 0
+end
+```
+
+### Gradient Computation Validation
+```julia
+@testset "Gradient Computation" begin
+    # Test gradient computation doesn't fail
+    loss, grad = compute_loss_and_grad(model, trajectories)
+    @test !isnan(loss)
+    @test !isnothing(grad)
+    
+    # Test gradient structure
+    @test haskey(grad, :forward)
+    if !isnothing(model.backward_policy)
+        @test haskey(grad, :backward)
+    end
+    
+    # Test gradient finiteness
+    @test all(isfinite, grad.forward.weights)
+end
+```
+
+## Example Testing Patterns
+
+### Grid World Example Testing
+Reference pattern from [grid_world.jl](mdc:examples/grid_world/grid_world.jl):
+
+```julia
+@testset "Grid World Functionality" begin
+    # Test state transitions
+    initial_state = SimpleGridState(1, 1, false)
+    action = MoveRightAction()
+    next_state = apply_action(action, initial_state)
+    @test next_state.x == 2
+    
+    # Test reward structure
+    terminal_state = SimpleGridState(3, 3, true)
+    @test reward(terminal_state) ≈ 10.0
+    
+    # Test DAG creation
+    dag = create_simple_dag()
+    @test length(dag.states) > 0
+    @test length(dag.actions) > 0
+end
+```
+
+### Training Integration Testing
+```julia
+@testset "Training Integration" begin
+    # Test model creation
+    model = create_test_model()
+    @test !isnothing(model.forward_policy)
+    @test isa(model.parameters, ComponentArray)
+    
+    # Test trajectory sampling
+    trajectory = sample_trajectory(model)
+    @test isa(trajectory, Trajectory)
+    @test length(trajectory.states) >= 2
+    
+    # Test training step
+    initial_loss = compute_loss(model, [trajectory])
+    update_model_parameters!(model, config, [trajectory])
+    # Training should modify parameters
+end
+```
+
+## Validation Utilities
+
+### Input Validation Patterns
+```julia
+function validate_test_inputs(state, action, model)
+    # State validation
+    @test isa(state, AbstractState)
+    features = state_to_features(state)
+    @test isa(features, Vector{Float32})
+    @test !any(isnan.(features))
+    
+    # Action validation
+    @test isa(action, AbstractAction)
+    @test is_applicable(action, state) isa Bool
+    
+    # Model validation
+    @test isa(model.parameters, ComponentArray)
+    @test haskey(model.parameters, :forward)
+end
+```
+
+### Numerical Stability Checks
+```julia
+function check_numerical_stability(values, name::String)
+    @test !any(isnan.(values)) "$(name) contains NaN values"
+    @test !any(isinf.(values)) "$(name) contains Inf values"
+    @test all(isfinite.(values)) "$(name) contains non-finite values"
+end
+```
+
+## Performance Testing
+
+### Memory and Speed Benchmarks
+```julia
+using BenchmarkTools
+
+@testset "Performance" begin
+    # Test trajectory sampling speed
+    @benchmark sample_trajectory($model) seconds=5
+    
+    # Test gradient computation performance
+    @benchmark compute_loss_and_grad($model, $trajectories) seconds=10
+    
+    # Memory allocation tests
+    allocs = @allocated begin
+        for _ in 1:100
+            sample_trajectory(model)
+        end
+    end
+    @test allocs < 1_000_000  # Less than 1MB for 100 samples
+end
+```
+
+## Error Handling Tests
+
+### Robustness Testing
+```julia
+@testset "Error Handling" begin
+    # Test invalid inputs
+    @test_throws ArgumentError state_to_features(invalid_state)
+    @test_throws MethodError is_applicable(wrong_action_type, state)
+    
+    # Test edge cases
+    empty_trajectory = Trajectory(AbstractState[])
+    @test_throws BoundsError compute_loss_and_grad(model, [empty_trajectory])
+    
+    # Test numerical edge cases
+    zero_reward_state = create_zero_reward_state()
+    @test_logs (:warn, r"zero.*reward") reward(zero_reward_state)
+end
+```
+
+## Integration with Examples
+
+### Example-Specific Testing
+Each example in [examples/](mdc:examples/) should include:
+
+1. **Functionality Test**: Core domain logic works correctly
+2. **Training Test**: Model can train without errors  
+3. **Results Test**: Training produces reasonable results
+4. **Mathematical Test**: Domain-specific mathematical properties
+
+### Continuous Validation
+- Run tests before any major changes
+- Validate examples still work after core modifications
+- Check performance regressions in gradient computation
+- Verify numerical stability across different input ranges

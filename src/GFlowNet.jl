@@ -1,5 +1,7 @@
 module GFlowNet
 
+# Enable precompilation for better performance
+
 # External dependencies
 using Graphs
 using Distributions
@@ -17,7 +19,7 @@ using Dates
 using GraphRecipes
 
 # Add this line to disable precompilation until issues are resolved
-# CORRECTED: Removed __precompile__(false) to enable precompilation for better performance
+
 
 # =============================================================================
 # Core Components (New Structure)
@@ -26,25 +28,24 @@ using GraphRecipes
 # Core types and data structures
 include("core/types.jl")
 include("core/dag.jl")
+include("core/transitions.jl")
 
 # Core algorithms
 include("core/algorithms/sampling.jl")
-include("core/algorithms/probabilities.jl")
-include("core/algorithms/flows.jl")
 include("core/algorithms/objectives.jl")
 include("core/algorithms/partition.jl")
 
 # Policy implementations
-include("core/policies/base.jl")
-include("core/policies/forward.jl")
-include("core/policies/backward.jl")
-include("core/policies/flow.jl")
+include("policies/base.jl")
+include("policies/forward.jl")
+include("policies/backward.jl")
 
 # =============================================================================
 # Training Infrastructure
 # =============================================================================
 
-# Training interface (loads config and optimization internally)
+# Training interface (loads config, rewards, and optimization internally)
+include("training/rewards.jl")
 include("training/config.jl")
 include("training/optimization.jl")
 include("training/trainer.jl")
@@ -68,7 +69,7 @@ include("applications/molecular_design.jl")
 # =============================================================================
 
 # Utility functions and helpers
-include("utils/rewards.jl")
+include("utils/validation.jl")
 include("utils/logging.jl")
 include("utils/visualization.jl")
 # Note: utils.jl creates a submodule, so we need to import its exports
@@ -87,7 +88,9 @@ export DirectedAcyclicGraph, SimpleState, SimpleAction
 # =============================================================================
 
 export GFlowNetModel, ForwardPolicy, BackwardPolicy, FlowEstimator
-export forward_transition_prob, backward_transition_prob, flow, sample_trajectory
+export to_component_array, create_gflownet_model_safe
+export validate_reward, validate_state_features, validate_neural_network_input, validate_neural_network_output, validate_numerical_array, validate_model_parameters
+export forward_transition_prob, backward_transition_prob, flow, sample_trajectory, clear_flow_cache!
 export state_to_features, edge_flow, is_terminal_state
 export get_next_states, get_previous_states, get_possible_actions
 
@@ -121,9 +124,8 @@ export trajectory_balance_loss, general_trajectory_balance_loss
 export sub_trajectory_balance_loss, hierarchical_sub_trajectory_balance_loss
 export adaptive_sub_trajectory_balance_loss
 
-# Legacy compatibility
-export detailed_balance_loss, flow_matching_loss
-export compute_loss_and_grad, apply_optimizer!  # Legacy functions for examples
+# Legacy compatibility for examples only
+export compute_loss_and_grad, apply_optimizer!
 
 # =============================================================================
 # Exports - Policy Functions
@@ -138,7 +140,7 @@ export sample_action, sample_prev_state, estimate_flow, estimate_edge_flow
 # Policy utilities
 export state_to_features, normalize_probabilities, sample_from_probabilities
 export clamp_probabilities, validate_policy_output
-export PolicyError, PolicyMetrics
+export PolicyError, PolicyMetrics, increment_policy_metric!
 
 # =============================================================================
 # Exports - Optimization and Training Utilities

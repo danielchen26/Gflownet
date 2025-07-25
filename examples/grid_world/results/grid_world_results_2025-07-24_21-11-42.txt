@@ -1,0 +1,21 @@
+Grid World GFlowNet Results
+Timestamp: 2025-07-24_21-11-42
+========================================
+📊 Evaluation Results:
+   Successful evaluations: 10/10
+   Mean Reward: 1.08
+   High Reward (≥5.0) Rate: 0.0% (0/10)
+   Max Reward (≥10.0) Rate: 0.0% (0/10)
+   
+📋 Sample Trajectories:
+   1. (1,1) → (1,1) (Reward: 1.0)
+   2. (1,1) → (1,1) (Reward: 1.0)
+   3. (1,1) → (1,1) (Reward: 1.0)
+
+📈 Reward Distribution:
+   Reward 1.0: 6 samples
+   Reward 5.0: 0 samples  
+   Reward 10.0: 0 samples
+
+
+Training Data:

@@ -209,62 +209,118 @@ end
     PolicyMetrics
 
 Structure to track policy performance metrics during training.
+THREAD-SAFE: Now uses atomic operations and locks for concurrent access.
 """
 mutable struct PolicyMetrics
-    n_forward_calls::Int
-    n_backward_calls::Int
-    n_flow_calls::Int
-    total_forward_time::Float64
-    total_backward_time::Float64
-    total_flow_time::Float64
-    last_reset_time::Float64
+    n_forward_calls::Base.Threads.Atomic{Int}
+    n_backward_calls::Base.Threads.Atomic{Int}
+    n_flow_calls::Base.Threads.Atomic{Int}
+    total_forward_time::Base.Threads.Atomic{Float64}
+    total_backward_time::Base.Threads.Atomic{Float64}
+    total_flow_time::Base.Threads.Atomic{Float64}
+    last_reset_time::Base.Threads.Atomic{Float64}
+    lock::ReentrantLock  # For coordinated operations
 end
 
 """
     PolicyMetrics()
 
-Create a new policy metrics tracker.
+Create a new thread-safe policy metrics tracker.
 """
 function PolicyMetrics()
     current_time = time()
-    return PolicyMetrics(0, 0, 0, 0.0, 0.0, 0.0, current_time)
+    return PolicyMetrics(
+        Base.Threads.Atomic{Int}(0),
+        Base.Threads.Atomic{Int}(0),
+        Base.Threads.Atomic{Int}(0),
+        Base.Threads.Atomic{Float64}(0.0),
+        Base.Threads.Atomic{Float64}(0.0),
+        Base.Threads.Atomic{Float64}(0.0),
+        Base.Threads.Atomic{Float64}(current_time),
+        ReentrantLock()
+    )
 end
 
 """
     reset_policy_metrics!(metrics::PolicyMetrics)
 
-Reset all policy metrics to zero.
+Reset all policy metrics to zero (thread-safe).
 """
 function reset_policy_metrics!(metrics::PolicyMetrics)
-    metrics.n_forward_calls = 0
-    metrics.n_backward_calls = 0
-    metrics.n_flow_calls = 0
-    metrics.total_forward_time = 0.0
-    metrics.total_backward_time = 0.0
-    metrics.total_flow_time = 0.0
-    metrics.last_reset_time = time()
+    lock(metrics.lock) do
+        Base.Threads.atomic_xchg!(metrics.n_forward_calls, 0)
+        Base.Threads.atomic_xchg!(metrics.n_backward_calls, 0)
+        Base.Threads.atomic_xchg!(metrics.n_flow_calls, 0)
+        Base.Threads.atomic_xchg!(metrics.total_forward_time, 0.0)
+        Base.Threads.atomic_xchg!(metrics.total_backward_time, 0.0)
+        Base.Threads.atomic_xchg!(metrics.total_flow_time, 0.0)
+        Base.Threads.atomic_xchg!(metrics.last_reset_time, time())
+    end
 end
 
 """
     get_policy_statistics(metrics::PolicyMetrics)
 
-Get summary statistics for policy performance.
+Get summary statistics for policy performance (thread-safe).
 
 # Returns
 - Dictionary with performance statistics
 """
 function get_policy_statistics(metrics::PolicyMetrics)
-    elapsed_time = time() - metrics.last_reset_time
-    
-    return Dict(
-        :total_calls => metrics.n_forward_calls + metrics.n_backward_calls + metrics.n_flow_calls,
-        :forward_calls => metrics.n_forward_calls,
-        :backward_calls => metrics.n_backward_calls,
-        :flow_calls => metrics.n_flow_calls,
-        :avg_forward_time => metrics.n_forward_calls > 0 ? metrics.total_forward_time / metrics.n_forward_calls : 0.0,
-        :avg_backward_time => metrics.n_backward_calls > 0 ? metrics.total_backward_time / metrics.n_backward_calls : 0.0,
-        :avg_flow_time => metrics.n_flow_calls > 0 ? metrics.total_flow_time / metrics.n_flow_calls : 0.0,
-        :elapsed_time => elapsed_time,
-        :calls_per_second => elapsed_time > 0 ? (metrics.n_forward_calls + metrics.n_backward_calls + metrics.n_flow_calls) / elapsed_time : 0.0
-    )
+    # Read atomic values safely
+    lock(metrics.lock) do
+        n_forward = metrics.n_forward_calls[]
+        n_backward = metrics.n_backward_calls[]
+        n_flow = metrics.n_flow_calls[]
+        t_forward = metrics.total_forward_time[]
+        t_backward = metrics.total_backward_time[]
+        t_flow = metrics.total_flow_time[]
+        last_reset = metrics.last_reset_time[]
+        
+        elapsed_time = time() - last_reset
+        total_calls = n_forward + n_backward + n_flow
+        
+        return Dict(
+            :total_calls => total_calls,
+            :forward_calls => n_forward,
+            :backward_calls => n_backward,
+            :flow_calls => n_flow,
+            :avg_forward_time => n_forward > 0 ? t_forward / n_forward : 0.0,
+            :avg_backward_time => n_backward > 0 ? t_backward / n_backward : 0.0,
+            :avg_flow_time => n_flow > 0 ? t_flow / n_flow : 0.0,
+            :elapsed_time => elapsed_time,
+            :calls_per_second => elapsed_time > 0 ? total_calls / elapsed_time : 0.0
+        )
+    end
+end
+
+"""
+    increment_policy_metric!(metrics::PolicyMetrics, metric_type::Symbol, time_delta::Float64=0.0)
+
+Thread-safe increment of policy metrics.
+
+# Arguments
+- `metrics`: PolicyMetrics instance
+- `metric_type`: Type of metric (:forward, :backward, :flow)
+- `time_delta`: Time taken for the operation
+"""
+function increment_policy_metric!(metrics::PolicyMetrics, metric_type::Symbol, time_delta::Float64=0.0)
+    if metric_type == :forward
+        Base.Threads.atomic_add!(metrics.n_forward_calls, 1)
+        if time_delta > 0.0
+            Base.Threads.atomic_add!(metrics.total_forward_time, time_delta)
+        end
+    elseif metric_type == :backward
+        Base.Threads.atomic_add!(metrics.n_backward_calls, 1)
+        if time_delta > 0.0
+            Base.Threads.atomic_add!(metrics.total_backward_time, time_delta)
+        end
+    elseif metric_type == :flow
+        Base.Threads.atomic_add!(metrics.n_flow_calls, 1)
+        if time_delta > 0.0
+            Base.Threads.atomic_add!(metrics.total_flow_time, time_delta)
+        end
+    else
+        @warn "Unknown metric type: $metric_type"
+    end
 end 

@@ -14,8 +14,8 @@ using ..GFlowNet: SimplePartitionFunctionEstimator, LearnablePartitionFunctionEs
                   SamplingPartitionFunctionEstimator, AdaptivePartitionFunctionEstimator
 
 # Import config and optimization
-include("config.jl")
-include("optimization.jl")
+# config.jl is already included in main module
+# optimization.jl is already included in main module
 
 # Simple logging function for training metrics
 function log_to_file!(logger, iteration, loss, reward_mean, reward_std, start_time)

@@ -10,9 +10,10 @@ import ..GFlowNet: MoleculeState, DAGState, ExperimentState
     visualize_dag(dag::DirectedAcyclicGraph; node_color=:lightblue, colors=nothing)
 
 Visualize the directed acyclic graph structure of a GFlowNet.
+Properly visualizes directed edges using SimpleDiGraph.
 """
 function visualize_dag(dag::DirectedAcyclicGraph; node_color=:lightblue, colors=nothing)
-    # Get graph structure
+    # Get directed graph structure (now uses SimpleDiGraph)
     g = dag.graph
     
     # Create a mapping from state indices to human-readable labels

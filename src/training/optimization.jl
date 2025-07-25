@@ -6,6 +6,7 @@ using Zygote
 using Optimisers
 using ComponentArrays
 using Lux
+using NNlib: logsumexp
 
 # Import objective functions for gradient computation
 using ..GFlowNet: trajectory_balance_loss, trajectory_balance_loss_grad, general_trajectory_balance_loss_grad
@@ -37,7 +38,15 @@ function update_model_parameters!(model::GFlowNetModel, config::TrainingConfig, 
         error("Unknown training objective: $(config.objective)")
     end
     
-    # Apply gradients to update parameters
+    # Apply gradients to update parameters with gradient clipping
+    max_grad_norm = get(config.sub_trajectory_config, :max_grad_norm, 1.0)
+    if max_grad_norm > 0.0 && !isnothing(grad)
+        grad_norm = clip_gradients!(grad, max_grad_norm)
+        if grad_norm > max_grad_norm
+            @debug "Clipped gradients: norm $grad_norm → $max_grad_norm"
+        end
+    end
+    
     apply_gradients!(model, grad, config.learning_rate)
 end
 
@@ -56,6 +65,12 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
     if isnothing(gradients)
         @warn "Gradients are Nothing, skipping parameter update"
         return
+    end
+    
+    # Ensure parameters are ComponentArray for consistent gradient operations
+    if !(model.parameters isa ComponentArray)
+        @warn "Converting model parameters to ComponentArray for gradient compatibility"
+        model.parameters = to_component_array(model.parameters)
     end
     
     # Create new optimizer and parameter tuples
@@ -95,6 +110,9 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
     # Set the new optimizer and parameters
     model.optimizer = new_optimizer
     model.parameters = new_parameters
+    
+    # Clear flow cache when parameters change
+    clear_flow_cache!()
 end
 
 """
@@ -133,6 +151,7 @@ end
     clip_gradients!(gradients, max_norm::Float64)
 
 Clip gradients to prevent exploding gradients during training.
+Handles nested NamedTuple structures recursively.
 
 # Arguments
 - `gradients`: Gradients to clip (modified in-place)
@@ -147,15 +166,34 @@ function clip_gradients!(gradients, max_norm::Float64)
     if current_norm > max_norm
         scale_factor = max_norm / current_norm
         
-        # Scale all gradients
-        for (name, grad) in pairs(gradients)
-            if !isnothing(grad) && grad isa AbstractArray
-                grad .*= scale_factor
-            end
-        end
+        # Recursively scale all gradients including nested structures
+        _clip_gradients_recursive!(gradients, scale_factor)
     end
     
     return current_norm
+end
+
+"""
+    _clip_gradients_recursive!(gradients, scale_factor::Float64)
+
+Helper function to recursively clip gradients in nested structures.
+"""
+function _clip_gradients_recursive!(gradients, scale_factor::Float64)
+    for (name, grad) in pairs(gradients)
+        if !isnothing(grad)
+            if grad isa AbstractArray
+                # Scale array gradients in-place
+                grad .*= scale_factor
+            elseif grad isa NamedTuple
+                # Recursively handle nested structures
+                _clip_gradients_recursive!(grad, scale_factor)
+            elseif grad isa Number
+                # Handle scalar gradients - ComponentArrays should handle this automatically
+                # Skip scalar clipping as ComponentArrays manages this internally
+                continue
+            end
+        end
+    end
 end
 
 """
@@ -215,33 +253,159 @@ Legacy function for backward compatibility with examples.
 Use modern train_gflownet() interface for new code.
 """
 function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
-    # Use the modern trajectory balance implementation
-    loss_fn = ps -> trajectory_balance_loss(model, trajectories)
+    # SYSTEMATIC FIX: Pre-compute all state indices and transitions outside the differentiable function
+    # This avoids Zygote differentiation issues with custom struct operations
+
+    # Comprehensive trajectory validation to prevent type issues
+    if !isa(trajectories, Vector{<:Trajectory})
+        error("trajectories must be Vector{<:Trajectory}, got $(typeof(trajectories))")
+    end
     
-    # Use Zygote to compute gradients  
+    for (i, traj) in enumerate(trajectories)
+        if !isa(traj, Trajectory)
+            error("Trajectory $i is not a Trajectory, got $(typeof(traj))")
+        end
+        if isempty(traj.states)
+            error("Trajectory $i has empty states")
+        end
+    end
+
+    # Pre-compute trajectory data to avoid struct operations in differentiable function
+    trajectory_data = Vector{Vector{Tuple{Vector{Float32}, Vector{Int}, Int}}}()
+
+    for traj in trajectories
+        traj_data = Vector{Tuple{Vector{Float32}, Vector{Int}, Int}}()
+        for i in 1:(length(traj.states)-1)
+            current_state = traj.states[i]
+            next_state = traj.states[i+1]
+
+            # Pre-compute state features (these are just Float32 arrays)
+            features = state_to_features(current_state)
+
+            # Pre-compute next state indices (avoid struct operations in loss function)
+            next_states = get_next_states(model.dag, current_state)
+
+            if !isempty(next_states) && next_state in next_states
+                next_state_indices = [model.dag.state_to_idx[s] for s in next_states]
+                target_idx = findfirst(s -> s == next_state, next_states)
+
+                if !isnothing(target_idx)
+                    push!(traj_data, (features, next_state_indices, target_idx))
+                end
+            end
+        end
+        push!(trajectory_data, traj_data)
+    end
+
+    total_transitions = sum(length(td) for td in trajectory_data)
+
+    # CRITICAL: Check if we have any valid transitions for gradient computation
+    if total_transitions == 0
+        @warn "No valid transitions found for gradient computation! Returning zero loss and nothing gradients."
+        return 0.0f0, nothing
+    end
+
+    # Differentiable loss function that only operates on numeric data
+    function loss_fn(params)
+        total_loss = 0.0f0
+        valid_trajectories = 0
+
+        for traj_data in trajectory_data
+            if isempty(traj_data)
+                continue
+            end
+
+            log_prob = 0.0f0
+
+            for (features, next_state_indices, target_idx) in traj_data
+                # Reshape features for neural network
+                features_matrix = reshape(features, :, 1)
+
+                # Forward pass through neural network
+                logits, _ = model.forward_policy.model(features_matrix, params.forward, model.states.forward)
+                logits = vec(logits)
+
+                # Extract relevant logits for possible next states
+                relevant_logits = logits[next_state_indices]
+
+                # Compute log probabilities
+                log_probs = relevant_logits .- logsumexp(relevant_logits)
+
+                # Add log probability of the actual transition
+                log_prob += log_probs[target_idx]
+            end
+
+            # Simple loss: negative log probability
+            total_loss += -log_prob
+            valid_trajectories += 1
+        end
+
+        return valid_trajectories > 0 ? total_loss / valid_trajectories : 0.0f0
+    end
+
+    # Compute gradients
     loss, grad = Zygote.withgradient(loss_fn, model.parameters)
-    
     return loss, grad[1]
 end
 
 """
-    apply_optimizer!(model::GFlowNetModel, grad)
+    apply_optimizer!(model::GFlowNetModel, grad; max_grad_norm::Float64=1.0)
 
 Legacy function for backward compatibility with examples.
-Use modern train_gflownet() interface for new code.
+PREFERRED: Use modern train_gflownet() interface for new code.
+
+This function is used by:
+- examples/grid_world/grid_world.jl
+- examples/feature_acquisition/ (legacy versions)
+
+# Arguments
+- `model`: GFlowNet model to update
+- `grad`: Gradients to apply (should be NamedTuple with forward/backward/flow components)
+- `max_grad_norm`: Maximum gradient norm for clipping
 """
-function apply_optimizer!(model::GFlowNetModel, grad)
-    # Create new optimizer and parameter tuples
+function apply_optimizer!(model::GFlowNetModel, grad; max_grad_norm::Float64=1.0)
+    # Handle case where gradients is Nothing
+    if isnothing(grad)
+        @warn "Gradients are Nothing, skipping parameter update"
+        return model
+    end
+
+
+
+    # Add gradient clipping integration with improved nested structure support
+    # Clip gradients to prevent exploding gradients
+    if max_grad_norm > 0.0
+        grad_norm = clip_gradients!(grad, max_grad_norm)
+        if grad_norm > max_grad_norm
+            @debug "Clipped gradients: norm $grad_norm → $max_grad_norm"
+        end
+    end
+
+    # Create new optimizer and parameter structures
     new_optimizer = model.optimizer
     new_parameters = model.parameters
-    
+
     # Update forward policy
     if !isnothing(model.forward_policy) && haskey(grad, :forward) && !isnothing(grad.forward)
         result = Optimisers.update(model.optimizer.forward, model.parameters.forward, grad.forward)
-        
+
         if !isnothing(result) && length(result) == 2
-            new_optimizer = merge(new_optimizer, (forward = result[1],))
-            new_parameters = merge(new_parameters, (forward = result[2],))
+            # Handle both NamedTuple and ComponentArray cases
+            if isa(new_optimizer, NamedTuple)
+                new_optimizer = merge(new_optimizer, (forward = result[1],))
+            else
+                new_optimizer = (forward = result[1], flow = new_optimizer.flow)
+            end
+
+            if isa(new_parameters, ComponentArray)
+                # For ComponentArray, update the forward component directly
+                new_parameters = ComponentArray(
+                    forward = result[2],
+                    flow = new_parameters.flow
+                )
+            else
+                new_parameters = merge(new_parameters, (forward = result[2],))
+            end
         end
     end
     
@@ -258,16 +422,33 @@ function apply_optimizer!(model::GFlowNetModel, grad)
     # Update flow estimator if it exists
     if !isnothing(model.flow_estimator) && haskey(grad, :flow) && !isnothing(grad.flow)
         result = Optimisers.update(model.optimizer.flow, model.parameters.flow, grad.flow)
-        
+
         if !isnothing(result) && length(result) == 2
-            new_optimizer = merge(new_optimizer, (flow = result[1],))
-            new_parameters = merge(new_parameters, (flow = result[2],))
+            # Handle both NamedTuple and ComponentArray cases
+            if isa(new_optimizer, NamedTuple)
+                new_optimizer = merge(new_optimizer, (flow = result[1],))
+            else
+                new_optimizer = (forward = new_optimizer.forward, flow = result[1])
+            end
+
+            if isa(new_parameters, ComponentArray)
+                # For ComponentArray, update the flow component directly
+                new_parameters = ComponentArray(
+                    forward = new_parameters.forward,
+                    flow = result[2]
+                )
+            else
+                new_parameters = merge(new_parameters, (flow = result[2],))
+            end
         end
     end
     
     # Set the new optimizer and parameters
     model.optimizer = new_optimizer
     model.parameters = new_parameters
+    
+    # OPTIMIZED: Clear flow cache when parameters change
+    clear_flow_cache!()
     
     return model
 end

@@ -3,13 +3,50 @@ Comprehensive GFlowNet Training Example
 
 This example demonstrates all available training objectives and partition function
 estimation methods in the GFlowNet.jl framework.
+
+NOTE: This example demonstrates the API but requires a complete domain implementation.
+For working examples, see examples/grid_world/ or examples/causal_discovery/
 """
 
 using GFlowNet
-using Plots, Random, Statistics
+using Random, Statistics
+using Lux, ComponentArrays, Optimisers
 
 # Set random seed for reproducibility
 Random.seed!(42)
+
+# Simple grid state implementation for demonstration
+struct SimpleGridState <: GFlowNet.AbstractState
+    x::Int
+    y::Int
+    is_terminal::Bool
+end
+
+# Simple grid action implementation
+struct SimpleGridAction <: GFlowNet.AbstractAction
+    direction::Symbol  # :up, :down, :left, :right, :terminate
+end
+
+# State feature extraction
+function GFlowNet.state_to_features(state::SimpleGridState)
+    return Float32[state.x, state.y, state.is_terminal ? 1.0 : 0.0]
+end
+
+# Reward function
+function GFlowNet.reward(state::SimpleGridState)
+    if !state.is_terminal
+        return 0.0f0
+    end
+
+    # High reward for reaching (5,5), medium for (1,5), base for others
+    if state.x == 5 && state.y == 5
+        return 10.0f0
+    elseif state.x == 1 && state.y == 5
+        return 5.0f0
+    else
+        return 1.0f0
+    end
+end
 
 """
     create_simple_grid_environment(size::Int=5)
@@ -17,64 +54,94 @@ Random.seed!(42)
 Create a simple grid world environment for demonstration.
 """
 function create_simple_grid_environment(size::Int=5)
-    # Create states (grid positions)
-    states = [(i, j) for i in 1:size, j in 1:size]
-    initial_state = (1, 1)
-    terminal_states = [(size, size)]
-    
-    # Create actions (movements)
-    actions = [:right, :down, :up, :left]
-    
-    # Create DAG
-    dag = create_dag(initial_state, terminal_states, actions)
-    
-    # Add valid transitions
+    # Create states
+    states = SimpleGridState[]
     for i in 1:size, j in 1:size
-        current = (i, j)
-        
-        # Right movement
-        if j < size
-            next_state = (i, j + 1)
-            add_action!(dag, current, next_state, :right)
-        end
-        
-        # Down movement  
-        if i < size
-            next_state = (i + 1, j)
-            add_action!(dag, current, next_state, :down)
-        end
-        
-        # Up movement
-        if i > 1
-            next_state = (i - 1, j)
-            add_action!(dag, current, next_state, :up)
-        end
-        
-        # Left movement
-        if j > 1
-            next_state = (i, j - 1)
-            add_action!(dag, current, next_state, :left)
-        end
+        push!(states, SimpleGridState(i, j, false))  # Non-terminal
+        push!(states, SimpleGridState(i, j, true))   # Terminal
     end
-    
-    return dag
+
+    # Create actions
+    actions = [
+        SimpleGridAction(:up),
+        SimpleGridAction(:down),
+        SimpleGridAction(:left),
+        SimpleGridAction(:right),
+        SimpleGridAction(:terminate)
+    ]
+
+    # Initial and terminal states
+    initial_state = SimpleGridState(1, 1, false)
+    terminal_states = [SimpleGridState(i, j, true) for i in 1:size, j in 1:size]
+    terminal_sink = SimpleGridState(size, size, true)  # Special sink state
+
+    # Create DAG using the actual function signature
+    dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
+
+    return dag, states, actions
 end
 
 """
-    create_reward_function(terminal_state)
+    create_simple_model(dag, states, actions)
 
-Create a simple reward function that gives higher reward for reaching the terminal state.
+Create a simple GFlowNet model for demonstration.
 """
-function create_reward_function(terminal_state)
-    return function(state)
-        if state == terminal_state
-            return 10.0  # High reward for reaching goal
-        else
-            # Distance-based reward (encourage moving towards goal)
-            dist = abs(state[1] - terminal_state[1]) + abs(state[2] - terminal_state[2])
-            return max(0.1, 2.0 - 0.1 * dist)
-        end
-    end
+function create_simple_model(dag, states, actions)
+    # Create neural networks
+    input_dim = 3  # x, y, is_terminal
+    hidden_dim = 32
+    n_states = length(states)
+
+    rng = Random.default_rng()
+    Random.seed!(rng, 42)
+
+    # Forward policy network
+    forward_nn = Chain(
+        Dense(input_dim => hidden_dim, relu),
+        Dense(hidden_dim => n_states)
+    )
+
+    # Flow estimator network
+    flow_nn = Chain(
+        Dense(input_dim => hidden_dim, relu),
+        Dense(hidden_dim => 1, x -> softplus.(x) .+ 1f-6)
+    )
+
+    # Initialize parameters and states
+    forward_ps, forward_st = Lux.setup(rng, forward_nn)
+    flow_ps, flow_st = Lux.setup(rng, flow_nn)
+
+    # Create optimizer
+    opt = Optimisers.Adam(0.01)
+    forward_opt_state = Optimisers.setup(opt, forward_ps)
+    flow_opt_state = Optimisers.setup(opt, flow_ps)
+    optimizer = (forward = forward_opt_state, flow = flow_opt_state)
+
+    # Create ComponentArray for parameters
+    parameters = ComponentArray(
+        forward = ComponentArray(forward_ps),
+        flow = ComponentArray(flow_ps)
+    )
+    states = (forward = forward_st, backward = nothing, flow = flow_st)
+
+    # Create policies
+    forward_policy = GFlowNet.ForwardPolicy(forward_nn)
+    flow_estimator = GFlowNet.FlowEstimator(flow_nn)
+
+    # Create model
+    model = GFlowNet.GFlowNetModel(
+        dag = dag,
+        forward_policy = forward_policy,
+        backward_policy = nothing,
+        flow_estimator = flow_estimator,
+        partition_function = nothing,
+        objectives = GFlowNet.AbstractGFlowNetObjective[],
+        optimizer = optimizer,
+        parameters = parameters,
+        states = states
+    )
+
+    return model
 end
 
 """
@@ -85,18 +152,16 @@ Demonstrate all available training objectives.
 function demonstrate_training_objectives()
     println("🎯 Demonstrating All Training Objectives")
     println("=" ^ 50)
-    
+
     # Create environment
-    dag = create_simple_grid_environment(4)
-    reward_fn = create_reward_function((4, 4))
-    
-    # Create a basic model (simplified for demonstration)
-    model = GFlowNetModel(dag, reward_fn)  # This would need proper implementation
-    
-    # Define training objectives to test
+    dag, states, actions = create_simple_grid_environment(4)
+
+    # Create a basic model
+    model = create_simple_model(dag, states, actions)
+
+    # Define training objectives to test (only those that exist)
     objectives = [
         (TRAJECTORY_BALANCE, "Standard Trajectory Balance"),
-        (GENERAL_TRAJECTORY_BALANCE, "General Trajectory Balance (with P_B)"),
         (SUB_TRAJECTORY_BALANCE, "Sub-Trajectory Balance"),
         (HIERARCHICAL_SUB_TB, "Hierarchical Sub-Trajectory Balance"),
         (ADAPTIVE_SUB_TB, "Adaptive Sub-Trajectory Balance"),
@@ -166,17 +231,16 @@ Demonstrate all partition function estimation methods.
 function demonstrate_partition_function_methods()
     println("\n🔢 Demonstrating Partition Function Methods")
     println("=" ^ 50)
-    
+
     # Create environment
-    dag = create_simple_grid_environment(3)
-    reward_fn = create_reward_function((3, 3))
-    model = GFlowNetModel(dag, reward_fn)
-    
-    # Define partition function methods to test
+    dag, states, actions = create_simple_grid_environment(3)
+    model = create_simple_model(dag, states, actions)
+
+    # Define partition function methods to test (using correct names)
     methods = [
         (SIMPLE_ESTIMATION, "Simple Estimation (Sum of Rewards)"),
-        (LEARNABLE_PARAMETER, "Learnable Parameter (Gradient Descent)"),
-        (SAMPLING_BASED, "Sampling-Based Estimation"),
+        (LEARNABLE_ESTIMATION, "Learnable Parameter (Gradient Descent)"),
+        (SAMPLING_ESTIMATION, "Sampling-Based Estimation"),
         (ADAPTIVE_ESTIMATION, "Adaptive Method Switching")
     ]
     
@@ -225,12 +289,11 @@ Demonstrate advanced configuration options.
 function demonstrate_advanced_configurations()
     println("\n⚙️  Demonstrating Advanced Configurations")
     println("=" ^ 50)
-    
+
     # Create environment
-    dag = create_simple_grid_environment(4)
-    reward_fn = create_reward_function((4, 4))
-    model = GFlowNetModel(dag, reward_fn)
-    
+    dag, states, actions = create_simple_grid_environment(4)
+    model = create_simple_model(dag, states, actions)
+
     # Test hierarchical sub-trajectory balance with custom scales
     println("\n🏗️  Hierarchical Sub-Trajectory Balance with Custom Scales")
     config_hierarchical = TrainingConfig(
@@ -244,16 +307,16 @@ function demonstrate_advanced_configurations()
             :n_subtrajectories => 8
         )
     )
-    
+
     println("  Training with custom hierarchical scales...")
     history_hierarchical = train_gflownet(model, config_hierarchical; verbose=false)
     println("  ✅ Hierarchical training completed!")
-    
+
     # Test adaptive sub-trajectory balance with custom difficulty threshold
     println("\n🎯 Adaptive Sub-Trajectory Balance with Custom Threshold")
     config_adaptive = TrainingConfig(
         objective=ADAPTIVE_SUB_TB,
-        partition_function_method=LEARNABLE_PARAMETER,
+        partition_function_method=LEARNABLE_ESTIMATION,  # Fixed method name
         batch_size=16,
         learning_rate=0.01,
         n_iterations=150,
@@ -261,29 +324,15 @@ function demonstrate_advanced_configurations()
             :difficulty_threshold => 0.05  # Lower threshold = more selective
         )
     )
-    
+
     println("  Training with adaptive difficulty selection...")
     history_adaptive = train_gflownet(model, config_adaptive; verbose=false)
     println("  ✅ Adaptive training completed!")
-    
-    # Test general trajectory balance (requires backward policy)
-    println("\n↔️  General Trajectory Balance (Full Formulation)")
-    try
-        config_general = TrainingConfig(
-            objective=GENERAL_TRAJECTORY_BALANCE,
-            partition_function_method=SAMPLING_BASED,
-            batch_size=14,
-            learning_rate=0.008,
-            n_iterations=100
-        )
-        
-        println("  Training with full trajectory balance...")
-        history_general = train_gflownet(model, config_general; verbose=false)
-        println("  ✅ General trajectory balance completed!")
-    catch e
-        println("  ⚠️  General TB requires backward policy: $e")
-    end
-    
+
+    # Note: GENERAL_TRAJECTORY_BALANCE is not implemented in current version
+    println("\n⚠️  General Trajectory Balance not available in current implementation")
+    println("  Available objectives: TRAJECTORY_BALANCE, SUB_TRAJECTORY_BALANCE, HIERARCHICAL_SUB_TB, ADAPTIVE_SUB_TB, FLOW_CONSISTENCY")
+
     return Dict(
         "hierarchical" => history_hierarchical,
         "adaptive" => history_adaptive
@@ -298,18 +347,17 @@ Compare the performance of different methods side by side.
 function compare_methods_performance()
     println("\n📊 Performance Comparison")
     println("=" ^ 50)
-    
+
     # Create environment
-    dag = create_simple_grid_environment(5)
-    reward_fn = create_reward_function((5, 5))
-    model = GFlowNetModel(dag, reward_fn)
-    
-    # Define comparison scenarios
+    dag, states, actions = create_simple_grid_environment(5)
+    model = create_simple_model(dag, states, actions)
+
+    # Define comparison scenarios (using correct method names)
     scenarios = [
         ("Simple TB + Simple Z", TRAJECTORY_BALANCE, SIMPLE_ESTIMATION),
-        ("Simple TB + Learnable Z", TRAJECTORY_BALANCE, LEARNABLE_PARAMETER),
+        ("Simple TB + Learnable Z", TRAJECTORY_BALANCE, LEARNABLE_ESTIMATION),
         ("Sub-TB + Adaptive Z", SUB_TRAJECTORY_BALANCE, ADAPTIVE_ESTIMATION),
-        ("Hierarchical TB + Sampling Z", HIERARCHICAL_SUB_TB, SAMPLING_BASED)
+        ("Hierarchical TB + Sampling Z", HIERARCHICAL_SUB_TB, SAMPLING_ESTIMATION)
     ]
     
     results = Dict()

@@ -3,9 +3,62 @@
 
 # Import external dependencies only - internal GFlowNet types are available in module context
 using Random
-using Zygote
+using Lux
+using Zygote: gradient, withgradient
 using LinearAlgebra: norm
-using NNlib: softmax
+using NNlib: softmax, softplus
+
+# =============================================================================
+# Flow Estimator Neural Networks for Flow Consistency Training
+# =============================================================================
+
+"""
+    create_flow_estimator(input_dim::Int, hidden_dim::Int, rng=nothing)
+
+Create a flow estimator neural network for GFlowNet Flow Consistency training.
+The flow estimator directly predicts the flow value for a given state.
+"""
+function create_flow_estimator(input_dim::Int, hidden_dim::Int, rng=nothing)
+    if isnothing(rng)
+        rng = Random.default_rng()
+    end
+    
+    # Create a simple MLP for the flow estimator with positive output
+    model = Chain(
+        Dense(input_dim => hidden_dim, relu),
+        Dense(hidden_dim => hidden_dim, relu),
+        Dense(hidden_dim => 1),
+        x -> softplus.(x)  # Ensure positive flow values
+    )
+    
+    # Initialize parameters
+    ps, st = Lux.setup(rng, model)
+    
+    return FlowEstimator(model), ps, st
+end
+
+"""
+    estimate_flow(estimator::FlowEstimator, state::AbstractState, ps, st)
+
+Estimate the flow value for a given state using the flow estimator neural network.
+"""
+function estimate_flow(estimator::FlowEstimator, state::AbstractState, ps, st)
+    features = state_to_features(state)
+    flow_value, new_st = estimator.model(features, ps, st)
+    return flow_value[1], new_st  # Extract scalar value
+end
+
+"""
+    estimate_edge_flow(estimator::FlowEstimator, source::AbstractState, target::AbstractState, 
+                      forward_prob::Float64, ps, st)
+
+Estimate the flow value for an edge between two states.
+"""
+function estimate_edge_flow(estimator::FlowEstimator, source::AbstractState, target::AbstractState, 
+                           forward_prob::Float64, ps, st)
+    source_flow, new_st = estimate_flow(estimator, source, ps, st)
+    return source_flow * forward_prob, new_st
+end
 
 # Core objective functions are defined below
 
@@ -446,11 +499,11 @@ function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector
     # Define loss function that works directly with model parameters
     function loss_fn(params)
         # Compute forward pass with current parameters
-        loss_value = 0.0f0
+        loss_value = Float32(0.0)
 
         for traj in trajectories
             # Compute trajectory balance loss for the entire trajectory
-            log_prob_sum = 0.0f0
+            log_prob_sum = Float32(0.0)
 
             # Accumulate log probabilities for all transitions in the trajectory
             for i in 1:(length(traj.states)-1)
@@ -462,15 +515,19 @@ function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector
                     # Extract features for neural network
                     state_features = state_to_features(current_state)
 
+                    # Reshape features for Lux (expects matrix input)
+                    features_matrix = reshape(state_features, :, 1)
+
                     # Forward pass through neural network with current parameters
-                    logits, _ = model.forward_policy.model(state_features, params.forward, model.states.forward)
+                    logits, _ = model.forward_policy.model(features_matrix, params.forward, model.states.forward)
+                    logits = vec(logits)  # Convert back to vector
 
                     # Compute transition probability
                     next_states = get_next_states(model.dag, current_state)
                     if !isempty(next_states)
                         next_state_indices = [model.dag.state_to_idx[s] for s in next_states]
                         relevant_logits = logits[next_state_indices]
-                        relevant_logits = clamp.(relevant_logits, -20.0f0, 20.0f0)
+                        relevant_logits = clamp.(relevant_logits, Float32(-20.0), Float32(20.0))
                         log_probs = logsoftmax(relevant_logits)  # Use logsoftmax for numerical stability
 
                         # Find probability of the actual transition
@@ -484,11 +541,17 @@ function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector
 
             # Now compute trajectory balance loss for this complete trajectory
             R = reward(traj.states[end])
-            R_safe = max(R, 1f-8)  # Ensure positive reward
+            # Handle potential Nothing values and ensure positive reward
+            if isnothing(R)
+                @warn "Reward function returned Nothing for state $(traj.states[end])"
+                R_safe = 1f-8
+            else
+                R_safe = max(Float32(R), 1f-8)  # Ensure positive reward
+            end
 
             # Trajectory balance: log(Z) + sum(log P_F) - log(R) ≈ 0
             # We minimize squared error: (log(Z) + sum(log P_F) - log(R))^2
-            log_Z = 0.0f0  # log(1) = 0, will be improved with proper partition function
+            log_Z = Float32(0.0)  # log(1) = 0, will be improved with proper partition function
 
             trajectory_balance = log_Z + log_prob_sum - log(R_safe)
             loss_value += trajectory_balance^2
@@ -498,14 +561,11 @@ function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector
     end
 
     # Compute gradients using Zygote
-    gradients = gradient(loss_fn, model.parameters)
-    
-    if !isnothing(gradients[1])
-        # Return the gradients directly (they're already in the correct structure)
-        return gradients[1]
-    else
-        return nothing
-    end
+    loss_value, gradients = withgradient(loss_fn, model.parameters)
+
+    # FIXED: trajectory_balance_loss_grad should only return gradients, not (loss, gradients)
+    # The loss is computed separately by compute_loss() function
+    return gradients[1]
 end
 
 """
@@ -610,33 +670,11 @@ end
 # *_grad functions above using proper Zygote.jl patterns.
 
 # =============================================================================
-# Legacy Compatibility Functions
+# Legacy Note
 # =============================================================================
 
-# Note: Former detailed_balance.jl and flow_matching.jl functionality
-# is now unified in this file as flow_consistency_loss() with different modes:
+# Former detailed_balance.jl and flow_matching.jl functionality
+# is now unified as flow_consistency_loss() with different modes:
 # - EDGE_LEVEL: Former detailed balance (edge-by-edge consistency)
 # - STATE_LEVEL: Former flow matching (state-by-state consistency)  
-# - MIXED_LEVEL: Combination of both approaches
-
-"""
-    detailed_balance_loss(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
-
-Legacy function name for edge-level flow consistency.
-Use flow_consistency_loss(model, trajectories; mode=EDGE_LEVEL) instead.
-"""
-function detailed_balance_loss(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
-    @warn "detailed_balance_loss is deprecated. Use flow_consistency_loss(model, trajectories; mode=EDGE_LEVEL) instead."
-    return flow_consistency_loss(model, trajectories; mode=EDGE_LEVEL)
-end
-
-"""
-    flow_matching_loss(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
-
-Legacy function name for state-level flow consistency.
-Use flow_consistency_loss(model, trajectories; mode=STATE_LEVEL) instead.
-"""
-function flow_matching_loss(model::GFlowNetModel, trajectories::Vector{<:Trajectory})
-    @warn "flow_matching_loss is deprecated. Use flow_consistency_loss(model, trajectories; mode=STATE_LEVEL) instead."
-    return flow_consistency_loss(model, trajectories; mode=STATE_LEVEL)
-end 
+# - MIXED_LEVEL: Combination of both approaches 

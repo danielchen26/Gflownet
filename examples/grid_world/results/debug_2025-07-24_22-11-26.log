@@ -1,0 +1,61 @@
+🎯 Grid World GFlowNet Example
+==================================================
+📅 Timestamp: 2025-07-24_22-11-26
+📁 Results directory: results/
+🔧 Creating GFlowNet model...
+✅ Model created successfully!
+
+🚀 Starting training...
+🚀 Training GFlowNet...
+   Iterations: 50
+   Batch size: 4
+  📚 Injected curriculum trajectory to help learning
+Iteration 5: Loss = 8.0656, Mean Reward = 15.25, High Rewards = 3/4, Successful samples = 4/4, Z = 176.0
+  📚 Injected curriculum trajectory to help learning
+  📚 Injected curriculum trajectory to help learning
+Iteration 10: Loss = 19.1585, Mean Reward = 22.75, High Rewards = 3/4, Successful samples = 4/4, Z = 176.0
+  📚 Injected curriculum trajectory to help learning
+  📚 Injected curriculum trajectory to help learning
+  📚 Injected curriculum trajectory to help learning
+  📚 Injected curriculum trajectory to help learning
+Iteration 15: Loss = 16.214, Mean Reward = 18.0, High Rewards = 2/4, Successful samples = 4/4, Z = 176.0
+  📚 Injected curriculum trajectory to help learning
+   Gradient norm: 39.4871
+Iteration 20: Loss = 7.8645, Mean Reward = 15.25, High Rewards = 3/4, Successful samples = 4/4, Z = 176.0
+Iteration 25: Loss = 9.7084, Mean Reward = 5.75, High Rewards = 1/4, Successful samples = 4/4, Z = 176.0
+Iteration 30: Loss = 22.1904, Mean Reward = 10.5, High Rewards = 2/4, Successful samples = 4/4, Z = 176.0
+Iteration 35: Loss = 9.7622, Mean Reward = 5.75, High Rewards = 1/4, Successful samples = 4/4, Z = 176.0
+   Gradient norm: 45.9458
+Iteration 40: Loss = 13.8376, Mean Reward = 30.5, High Rewards = 2/4, Successful samples = 4/4, Z = 176.0
+Iteration 45: Loss = 10.3447, Mean Reward = 10.5, High Rewards = 2/4, Successful samples = 4/4, Z = 176.0
+Iteration 50: Loss = 10.7512, Mean Reward = 20.0, High Rewards = 4/4, Successful samples = 4/4, Z = 176.0
+✅ Training completed!
+📊 Total successful samples: 200/200
+
+🎯 Evaluating model...
+🎯 Evaluating Model...
+   Sampling 10 trajectories...
+📊 Evaluation Results:
+   Successful evaluations: 10/10
+   Mean Reward: 14.3
+   High Reward (≥5.0) Rate: 0.0% (0/10)
+   Max Reward (≥10.0) Rate: 70.0% (7/10)
+
+📋 Sample Trajectories:
+   1. (1,1) → (1,1) (Reward: 1.0)
+   2. (1,1) → (2,1) → (3,1) → (3,1) (Reward: 20.0)
+   3. (1,1) → (2,1) → (2,1) (Reward: 1.0)
+
+📈 Reward Distribution:
+   Reward 1.0: 3 samples
+   Reward 5.0: 0 samples
+   Reward 10.0: 0 samples
+   Reward 20.0: 7 samples
+   Other: 0 samples
+
+
+📊 Creating visualizations...
+
+✅ Grid World Example Complete!
+📊 Results saved to: results/grid_world_results_2025-07-24_22-11-26.txt
+🐛 Debug log saved to: results/debug_2025-07-24_22-11-26.log
