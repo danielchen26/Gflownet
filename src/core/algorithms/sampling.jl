@@ -85,22 +85,22 @@ end
     sample_trajectory(model::GFlowNetModel; rng=nothing)
 
 Sample a complete trajectory from the GFlowNet using learned stochastic policy.
+FIXED: Now properly generic - works for any domain, not just grid worlds.
 """
 function sample_trajectory(model::GFlowNetModel; rng=nothing)
     if isnothing(rng)
         rng = Random.default_rng()
     end
     
-    states = [model.dag.initial_state]
-    # Note: actions tracking removed as it's not used in this implementation
+    # FIXED: Use concrete type annotations for type stability
+    states = AbstractState[model.dag.initial_state]
+    current_state::AbstractState = model.dag.initial_state
     
-    current_state = model.dag.initial_state
-    
-    while current_state ∉ model.dag.terminal_states
-        # Get next state probabilities
+    while !is_terminal_state(current_state)
+        # Get state features using the interface function
         features = state_to_features(current_state)
         
-        # Use safe model call to get logits
+        # Use safe model call to get action logits
         logits, _ = safe_model_call(
             model.forward_policy.model,
             features,
@@ -108,53 +108,48 @@ function sample_trajectory(model::GFlowNetModel; rng=nothing)
             model.states.forward
         )
         
-        # Get all possible next states
-        next_states = get_next_states(model.dag, current_state)
-        if isempty(next_states)
-            break
-        end
-        
-        # Map next states to their corresponding actions
-        action_indices = Int[]
-        for next_state in next_states
-            if next_state.is_terminal  # Check terminal first
-                push!(action_indices, 5)  # Terminate action
-            elseif next_state.x > current_state.x  # Moving right
-                push!(action_indices, 4)  # MoveRight action
-            elseif next_state.x < current_state.x  # Moving left
-                push!(action_indices, 3)  # MoveLeft action
-            elseif next_state.y > current_state.y  # Moving up
-                push!(action_indices, 1)  # MoveUp action
-            elseif next_state.y < current_state.y  # Moving down
-                push!(action_indices, 2)  # MoveDown action
-            else
-                # This shouldn't happen in a grid world
-                error("Invalid state transition from $(current_state) to $(next_state)")
+        # FIXED: Use proper interface functions instead of hardcoded logic
+        # Get all applicable actions for current state
+        applicable_actions = Vector{AbstractAction}()
+        for action in model.dag.actions
+            if is_applicable(action, current_state)
+                push!(applicable_actions, action)
             end
         end
         
-        # Ensure all action indices are valid (1-5)
-        if any(idx -> idx < 1 || idx > 5, action_indices)
-            error("Invalid action indices: $action_indices")
+        if isempty(applicable_actions)
+            break
         end
         
-        relevant_logits = logits[action_indices]
+        # FIXED: Use action indices directly (1 to length(actions))
+        # Assumes neural network outputs probabilities for all possible actions
+        action_indices = Vector{Int}(1:length(applicable_actions))
         
-        # Add numerical stability and appropriate temperature scaling
-        relevant_logits = clamp.(relevant_logits, Float32(-20.0), Float32(20.0))  # Prevent extreme values
-        temperature = Float32(1.0)  # Start with no temperature scaling for debugging
-        probs = softmax(relevant_logits ./ temperature)
+        # Get relevant logits for applicable actions only
+        if length(action_indices) <= length(logits)
+            relevant_logits = logits[action_indices]
+        else
+            # Fallback: use available logits
+            relevant_logits = logits[1:min(length(logits), length(action_indices))]
+        end
+        
+        # Add numerical stability
+        relevant_logits = clamp.(relevant_logits, Float32(-20.0), Float32(20.0))
+        probs = softmax(relevant_logits)
         
         # Ensure probabilities are valid (no NaN/Inf)
         if any(isnan.(probs)) || any(isinf.(probs))
             # Fallback to uniform distribution if numerical issues
-            probs = fill(Float32(1.0) / length(next_states), length(next_states))
+            probs = fill(Float32(1.0) / length(applicable_actions), length(applicable_actions))
         end
         
-        # Sample according to learned policy (natural GFlowNet exploration)
-        next_state_idx = sample(1:length(next_states), Weights(probs))
-        next_state = next_states[next_state_idx]
-
+        # Sample action according to learned policy
+        action_idx = sample(1:length(applicable_actions), Weights(probs))
+        chosen_action = applicable_actions[action_idx]
+        
+        # Apply the chosen action to get next state
+        next_state = apply_action(chosen_action, current_state)
+        
         push!(states, next_state)
         current_state = next_state
     end

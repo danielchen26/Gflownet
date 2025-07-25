@@ -1,0 +1,55 @@
+---
+title: GFlowNet Code Cleanliness Standards
+---
+
+# GFlowNet Code Cleanliness Standards
+
+Based on the core workspace rule about professional code quality, maintain clean example directories.
+
+## Keep Examples Clean
+
+Example directories should contain only essential files:
+
+### ✅ Required Files:
+- **Main example file**: `example_name.jl` (single working file)
+- **Project dependencies**: `Project.toml`, `Manifest.toml`
+- **Documentation**: `README.md`
+- **Results directory**: `results/` (auto-created when needed)
+
+### ❌ Remove Temporary Files:
+- Development test files: `test_*.jl`, `demo_*.jl`, `simple_*.jl`
+- Debug logs: `debug_*.log`, `*_output.log`
+- System files: `.DS_Store`
+- Old result files: Previous timestamped results
+
+## Example Structure Template
+
+```
+examples/domain_name/
+├── domain_name.jl     ← Single working file using high-level interface
+├── Project.toml       ← Dependencies
+├── Manifest.toml      ← Exact versions
+├── README.md          ← Documentation
+└── results/           ← Auto-created output directory
+    ├── domain_trajectories.csv
+    ├── domain_rewards.csv
+    ├── domain_training.csv
+    └── domain_results_timestamp.txt
+```
+
+## File Naming Convention
+
+Use consistent naming:
+- Main file: `{domain_name}.jl`
+- Results: `{domain_name}_{data_type}.csv`
+- Summary: `{domain_name}_results_{timestamp}.txt`
+
+## Clean After Development
+
+When working on examples:
+1. Remove all temporary test files after verification
+2. Keep only the single working example file
+3. Ensure results directory contains only latest outputs
+4. Remove development artifacts and debug files
+
+This maintains a professional codebase that's easy to navigate and understand.

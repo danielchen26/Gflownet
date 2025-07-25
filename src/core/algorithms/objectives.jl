@@ -522,11 +522,34 @@ function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector
                     logits, _ = model.forward_policy.model(features_matrix, params.forward, model.states.forward)
                     logits = vec(logits)  # Convert back to vector
 
-                    # Compute transition probability
+                    # Compute transition probability using ACTION-BASED approach (CORRECT)
                     next_states = get_next_states(model.dag, current_state)
                     if !isempty(next_states)
-                        next_state_indices = [model.dag.state_to_idx[s] for s in next_states]
-                        relevant_logits = logits[next_state_indices]
+                        # FIXED: Map next states to their corresponding actions (not state indices)
+                        action_indices = Int[]
+                        for ns in next_states
+                            if ns.is_terminal  # Check terminal first
+                                push!(action_indices, 5)  # Terminate action (index 5)
+                            elseif ns.x > current_state.x  # Moving right
+                                push!(action_indices, 4)  # MoveRight action (index 4)
+                            elseif ns.x < current_state.x  # Moving left
+                                push!(action_indices, 3)  # MoveLeft action (index 3)
+                            elseif ns.y > current_state.y  # Moving up
+                                push!(action_indices, 1)  # MoveUp action (index 1)
+                            elseif ns.y < current_state.y  # Moving down
+                                push!(action_indices, 2)  # MoveDown action (index 2)
+                            else
+                                error("Invalid state transition from $(current_state) to $(ns)")
+                            end
+                        end
+                        
+                        # Ensure all action indices are valid (1-5)
+                        if any(idx -> idx < 1 || idx > 5, action_indices)
+                            error("Invalid action indices: $action_indices")
+                        end
+                        
+                        # FIXED: Use action indices (not state indices) to get relevant logits
+                        relevant_logits = logits[action_indices]
                         relevant_logits = clamp.(relevant_logits, Float32(-20.0), Float32(20.0))
                         log_probs = logsoftmax(relevant_logits)  # Use logsoftmax for numerical stability
 

@@ -286,11 +286,42 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
             next_states = get_next_states(model.dag, current_state)
 
             if !isempty(next_states) && next_state in next_states
-                next_state_indices = [model.dag.state_to_idx[s] for s in next_states]
+                # FIXED: Map next states to their corresponding actions (not state indices)
+                # This assumes GridWorld-like actions: UP=1, DOWN=2, LEFT=3, RIGHT=4, TERMINATE=5
+                action_indices = Int[]
+                for ns in next_states
+                    if hasfield(typeof(ns), :is_terminal) && ns.is_terminal  # Check terminal first
+                        push!(action_indices, 5)  # Terminate action (index 5)
+                    elseif hasfield(typeof(ns), :x) && hasfield(typeof(ns), :y)
+                        # Grid world specific logic
+                        if ns.x > current_state.x  # Moving right
+                            push!(action_indices, 4)  # MoveRight action (index 4)
+                        elseif ns.x < current_state.x  # Moving left
+                            push!(action_indices, 3)  # MoveLeft action (index 3)
+                        elseif ns.y > current_state.y  # Moving up
+                            push!(action_indices, 1)  # MoveUp action (index 1)
+                        elseif ns.y < current_state.y  # Moving down
+                            push!(action_indices, 2)  # MoveDown action (index 2)
+                        else
+                            error("Invalid state transition from $(current_state) to $(ns)")
+                        end
+                    else
+                        # Fallback: assume sequential action mapping for non-grid domains
+                        # This is a temporary solution for compatibility
+                        push!(action_indices, 1)  # Default to first action
+                        @warn "Using fallback action mapping for non-grid domain"
+                    end
+                end
+                
+                # Ensure all action indices are valid (1-5 for grid world)
+                if any(idx -> idx < 1 || idx > 5, action_indices)
+                    error("Invalid action indices: $action_indices")
+                end
+                
                 target_idx = findfirst(s -> s == next_state, next_states)
 
                 if !isnothing(target_idx)
-                    push!(traj_data, (features, next_state_indices, target_idx))
+                    push!(traj_data, (features, action_indices, target_idx))
                 end
             end
         end
@@ -317,7 +348,7 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
 
             log_prob = 0.0f0
 
-            for (features, next_state_indices, target_idx) in traj_data
+            for (features, action_indices, target_idx) in traj_data
                 # Reshape features for neural network
                 features_matrix = reshape(features, :, 1)
 
@@ -326,7 +357,7 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
                 logits = vec(logits)
 
                 # Extract relevant logits for possible next states
-                relevant_logits = logits[next_state_indices]
+                relevant_logits = logits[action_indices]
 
                 # Compute log probabilities
                 log_probs = relevant_logits .- logsumexp(relevant_logits)

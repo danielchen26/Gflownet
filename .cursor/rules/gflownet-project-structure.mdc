@@ -1,0 +1,35 @@
+# GFlowNet Project Structure
+
+This codebase implements Generative Flow Networks (GFlowNets) in Julia. Key structure:
+
+## Core Architecture
+
+- **[src/GFlowNet.jl](mdc:src/GFlowNet.jl)**: Main module with exports
+- **[src/core/](mdc:src/core/)**: Core algorithms and types
+  - **[src/core/types.jl](mdc:src/core/types.jl)**: All core types and abstract interfaces
+  - **[src/core/dag.jl](mdc:src/core/dag.jl)**: Directed Acyclic Graph operations
+  - **[src/core/algorithms/](mdc:src/core/algorithms/)**: Core algorithmic components
+- **[src/training/](mdc:src/training/)**: Training infrastructure 
+- **[src/policies/](mdc:src/policies/)**: Neural network policy implementations
+- **[examples/](mdc:examples/)**: Domain-specific applications
+
+## High-Level Interface
+
+Users should interact with GFlowNet through high-level functions:
+- Use `GFlowNet.create_forward_policy()` instead of manual neural networks
+- Use `GFlowNet.TrainingConfig()` and `GFlowNet.train_gflownet()` for training
+- Use `GFlowNet.sample_trajectory()` for sampling
+
+## Examples Pattern
+
+Each example follows the same pattern:
+1. Define domain-specific state/action types
+2. Implement required interface functions (`state_to_features`, `is_applicable`, etc.)
+3. Use high-level GFlowNet functions for model creation and training
+4. Generate comprehensive results in `results/` directory
+
+## Key Files for Reference
+
+- **[examples/grid_world/grid_world.jl](mdc:examples/grid_world/grid_world.jl)**: Clean example using high-level interface
+- **[src/training/trainer.jl](mdc:src/training/trainer.jl)**: High-level training functions
+- **[src/core/algorithms/objectives.jl](mdc:src/core/algorithms/objectives.jl)**: Training objectives and neural network creators

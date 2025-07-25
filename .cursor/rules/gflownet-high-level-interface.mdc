@@ -1,0 +1,85 @@
+---
+description: GFlowNet High-Level Interface Usage
+globs:
+  - "**/*.jl"
+---
+
+# GFlowNet High-Level Interface Usage
+
+## ❌ NEVER Manually Define Neural Networks
+
+Users should NEVER see manual neural network definitions in examples:
+
+```julia
+# ❌ WRONG - Manual neural network definition
+forward_nn = Chain(
+    Dense(input_dim => 64, tanh),
+    Dense(64 => 32, tanh), 
+    Dense(32 => n_actions)
+)
+```
+
+## ✅ ALWAYS Use High-Level GFlowNet Functions
+
+Instead, use GFlowNet's built-in functions for automatic neural network creation:
+
+```julia
+# ✅ CORRECT - High-level interface
+forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(input_dim, hidden_dim, n_actions, rng)
+flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(input_dim, hidden_dim, rng)
+```
+
+## Required High-Level Functions
+
+All examples must use these high-level functions:
+
+1. **Neural Network Creation:**
+   - `GFlowNet.create_forward_policy()`
+   - `GFlowNet.create_flow_estimator()`
+   - `GFlowNet.create_backward_policy()` (if needed)
+
+2. **Training Configuration:**
+   - `GFlowNet.TrainingConfig()`
+   - `GFlowNet.train_gflownet()`
+
+3. **Core Sampling:**
+   - `GFlowNet.sample_trajectory()`
+
+## Training Interface
+
+Use the high-level training interface:
+
+```julia
+# ✅ CORRECT - High-level training
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.TRAJECTORY_BALANCE,
+    partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
+    n_iterations=50,
+    batch_size=16,
+    learning_rate=0.01
+)
+
+training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+```
+
+## Model Creation
+
+Follow the standard pattern for model creation:
+
+```julia
+# Create model with proper optimizer setup
+optimizer = Optimisers.setup(Optimisers.Adam(learning_rate), parameters)
+model = GFlowNet.GFlowNetModel(
+    dag=dag,
+    forward_policy=forward_policy,
+    flow_estimator=flow_estimator,
+    optimizer=optimizer,
+    parameters=parameters,
+    states=states
+)
+```
+
+This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details. 
+
+
+This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details. 
