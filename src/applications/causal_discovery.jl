@@ -251,9 +251,32 @@ function is_cyclic_util(adjacency_matrix::Matrix{Bool}, v::Int, visited::Abstrac
 end
 
 """
+    base_reward(state::DAGState)
+
+Calculate the base reward for a DAG state based on structural properties.
+This implements the required interface method.
+"""
+function base_reward(state::DAGState)
+    if !state.is_terminal
+        return 0.0
+    end
+
+    # Without data, we can use structural properties
+    # Here we use a simple sparsity-based reward
+    n_nodes = size(state.adjacency_matrix, 1)
+    n_edges = sum(state.adjacency_matrix)
+
+    # Penalize dense graphs
+    sparsity_factor = exp(-n_edges / n_nodes)
+
+    return sparsity_factor
+end
+
+"""
     reward(state::DAGState, data::Matrix{Float64})
 
-Calculate the reward for a DAG state based on how well it fits the observed data.
+Compute reward for a DAG state based on how well it explains the data.
+This uses Bayesian Information Criterion (BIC) as a scoring function.
 """
 function reward(state::DAGState, data::Matrix{Float64})
     if !state.is_terminal
@@ -318,22 +341,11 @@ end
 """
     reward(state::DAGState)
 
-Default reward function when no data is provided.
+Compute reward for a DAG state using structural properties when no data is available.
+This is the full reward interface for compatibility.
 """
 function reward(state::DAGState)
-    if !state.is_terminal
-        return 0.0
-    end
-
-    # Without data, we can use structural properties
-    # Here we use a simple sparsity-based reward
-    n_nodes = size(state.adjacency_matrix, 1)
-    n_edges = sum(state.adjacency_matrix)
-
-    # Penalize dense graphs
-    sparsity_factor = exp(-n_edges / n_nodes)
-
-    return sparsity_factor
+    return base_reward(state)
 end
 
 """

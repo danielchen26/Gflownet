@@ -25,10 +25,11 @@ and action types, ensuring type stability and better performance.
 
 # Example
 ```julia
-initial = MoleculeState(MoleculeData([], []), false)
-terminals = MoleculeState[]
-sink = MoleculeState(MoleculeData([:SINK], []), true)
-actions = [AddAtomAction(:C, (1.0, 1.0, 1.0)), TerminateMoleculeAction()]
+# Using generic state and action types (defined in your domain)
+initial = YourState(initial_data, false)
+terminals = YourState[]
+sink = YourState(terminal_data, true)
+actions = [YourAction1(), YourAction2(), TerminateAction()]
 
 dag = create_dag(initial, terminals, sink, actions)
 ```
@@ -109,11 +110,9 @@ This is a core interface method that must be implemented for each domain.
 # Implementation Note
 This is a generic fallback that throws an error. Domain-specific implementations
 should override this method for their concrete action and state types.
+
+Implementation moved to src/core/interfaces.jl to avoid method overwriting.
 """
-function is_applicable(action::AbstractAction, state::AbstractState)
-    error("is_applicable not implemented for action type $(typeof(action)) and state type $(typeof(state)). " *
-          "Please implement this method for your domain-specific types.")
-end
 
 """
     apply_action(action::AbstractAction, state::AbstractState)
@@ -131,11 +130,9 @@ This is a core interface method that must be implemented for each domain.
 # Implementation Note
 This is a generic fallback that throws an error. Domain-specific implementations
 should override this method for their concrete action and state types.
+
+Implementation moved to src/core/interfaces.jl to avoid method overwriting.
 """
-function apply_action(action::AbstractAction, state::AbstractState)
-    error("apply_action not implemented for action type $(typeof(action)) and state type $(typeof(state)). " *
-          "Please implement this method for your domain-specific types.")
-end
 
 """
     get_possible_actions(dag::DirectedAcyclicGraph, state::AbstractState)
@@ -154,6 +151,22 @@ Uses action cache for O(1) lookup instead of O(A) filtering.
 function get_possible_actions(dag::DirectedAcyclicGraph, state::AbstractState)
     # Use cached applicable actions instead of filtering all actions
     return get(dag.action_cache, state, eltype(dag.actions)[])
+end
+
+"""
+    get_applicable_actions(dag::DirectedAcyclicGraph, state::AbstractState)
+
+Get all actions applicable to a given state from the DAG. This is an alias for get_possible_actions.
+
+# Arguments
+- `dag::DirectedAcyclicGraph`: The DAG containing all possible actions
+- `state::AbstractState`: The state to get actions for
+
+# Returns
+- `Vector{AbstractAction}`: Vector of applicable actions
+"""
+function get_applicable_actions(dag::DirectedAcyclicGraph, state::AbstractState)
+    return get_possible_actions(dag, state)
 end
 
 """

@@ -62,7 +62,8 @@ end
 ```
 """
 function is_terminal_state(state::AbstractState)
-    throw(MethodError(is_terminal_state, (typeof(state),)))
+    error("is_terminal_state not implemented for state type $(typeof(state)). " *
+          "Please implement this method for your domain-specific types.")
 end
 
 """
@@ -85,34 +86,38 @@ end
 ```
 """
 function state_to_features(state::AbstractState)
-    throw(MethodError(state_to_features, (typeof(state),)))
+    error("state_to_features not implemented for state type $(typeof(state)). " *
+          "Please implement this method for your domain-specific types.")
 end
 
 """
-    reward(state::AbstractState) -> Float64
+    function base_reward(state::AbstractState) -> Float64
 
-Compute the reward for a state. For GFlowNets, rewards must be positive.
-This function MUST be implemented for all concrete state types.
+    Compute the base reward for a state. For GFlowNets, rewards must be positive.
+    This function MUST be implemented for all concrete state types.
 
-# Arguments
-- `state`: State to compute reward for
+    Note: Use `reward(state, env_data)` from training/rewards.jl for full reward computation.
 
-# Returns
-- Positive reward value
+    # Arguments
+    - `state`: State to compute reward for
 
-# Example
-```julia
-function reward(state::MyState)
-    if is_terminal_state(state)
-        return exp(-state.energy)  # Always positive
-    else
-        return 0.0
+    # Returns
+    - Positive reward value
+
+    # Example
+    ```julia
+    function base_reward(state::MyState)
+        if is_terminal_state(state)
+            return exp(-state.energy)  # Always positive
+        else
+            return 0.0
+        end
     end
-end
-```
+    ```
 """
-function reward(state::AbstractState)
-    throw(MethodError(reward, (typeof(state),)))
+function base_reward(state::AbstractState)
+    error("base_reward not implemented for state type $(typeof(state)). " *
+          "Please implement this method for your domain-specific types.")
 end
 
 """
@@ -192,7 +197,8 @@ end
 ```
 """
 function is_applicable(action::AbstractAction, state::AbstractState)
-    throw(MethodError(is_applicable, (typeof(action), typeof(state))))
+    error("is_applicable not implemented for action type $(typeof(action)) and state type $(typeof(state)). " *
+          "Please implement this method for your domain-specific types.")
 end
 
 """
@@ -216,7 +222,8 @@ end
 ```
 """
 function apply_action(action::AbstractAction, state::AbstractState)
-    throw(MethodError(apply_action, (typeof(action), typeof(state))))
+    error("apply_action not implemented for action type $(typeof(action)) and state type $(typeof(state)). " *
+          "Please implement this method for your domain-specific types.")
 end
 
 """

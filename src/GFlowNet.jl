@@ -28,6 +28,7 @@ using GraphRecipes
 # Core types and data structures
 include("core/types.jl")
 include("core/dag.jl")
+include("core/dag_builder.jl")
 include("core/interfaces.jl")
 include("core/transitions.jl")
 
@@ -79,10 +80,16 @@ include("utils/visualization.jl")
 # Exports - Core Types and Data Structures
 # =============================================================================
 
-export State, Action, Trajectory, TrajectorySet
+export Trajectory
 export DAG, TerminalSink, create_dag, add_state!, add_action!
 export is_terminal, get_parents, get_children, get_actions
 export DirectedAcyclicGraph
+
+# DAG Builder exports (new generic construction system)
+export AbstractDAGBuilder, ExplorationDAGBuilder, ExplicitDAGBuilder
+export DAGBuilderConfig, build_dag
+export create_dag_with_exploration, create_dag_from_states
+export analyze_dag, optimize_dag
 
 # =============================================================================
 # Exports - GFlowNet Model and Components
@@ -97,13 +104,12 @@ export validate_reward, validate_state_features, validate_neural_network_input, 
 # =============================================================================
 
 export AbstractState, AbstractAction, AbstractGFlowNetObjective, AbstractPolicy, AbstractPartitionFunctionEstimator
-export is_terminal_state, state_to_features, reward
+export is_terminal_state, state_to_features, reward, base_reward
 export is_applicable, apply_action
-export get_applicable_actions, get_next_states, get_previous_states
+export get_applicable_actions, get_next_states, get_previous_states, get_possible_actions
 export validate_state_interface, validate_action_interface
 export forward_transition_prob, backward_transition_prob, flow, sample_trajectory, clear_flow_cache!
-export state_to_features, edge_flow, is_terminal_state
-export get_next_states, get_previous_states, get_possible_actions
+export edge_flow
 
 # =============================================================================
 # Exports - Training Interface
@@ -149,7 +155,7 @@ export forward_action_probabilities, backward_action_probabilities
 export sample_action, sample_prev_state, estimate_flow, estimate_edge_flow
 
 # Policy utilities
-export state_to_features, normalize_probabilities, sample_from_probabilities
+export normalize_probabilities, sample_from_probabilities
 export clamp_probabilities, validate_policy_output
 export PolicyError, PolicyMetrics, increment_policy_metric!
 
@@ -192,12 +198,8 @@ export create_grid_visualization, create_reward_distribution_plot, create_traini
 
 export ActiveLearningEnvironment, CausalDiscoveryEnvironment, MolecularDesignEnvironment
 export setup_active_learning, setup_causal_discovery, setup_molecular_design
-export MoleculeState, DAGState, ExperimentState  # Export concrete state types
-
-# Application-specific actions
-export SelectExperimentAction, TerminateExperimentAction
-export AddEdgeAction, RemoveEdgeAction, TerminateDAGAction
-export AddAtomAction, AddBondAction, TerminateMoleculeAction
+# Note: Domain-specific state and action types are now available only through
+# their respective application modules (molecular_design, causal_discovery, active_learning)
 
 # =============================================================================
 # Exports - Extensions

@@ -13,42 +13,8 @@ using ..GFlowNet: trajectory_balance_loss, trajectory_balance_loss_grad, general
 using ..GFlowNet: sub_trajectory_balance_loss_grad, flow_consistency_loss_grad
 using ..GFlowNet: FlowConsistencyMode, STATE_LEVEL
 
-"""
-    update_model_parameters!(model::GFlowNetModel, config::TrainingConfig, trajectories::Vector{<:Trajectory})
-
-Update model parameters based on gradients computed for the given trajectories.
-
-# Arguments
-- `model`: GFlowNet model to update
-- `config`: Training configuration
-- `trajectories`: Batch of trajectories for gradient computation
-"""
-function update_model_parameters!(model::GFlowNetModel, config::TrainingConfig, trajectories::Vector{<:Trajectory})
-    # Compute gradients based on objective
-    if config.objective == TRAJECTORY_BALANCE
-        grad = trajectory_balance_loss_grad(model, trajectories)
-    elseif config.objective == GENERAL_TRAJECTORY_BALANCE
-        grad = general_trajectory_balance_loss_grad(model, trajectories)
-    elseif config.objective in [SUB_TRAJECTORY_BALANCE, HIERARCHICAL_SUB_TB, ADAPTIVE_SUB_TB]
-        grad = sub_trajectory_balance_loss_grad(model, trajectories)
-    elseif config.objective == FLOW_CONSISTENCY
-        mode = get(config.sub_trajectory_config, :flow_consistency_mode, STATE_LEVEL)
-        grad = flow_consistency_loss_grad(model, trajectories; mode=mode)
-    else
-        error("Unknown training objective: $(config.objective)")
-    end
-    
-    # Apply gradients to update parameters with gradient clipping
-    max_grad_norm = get(config.sub_trajectory_config, :max_grad_norm, 1.0)
-    if max_grad_norm > 0.0 && !isnothing(grad)
-        grad_norm = clip_gradients!(grad, max_grad_norm)
-        if grad_norm > max_grad_norm
-            @debug "Clipped gradients: norm $grad_norm → $max_grad_norm"
-        end
-    end
-    
-    apply_gradients!(model, grad, config.learning_rate)
-end
+# update_model_parameters! function moved to src/training/trainer.jl to avoid method overwriting
+# This file now contains only helper functions for optimization
 
 """
     apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float64)
@@ -85,7 +51,7 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
     # Fallback: component-wise update (for backward compatibility)
     new_optimizer = model.optimizer
     new_parameters = model.parameters
-    
+
     # Update forward policy - handle Optimisers.setup() structure
     if !isnothing(model.forward_policy) && haskey(gradients, :forward) && !isnothing(gradients.forward)
         # For Optimisers.setup() structure, access components directly
@@ -103,28 +69,28 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
             if !isnothing(result) && length(result) == 2
                 # Update the optimizer and parameters
                 if hasfield(typeof(model.optimizer), :forward)
-                    new_optimizer = merge(new_optimizer, (forward = result[1],))
+                    new_optimizer = merge(new_optimizer, (forward=result[1],))
                 else
                     # For Optimisers.setup structure, reconstruct appropriately
                     new_optimizer = result[1]
                 end
-                new_parameters = merge(new_parameters, (forward = result[2],))
+                new_parameters = merge(new_parameters, (forward=result[2],))
             end
         catch e
             @warn "Failed to update forward policy parameters: $e"
         end
     end
-    
+
     # Update backward policy if it exists
     if !isnothing(model.backward_policy) && haskey(gradients, :backward) && !isnothing(gradients.backward)
         result = Optimisers.update(model.optimizer.backward, model.parameters.backward, gradients.backward)
-        
+
         if !isnothing(result) && length(result) == 2
-            new_optimizer = merge(new_optimizer, (backward = result[1],))
-            new_parameters = merge(new_parameters, (backward = result[2],))
+            new_optimizer = merge(new_optimizer, (backward=result[1],))
+            new_parameters = merge(new_parameters, (backward=result[2],))
         end
     end
-    
+
     # Update flow estimator if it exists - handle Optimisers.setup() structure
     if !isnothing(model.flow_estimator) && haskey(gradients, :flow) && !isnothing(gradients.flow)
         try
@@ -141,57 +107,27 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
             if !isnothing(result) && length(result) == 2
                 # Update the optimizer and parameters
                 if hasfield(typeof(model.optimizer), :flow)
-                    new_optimizer = merge(new_optimizer, (flow = result[1],))
+                    new_optimizer = merge(new_optimizer, (flow=result[1],))
                 else
                     # For Optimisers.setup structure, reconstruct appropriately
                     new_optimizer = result[1]
                 end
-                new_parameters = merge(new_parameters, (flow = result[2],))
+                new_parameters = merge(new_parameters, (flow=result[2],))
             end
         catch e
             @warn "Failed to update flow estimator parameters: $e"
         end
     end
-    
+
     # Set the new optimizer and parameters
     model.optimizer = new_optimizer
     model.parameters = new_parameters
-    
+
     # Clear flow cache when parameters change
     clear_flow_cache!()
 end
 
-"""
-    compute_gradient_norm(gradients)
-
-Compute the L2 norm of gradients for monitoring training stability.
-
-# Arguments
-- `gradients`: Computed gradients (typically a NamedTuple)
-
-# Returns
-- L2 norm of all gradients combined
-"""
-function compute_gradient_norm(gradients)
-    total_norm_squared = 0.0
-    
-    for (name, grad) in pairs(gradients)
-        if !isnothing(grad)
-            # Handle different gradient structures
-            if grad isa AbstractArray
-                total_norm_squared += sum(abs2, grad)
-            elseif grad isa NamedTuple
-                # Recursively compute norm for nested structures
-                total_norm_squared += compute_gradient_norm(grad)
-            else
-                # For scalar gradients
-                total_norm_squared += abs2(grad)
-            end
-        end
-    end
-    
-    return sqrt(total_norm_squared)
-end
+# compute_gradient_norm function moved to src/training/trainer.jl to avoid method overwriting
 
 """
     clip_gradients!(gradients, max_norm::Float64)
@@ -208,14 +144,14 @@ Handles nested NamedTuple structures recursively.
 """
 function clip_gradients!(gradients, max_norm::Float64)
     current_norm = compute_gradient_norm(gradients)
-    
+
     if current_norm > max_norm
         scale_factor = max_norm / current_norm
-        
+
         # Recursively scale all gradients including nested structures
         _clip_gradients_recursive!(gradients, scale_factor)
     end
-    
+
     return current_norm
 end
 
@@ -266,9 +202,9 @@ function setup_optimizers(model::GFlowNetModel, learning_rate::Float64=0.001; op
     else
         error("Unknown optimizer type: $optimizer_type")
     end
-    
+
     # Setup optimizers for each component using functional approach
-    optimizers = Pair{Symbol, Any}[]
+    optimizers = Pair{Symbol,Any}[]
 
     # Forward policy optimizer
     if !isnothing(model.forward_policy)
@@ -306,7 +242,7 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
     if !isa(trajectories, Vector{<:Trajectory})
         error("trajectories must be Vector{<:Trajectory}, got $(typeof(trajectories))")
     end
-    
+
     for (i, traj) in enumerate(trajectories)
         if !isa(traj, Trajectory)
             error("Trajectory $i is not a Trajectory, got $(typeof(traj))")
@@ -317,10 +253,10 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
     end
 
     # Pre-compute trajectory data to avoid struct operations in differentiable function
-    trajectory_data = Vector{Vector{Tuple{Vector{Float32}, Vector{Int}, Int}}}()
+    trajectory_data = Vector{Vector{Tuple{Vector{Float32},Vector{Int},Int}}}()
 
     for traj in trajectories
-        traj_data = Vector{Tuple{Vector{Float32}, Vector{Int}, Int}}()
+        traj_data = Vector{Tuple{Vector{Float32},Vector{Int},Int}}()
         for i in 1:(length(traj.states)-1)
             current_state = traj.states[i]
             next_state = traj.states[i+1]
@@ -357,12 +293,12 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
                         @warn "Using fallback action mapping for non-grid domain"
                     end
                 end
-                
+
                 # Ensure all action indices are valid (1-5 for grid world)
                 if any(idx -> idx < 1 || idx > 5, action_indices)
                     error("Invalid action indices: $action_indices")
                 end
-                
+
                 target_idx = findfirst(s -> s == next_state, next_states)
 
                 if !isnothing(target_idx)
@@ -470,33 +406,33 @@ function apply_optimizer!(model::GFlowNetModel, grad; max_grad_norm::Float64=1.0
         if !isnothing(result) && length(result) == 2
             # Handle both NamedTuple and ComponentArray cases
             if isa(new_optimizer, NamedTuple)
-                new_optimizer = merge(new_optimizer, (forward = result[1],))
+                new_optimizer = merge(new_optimizer, (forward=result[1],))
             else
-                new_optimizer = (forward = result[1], flow = new_optimizer.flow)
+                new_optimizer = (forward=result[1], flow=new_optimizer.flow)
             end
 
             if isa(new_parameters, ComponentArray)
                 # For ComponentArray, update the forward component directly
                 new_parameters = ComponentArray(
-                    forward = result[2],
-                    flow = new_parameters.flow
+                    forward=result[2],
+                    flow=new_parameters.flow
                 )
             else
-                new_parameters = merge(new_parameters, (forward = result[2],))
+                new_parameters = merge(new_parameters, (forward=result[2],))
             end
         end
     end
-    
+
     # Update backward policy if it exists
     if !isnothing(model.backward_policy) && haskey(grad, :backward) && !isnothing(grad.backward)
         result = Optimisers.update(model.optimizer.backward, model.parameters.backward, grad.backward)
-        
+
         if !isnothing(result) && length(result) == 2
-            new_optimizer = merge(new_optimizer, (backward = result[1],))
-            new_parameters = merge(new_parameters, (backward = result[2],))
+            new_optimizer = merge(new_optimizer, (backward=result[1],))
+            new_parameters = merge(new_parameters, (backward=result[2],))
         end
     end
-    
+
     # Update flow estimator if it exists
     if !isnothing(model.flow_estimator) && haskey(grad, :flow) && !isnothing(grad.flow)
         result = Optimisers.update(model.optimizer.flow, model.parameters.flow, grad.flow)
@@ -504,30 +440,30 @@ function apply_optimizer!(model::GFlowNetModel, grad; max_grad_norm::Float64=1.0
         if !isnothing(result) && length(result) == 2
             # Handle both NamedTuple and ComponentArray cases
             if isa(new_optimizer, NamedTuple)
-                new_optimizer = merge(new_optimizer, (flow = result[1],))
+                new_optimizer = merge(new_optimizer, (flow=result[1],))
             else
-                new_optimizer = (forward = new_optimizer.forward, flow = result[1])
+                new_optimizer = (forward=new_optimizer.forward, flow=result[1])
             end
 
             if isa(new_parameters, ComponentArray)
                 # For ComponentArray, update the flow component directly
                 new_parameters = ComponentArray(
-                    forward = new_parameters.forward,
-                    flow = result[2]
+                    forward=new_parameters.forward,
+                    flow=result[2]
                 )
             else
-                new_parameters = merge(new_parameters, (flow = result[2],))
+                new_parameters = merge(new_parameters, (flow=result[2],))
             end
         end
     end
-    
+
     # Set the new optimizer and parameters
     model.optimizer = new_optimizer
     model.parameters = new_parameters
-    
+
     # OPTIMIZED: Clear flow cache when parameters change
     clear_flow_cache!()
-    
+
     return model
 end
 
@@ -549,10 +485,10 @@ Legacy function for examples.
 """
 function update_parameters_with_gradients!(parameters, gradients, optimizer_state, learning_rate::Float64)
     result = Optimisers.update(optimizer_state, parameters, gradients)
-    
+
     if !isnothing(result) && length(result) == 2
         return result[1], result[2]  # new_optimizer_state, new_parameters
     else
         return optimizer_state, parameters  # No update
     end
-end 
+end

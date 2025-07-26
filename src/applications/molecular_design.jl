@@ -82,9 +82,38 @@ function state_to_features(state::MoleculeState)
 end
 
 """
+    base_reward(state::MoleculeState)
+
+Calculate the base reward for a molecule state based on its properties.
+This implements the required interface method.
+"""
+function base_reward(state::MoleculeState)
+    if !state.complete
+        return 0.0
+    end
+
+    # In a real application, you would compute molecular properties
+    # like drug-likeness, binding affinity, etc.
+
+    # Simple example reward: prefer molecules with 5-20 atoms
+    n_atoms = length(state.data.atoms)
+    if n_atoms < 5
+        return 0.1
+    elseif n_atoms > 20
+        return 0.2
+    else
+        # Reward based on size and complexity
+        bond_count = length(state.data.bonds)
+        complexity_score = bond_count / n_atoms
+        return 1.0 + complexity_score
+    end
+end
+
+"""
     reward(state::MoleculeState)
 
 Calculate the reward for a molecule state based on its properties.
+This is the full reward interface for compatibility.
 """
 function reward(state::MoleculeState)
     if !state.complete

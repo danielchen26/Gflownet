@@ -34,10 +34,8 @@ function state_to_features(state::MoleculeState)
     return features
 end
 ```
+# state_to_features implementation moved to src/core/interfaces.jl to avoid method overwriting
 """
-function state_to_features(state::AbstractState)
-    error("state_to_features not implemented for $(typeof(state))")
-end
 
 # =============================================================================
 # Common Utility Functions for Policies
@@ -77,7 +75,7 @@ function sample_from_probabilities(probs::AbstractVector, rng=nothing)
     if isnothing(rng)
         rng = Random.default_rng()
     end
-    
+
     # Use categorical distribution for sampling
     return rand(rng, Categorical(probs))
 end
@@ -138,7 +136,7 @@ function initialize_policy_parameters(model, rng=nothing)
     if isnothing(rng)
         rng = Random.default_rng()
     end
-    
+
     return Lux.setup(rng, model)
 end
 
@@ -189,7 +187,7 @@ function validate_state_for_policy(state::AbstractState, policy_type::String)
     if isnothing(state)
         throw(PolicyError("Cannot use nothing state with $policy_type"))
     end
-    
+
     # Check if state_to_features is implemented
     try
         features = state_to_features(state)
@@ -276,10 +274,10 @@ function get_policy_statistics(metrics::PolicyMetrics)
         t_backward = metrics.total_backward_time[]
         t_flow = metrics.total_flow_time[]
         last_reset = metrics.last_reset_time[]
-        
+
         elapsed_time = time() - last_reset
         total_calls = n_forward + n_backward + n_flow
-        
+
         return Dict(
             :total_calls => total_calls,
             :forward_calls => n_forward,
@@ -323,4 +321,4 @@ function increment_policy_metric!(metrics::PolicyMetrics, metric_type::Symbol, t
     else
         @warn "Unknown metric type: $metric_type"
     end
-end 
+end

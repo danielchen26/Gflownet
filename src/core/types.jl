@@ -1,5 +1,6 @@
 using Graphs
 using ComponentArrays
+using Zygote
 
 """
     AbstractState
@@ -388,8 +389,8 @@ function validate_gflownet_model_construction(dag, forward_policy, backward_poli
         end
     end
 
-    # Validate parameter consistency
-    validate_model_parameters(parameters, "GFlowNetModel parameters")
+    # Validate parameter consistency (non-differentiable)
+    Zygote.@ignore validate_model_parameters(parameters, "GFlowNetModel parameters")
 
     @debug "GFlowNetModel validation passed"
 end

@@ -2,7 +2,8 @@
 # This file contains basic state and action types ONLY for testing purposes
 # These types should NOT be used in production code or examples
 
-using GFlowNet: AbstractState, AbstractAction, is_terminal_state, state_to_features, reward, is_applicable, apply_action
+using GFlowNet: AbstractState, AbstractAction
+import GFlowNet: is_terminal_state, state_to_features, is_applicable, apply_action, base_reward
 
 """
     SimpleState <: AbstractState
@@ -69,17 +70,22 @@ function state_to_features(state::SimpleState)
 end
 
 """
-    reward(state::SimpleState) -> Float64
+    base_reward(state::SimpleState) -> Float64
 
-Compute reward for SimpleState (for testing).
+Compute base reward for SimpleState (for testing).
 Returns 1.0 for terminal states, 0.0 otherwise.
 """
-function reward(state::SimpleState)
+function base_reward(state::SimpleState)
     if is_terminal_state(state)
         return 1.0  # Simple reward for reaching terminal state
     else
         return 0.0
     end
+end
+
+# Also define the full reward interface for compatibility
+function reward(state::SimpleState, env_data=Dict())
+    return base_reward(state)
 end
 
 """

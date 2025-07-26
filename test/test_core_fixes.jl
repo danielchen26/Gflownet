@@ -8,7 +8,7 @@ using Random
 using Zygote
 
 # Load test utilities for testing
-include("test_utilities.jl")
+include(joinpath(@__DIR__, "test_utilities.jl"))
 
 @testset "Core Fixes Test Suite" begin
 

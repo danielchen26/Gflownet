@@ -4,6 +4,7 @@ using NNlib: softmax
 using Random
 using Lux
 using Optimisers
+using Zygote
 
 """
     state_to_features(state::AbstractState)
@@ -40,9 +41,9 @@ Ensures features are properly shaped for Lux models and handles batch dimensions
 Includes comprehensive input validation to prevent numerical issues.
 """
 function safe_model_call(model, features, parameters, states)
-    # Comprehensive input validation
-    validate_neural_network_input(features, "features")
-    validate_model_parameters(parameters, "parameters")
+    # Comprehensive input validation (non-differentiable)
+    Zygote.@ignore validate_neural_network_input(features, "features")
+    Zygote.@ignore validate_model_parameters(parameters, "parameters")
 
     # Convert to Float32 to ensure type stability
     features = convert(Array{Float32}, features)
@@ -60,8 +61,8 @@ function safe_model_call(model, features, parameters, states)
         # Use proper Lux API for model application
         outputs, new_states = model(features, parameters, states)
 
-        # Validate outputs before returning
-        validate_neural_network_output(outputs, "model output")
+        # Validate outputs before returning (non-differentiable)
+        Zygote.@ignore validate_neural_network_output(outputs, "model output")
 
         # If outputs have batch dimension of 1, flatten to a vector
         if size(outputs, 2) == 1
