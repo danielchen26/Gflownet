@@ -109,11 +109,12 @@ function sample_trajectory(model::GFlowNetModel; rng=nothing)
         )
         
         # FIXED: Use proper interface functions instead of hardcoded logic
-        # Get all applicable actions for current state
+        # Get all applicable actions for current state using functional approach
         applicable_actions = Vector{AbstractAction}()
         for action in model.dag.actions
             if is_applicable(action, current_state)
-                push!(applicable_actions, action)
+                # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+                applicable_actions = vcat(applicable_actions, [action])
             end
         end
         
@@ -149,8 +150,9 @@ function sample_trajectory(model::GFlowNetModel; rng=nothing)
         
         # Apply the chosen action to get next state
         next_state = apply_action(chosen_action, current_state)
-        
-        push!(states, next_state)
+
+        # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+        states = vcat(states, [next_state])
         current_state = next_state
     end
 

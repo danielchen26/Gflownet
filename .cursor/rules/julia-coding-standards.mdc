@@ -1,9 +1,74 @@
----
-globs: *.jl
-description: Julia coding standards and best practices for GFlowNet development
----
 
 # Julia Coding Standards for GFlowNet
+
+## 🚨 CRITICAL: Automatic Differentiation (Zygote) Compatibility
+
+### The #1 Rule: NO IN-PLACE MUTATIONS in Differentiable Functions
+
+**Any function that might be called during gradient computation MUST avoid mutations:**
+
+```julia
+# ❌ WRONG - Causes "Mutating arrays is not supported" error
+function apply_action(action::GridAction, state::GridState)
+    x, y = state.x, state.y
+    isa(action, MoveUp) && (y += 1)      # ← MUTATION! Breaks Zygote!
+    isa(action, MoveDown) && (y -= 1)    # ← MUTATION! Breaks Zygote!
+    return GridState(x, y, false)
+end
+
+# ✅ CORRECT - Pure functional approach
+function apply_action(action::GridAction, state::GridState)
+    # Use conditional expressions instead of mutations
+    x = isa(action, MoveLeft) ? state.x - 1 :
+        isa(action, MoveRight) ? state.x + 1 : state.x
+    
+    y = isa(action, MoveUp) ? state.y + 1 :
+        isa(action, MoveDown) ? state.y - 1 : state.y
+    
+    return GridState(x, y, false)
+end
+```
+
+### AD-Friendly vs AD-Hostile Patterns
+
+**✅ AD-FRIENDLY:**
+```julia
+# Pure transformations
+new_state = transform(old_state)
+
+# Conditional assignments  
+x = condition ? value_a : value_b
+
+# Construct new objects
+return SomeStruct(computed_values...)
+
+# Functional array operations
+new_array = map(f, old_array)
+```
+
+**❌ AD-HOSTILE:**
+```julia
+# In-place mutations
+x += 1
+y -= delta
+z *= factor
+
+# Array mutations
+push!(array, item)
+append!(array, items)
+array[i] = value
+
+# Field mutations
+object.field = new_value
+```
+
+### Debugging Zygote Issues
+
+When you see: `"Mutating arrays is not supported -- called push!(Vector{Int64}, ...)"`:
+
+1. **Find the mutation**: Look for `+=`, `-=`, `*=`, `push!`, `append!`, etc.
+2. **Replace with pure functions**: Use conditional expressions and new object construction
+3. **Test in isolation**: Create minimal examples to verify AD compatibility
 
 ## Type System Best Practices
 

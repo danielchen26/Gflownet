@@ -162,11 +162,18 @@ export compute_reward, ensure_positive
 # Exports - Utilities
 # =============================================================================
 
-# Export logging utilities
+# Core utility functions and helpers
 export GFlowNetLogger, log_metric!, log_iteration!, get_metric, get_last_metric, reset!, save_metrics
 export summarize_performance, time_execution, benchmark_sampling
-export log_info, log_warning, log_error
-export visualize_dag, plot_training_progress, save_trajectory_plot
+
+# Visualization utilities 
+export visualize_dag, visualize_flows, visualize_trajectory
+export visualize_reward_distribution, visualize_training_progress
+
+# HTML Report System
+export generate_html_report, save_html_report
+export ReportData, add_section!, add_plot!, add_table!, add_metrics!
+export create_grid_visualization, create_reward_distribution_plot, create_training_progress_plot
 
 # =============================================================================
 # Exports - Applications

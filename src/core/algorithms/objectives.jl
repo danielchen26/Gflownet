@@ -525,19 +525,19 @@ function trajectory_balance_loss_grad(model::GFlowNetModel, trajectories::Vector
                     # Compute transition probability using ACTION-BASED approach (CORRECT)
                     next_states = get_next_states(model.dag, current_state)
                     if !isempty(next_states)
-                        # FIXED: Map next states to their corresponding actions (not state indices)
+                        # FIXED: Map next states to their corresponding actions using functional approach
                         action_indices = Int[]
                         for ns in next_states
                             if ns.is_terminal  # Check terminal first
-                                push!(action_indices, 5)  # Terminate action (index 5)
+                                action_indices = vcat(action_indices, [5])  # Terminate action (index 5)
                             elseif ns.x > current_state.x  # Moving right
-                                push!(action_indices, 4)  # MoveRight action (index 4)
+                                action_indices = vcat(action_indices, [4])  # MoveRight action (index 4)
                             elseif ns.x < current_state.x  # Moving left
-                                push!(action_indices, 3)  # MoveLeft action (index 3)
+                                action_indices = vcat(action_indices, [3])  # MoveLeft action (index 3)
                             elseif ns.y > current_state.y  # Moving up
-                                push!(action_indices, 1)  # MoveUp action (index 1)
+                                action_indices = vcat(action_indices, [1])  # MoveUp action (index 1)
                             elseif ns.y < current_state.y  # Moving down
-                                push!(action_indices, 2)  # MoveDown action (index 2)
+                                action_indices = vcat(action_indices, [2])  # MoveDown action (index 2)
                             else
                                 error("Invalid state transition from $(current_state) to $(ns)")
                             end

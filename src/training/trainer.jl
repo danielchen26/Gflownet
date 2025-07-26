@@ -134,15 +134,15 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig;
     end
     
     for iteration in 1:config.n_iterations
-        if verbose && iteration % 10 == 1
-            println("\n📊 Iteration $iteration/$config.n_iterations")
-            println("   📈 Sampling $config.batch_size trajectories...")
+        if verbose
+            println("\n📊 Iteration $iteration/$(config.n_iterations)")
+            println("   📈 Sampling $(config.batch_size) trajectories...")
         end
         
         # Sample trajectories for this batch
         trajectories = [sample_trajectory(model) for _ in 1:config.batch_size]
         
-        if verbose && iteration % 10 == 1
+        if verbose
             avg_traj_length = mean(length(traj.states) for traj in trajectories)
             println("   ✅ Sampled trajectories (avg length: $(round(avg_traj_length, digits=2)))")
             println("   🧮 Computing loss...")
@@ -150,7 +150,8 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig;
         
         # Compute loss
         current_loss = compute_loss(config, model, trajectories)
-        push!(history[:losses], current_loss)
+        # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+        history[:losses] = vcat(history[:losses], [current_loss])
         
         # Compute trajectory rewards for logging
         rewards = [reward(traj.states[end]) for traj in trajectories]
@@ -162,7 +163,7 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig;
             log_to_file!(logger, iteration, current_loss, reward_mean, reward_std, history[:start_time])
         end
         
-        if verbose && iteration % 10 == 1
+        if verbose
             println("   📉 Loss: $(round(current_loss, digits=6))")
             println("   🎯 Reward: μ=$(round(reward_mean, digits=3)), σ=$(round(reward_std, digits=3))")
         end
@@ -171,7 +172,8 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig;
         if iteration % config.partition_update_frequency == 0
             update_partition_function!(model, trajectories)
             current_Z = estimate_partition_function(model)
-            push!(history[:partition_function_estimates], current_Z)
+            # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+            history[:partition_function_estimates] = vcat(history[:partition_function_estimates], [current_Z])
             
             if verbose && iteration % (config.validation_frequency * 2) == 0
                 println("🔄 Iteration $iteration: Loss = $(round(current_loss, digits=6)), Z = $(round(current_Z, digits=6))")
@@ -181,7 +183,8 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig;
         # Validation
         if !isnothing(validation_data) && iteration % config.validation_frequency == 0
             val_loss = compute_loss(config, model, validation_data)
-            push!(history[:validation_losses], val_loss)
+            # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+            history[:validation_losses] = vcat(history[:validation_losses], [val_loss])
             
             # Early stopping check
             if val_loss < history[:best_loss]
@@ -200,7 +203,7 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig;
         end
         
         # Compute gradients and update model
-        if verbose && iteration % 10 == 1
+        if verbose
             println("   🔄 Computing gradients and updating parameters...")
         end
         update_model_parameters!(model, config, trajectories)

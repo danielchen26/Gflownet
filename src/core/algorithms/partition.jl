@@ -152,7 +152,8 @@ function estimate_partition_function(estimator::SamplingPartitionFunctionEstimat
             # Importance sampling estimate: R(x) / P_F(τ)
             if trajectory_prob > 1e-10
                 estimate = final_reward / trajectory_prob
-                push!(estimates, estimate)
+                # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+                estimates = vcat(estimates, [estimate])
             else
                 # Skip trajectories with zero probability
                 @warn "Zero probability trajectory encountered in partition function estimation"
@@ -183,10 +184,11 @@ function estimate_partition_function(estimator::SamplingPartitionFunctionEstimat
         smoothed_estimate = current_estimate
     end
     
-    # Update history
-    push!(estimator.estimate_history, smoothed_estimate)
+    # Update history using functional approach to avoid mutations
+    # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+    estimator.estimate_history = vcat(estimator.estimate_history, [smoothed_estimate])
     if length(estimator.estimate_history) > estimator.history_length
-        popfirst!(estimator.estimate_history)
+        estimator.estimate_history = estimator.estimate_history[2:end]  # Remove first element functionally
     end
     
     return smoothed_estimate

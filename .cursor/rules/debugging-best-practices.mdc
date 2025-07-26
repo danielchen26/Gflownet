@@ -1,0 +1,145 @@
+# Evidence-Based Debugging for GFlowNet
+
+## 🎯 The Golden Rule: Check Previous Success Before Making Changes
+
+### Lesson from Grid World Example
+
+**The Problem**: Grid world example was failing with Zygote mutation errors.
+
+**❌ Wrong Approach (Symptom-Based)**:
+1. Training fails → Reduce complexity
+2. Lower learning rate, fewer iterations
+3. Change reward structure
+4. Miss the root cause
+
+**✅ Correct Approach (Evidence-Based)**:
+1. **Look for previous successful runs**
+2. **Compare what changed** from working version
+3. **Identify root cause** (mutations in `apply_action`)
+4. **Fix root cause only**, keep everything else intact
+
+### Evidence-Based Debugging Steps
+
+#### 1. Gather Success Evidence First
+```bash
+# Check for previous successful runs
+ls results/
+grep "success" *.log
+git log --oneline
+```
+
+**Look for**:
+- Previous timestamped output files
+- HTML reports that were generated successfully  
+- CSV files with actual results
+- Log files showing completed training
+
+#### 2. Compare Working vs Broken Versions
+```julia
+# If it worked before, ask:
+# - What functions changed?
+# - What configurations changed? 
+# - What dependencies updated?
+```
+
+#### 3. Identify Root Cause Patterns
+
+**Common Root Causes in GFlowNet**:
+- **Zygote mutations**: Look for `+=`, `-=`, `push!`, in-place operations
+- **Type instability**: Mixed types, `Any` in containers
+- **Numerical issues**: NaN, Inf, negative rewards
+- **Interface changes**: Missing required methods
+
+#### 4. Minimal Reproduction
+```julia
+# Create minimal failing example
+function test_apply_action()
+    state = GridState(1, 1, false)
+    action = MoveUp()
+    
+    # Test if this works with Zygote
+    using Zygote
+    gradient(x -> sum(apply_action(action, state).x), 1.0)
+end
+```
+
+## 🔍 Debugging Anti-Patterns to Avoid
+
+### ❌ Shotgun Debugging
+```julia
+# DON'T change multiple things at once:
+# - Lower learning rate AND
+# - Reduce batch size AND  
+# - Change model architecture AND
+# - Modify reward function
+```
+
+### ❌ Assumption-Based Fixes
+```julia
+# DON'T assume the problem without evidence:
+# "Training is unstable, must be learning rate"
+# "Loss is NaN, must be gradient explosion"
+```
+
+### ❌ Ignoring Success Evidence
+```julia
+# DON'T ignore that it worked before:
+# "Let's rewrite everything from scratch"
+# "The old approach was probably wrong"
+```
+
+## ✅ Evidence-First Methodology
+
+### Step 1: Document Current State
+```julia
+println("🔍 DEBUGGING SESSION START")
+println("Current error: $error_message")
+println("Last known working version: $version")
+println("Changes since then: $changes")
+```
+
+### Step 2: Reproduce Success
+```julia
+# Try to run the exact working version first
+git checkout $working_commit
+julia script.jl  # Does this work?
+```
+
+### Step 3: Bisect Changes
+```julia
+# Identify minimal change that breaks it
+# Test each change individually
+```
+
+### Step 4: Root Cause Analysis
+```julia
+# Focus on the specific failing component
+# Don't change unrelated parts
+```
+
+## 🎯 Key Mantras
+
+1. **"If it worked before, what changed?"** 
+2. **"Trust the evidence, not assumptions"**
+3. **"Fix root causes, not symptoms"**
+4. **"One change at a time"**
+5. **"Previous success proves the approach is sound"**
+
+## Success Story: Grid World Debug
+
+**Evidence Found**: 
+- HTML report from `2025-07-25_18-59-32` showing 50 trajectories
+- Max reward 10.0 achieved in previous runs
+- Training completed successfully before
+
+**Root Cause**: 
+- Mutations in `apply_action` function broke Zygote differentiation
+- NOT the training configuration or reward structure
+
+**Fix**: 
+- Replace `y += 1` with `y = condition ? state.y + 1 : state.y`
+- Keep all other working configuration intact
+
+**Result**: 
+- Fixed with minimal changes
+- Maintained all working functionality

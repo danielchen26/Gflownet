@@ -66,24 +66,52 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
         @warn "Gradients are Nothing, skipping parameter update"
         return
     end
-    
-    # Ensure parameters are ComponentArray for consistent gradient operations
-    if !(model.parameters isa ComponentArray)
-        @warn "Converting model parameters to ComponentArray for gradient compatibility"
-        model.parameters = to_component_array(model.parameters)
+
+    # FIXED: For Optimisers.setup() structure, update parameters directly
+    # This handles the ComponentArray + Optimisers.setup() combination properly
+    try
+        result = Optimisers.update(model.optimizer, model.parameters, gradients)
+
+        if !isnothing(result) && length(result) == 2
+            # Update both optimizer state and parameters
+            model.optimizer = result[1]
+            model.parameters = result[2]
+            return  # Success - exit early
+        end
+    catch e
+        @debug "Direct optimizer update failed: $e, trying component-wise update"
     end
-    
-    # Create new optimizer and parameter tuples
+
+    # Fallback: component-wise update (for backward compatibility)
     new_optimizer = model.optimizer
     new_parameters = model.parameters
     
-    # Update forward policy
+    # Update forward policy - handle Optimisers.setup() structure
     if !isnothing(model.forward_policy) && haskey(gradients, :forward) && !isnothing(gradients.forward)
-        result = Optimisers.update(model.optimizer.forward, model.parameters.forward, gradients.forward)
-        
-        if !isnothing(result) && length(result) == 2
-            new_optimizer = merge(new_optimizer, (forward = result[1],))
-            new_parameters = merge(new_parameters, (forward = result[2],))
+        # For Optimisers.setup() structure, access components directly
+        try
+            # Try to access forward component if it exists
+            if hasfield(typeof(model.optimizer), :forward)
+                opt_forward = model.optimizer.forward
+            else
+                # For ComponentArray parameters with Optimisers.setup, use the optimizer directly
+                opt_forward = model.optimizer
+            end
+
+            result = Optimisers.update(opt_forward, model.parameters.forward, gradients.forward)
+
+            if !isnothing(result) && length(result) == 2
+                # Update the optimizer and parameters
+                if hasfield(typeof(model.optimizer), :forward)
+                    new_optimizer = merge(new_optimizer, (forward = result[1],))
+                else
+                    # For Optimisers.setup structure, reconstruct appropriately
+                    new_optimizer = result[1]
+                end
+                new_parameters = merge(new_parameters, (forward = result[2],))
+            end
+        catch e
+            @warn "Failed to update forward policy parameters: $e"
         end
     end
     
@@ -97,13 +125,31 @@ function apply_gradients!(model::GFlowNetModel, gradients, learning_rate::Float6
         end
     end
     
-    # Update flow estimator if it exists
+    # Update flow estimator if it exists - handle Optimisers.setup() structure
     if !isnothing(model.flow_estimator) && haskey(gradients, :flow) && !isnothing(gradients.flow)
-        result = Optimisers.update(model.optimizer.flow, model.parameters.flow, gradients.flow)
-        
-        if !isnothing(result) && length(result) == 2
-            new_optimizer = merge(new_optimizer, (flow = result[1],))
-            new_parameters = merge(new_parameters, (flow = result[2],))
+        try
+            # For Optimisers.setup() structure, access components directly
+            if hasfield(typeof(model.optimizer), :flow)
+                opt_flow = model.optimizer.flow
+            else
+                # For ComponentArray parameters with Optimisers.setup, use the optimizer directly
+                opt_flow = model.optimizer
+            end
+
+            result = Optimisers.update(opt_flow, model.parameters.flow, gradients.flow)
+
+            if !isnothing(result) && length(result) == 2
+                # Update the optimizer and parameters
+                if hasfield(typeof(model.optimizer), :flow)
+                    new_optimizer = merge(new_optimizer, (flow = result[1],))
+                else
+                    # For Optimisers.setup structure, reconstruct appropriately
+                    new_optimizer = result[1]
+                end
+                new_parameters = merge(new_parameters, (flow = result[2],))
+            end
+        catch e
+            @warn "Failed to update flow estimator parameters: $e"
         end
     end
     
@@ -221,24 +267,24 @@ function setup_optimizers(model::GFlowNetModel, learning_rate::Float64=0.001; op
         error("Unknown optimizer type: $optimizer_type")
     end
     
-    # Setup optimizers for each component
-    optimizers = []
-    
+    # Setup optimizers for each component using functional approach
+    optimizers = Pair{Symbol, Any}[]
+
     # Forward policy optimizer
     if !isnothing(model.forward_policy)
-        push!(optimizers, :forward => opt_fn())
+        optimizers = vcat(optimizers, [:forward => opt_fn()])
     end
-    
+
     # Backward policy optimizer
     if !isnothing(model.backward_policy)
-        push!(optimizers, :backward => opt_fn())
+        optimizers = vcat(optimizers, [:backward => opt_fn()])
     end
-    
+
     # Flow estimator optimizer
     if !isnothing(model.flow_estimator)
-        push!(optimizers, :flow => opt_fn())
+        optimizers = vcat(optimizers, [:flow => opt_fn()])
     end
-    
+
     return NamedTuple(optimizers)
 end
 
@@ -287,28 +333,27 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
 
             if !isempty(next_states) && next_state in next_states
                 # FIXED: Map next states to their corresponding actions (not state indices)
-                # This assumes GridWorld-like actions: UP=1, DOWN=2, LEFT=3, RIGHT=4, TERMINATE=5
+                # Use functional approach to avoid push! mutations that break Zygote
                 action_indices = Int[]
                 for ns in next_states
                     if hasfield(typeof(ns), :is_terminal) && ns.is_terminal  # Check terminal first
-                        push!(action_indices, 5)  # Terminate action (index 5)
+                        action_indices = vcat(action_indices, [5])  # Terminate action (index 5)
                     elseif hasfield(typeof(ns), :x) && hasfield(typeof(ns), :y)
                         # Grid world specific logic
                         if ns.x > current_state.x  # Moving right
-                            push!(action_indices, 4)  # MoveRight action (index 4)
+                            action_indices = vcat(action_indices, [4])  # MoveRight action (index 4)
                         elseif ns.x < current_state.x  # Moving left
-                            push!(action_indices, 3)  # MoveLeft action (index 3)
+                            action_indices = vcat(action_indices, [3])  # MoveLeft action (index 3)
                         elseif ns.y > current_state.y  # Moving up
-                            push!(action_indices, 1)  # MoveUp action (index 1)
+                            action_indices = vcat(action_indices, [1])  # MoveUp action (index 1)
                         elseif ns.y < current_state.y  # Moving down
-                            push!(action_indices, 2)  # MoveDown action (index 2)
+                            action_indices = vcat(action_indices, [2])  # MoveDown action (index 2)
                         else
                             error("Invalid state transition from $(current_state) to $(ns)")
                         end
                     else
                         # Fallback: assume sequential action mapping for non-grid domains
-                        # This is a temporary solution for compatibility
-                        push!(action_indices, 1)  # Default to first action
+                        action_indices = vcat(action_indices, [1])  # Default to first action
                         @warn "Using fallback action mapping for non-grid domain"
                     end
                 end
@@ -321,11 +366,13 @@ function compute_loss_and_grad(model::GFlowNetModel, trajectories::Vector{<:Traj
                 target_idx = findfirst(s -> s == next_state, next_states)
 
                 if !isnothing(target_idx)
-                    push!(traj_data, (features, action_indices, target_idx))
+                    # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+                    traj_data = vcat(traj_data, [(features, action_indices, target_idx)])
                 end
             end
         end
-        push!(trajectory_data, traj_data)
+        # FIXED: Use vcat instead of push! to avoid Zygote mutation error
+        trajectory_data = vcat(trajectory_data, [traj_data])
     end
 
     total_transitions = sum(length(td) for td in trajectory_data)

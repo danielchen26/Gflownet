@@ -1,10 +1,15 @@
-# 🎯 Grid World GFlowNet Example
-# ===============================
-# 
-# A complete grid world environment demonstrating GFlowNet's HIGH-LEVEL interface.
-# Uses GFlowNet's built-in functions: create_forward_policy, create_flow_estimator, train_gflownet
+"""
+🎯 Grid World GFlowNet Example
+=============================
 
-using GFlowNet, Random, Dates, ComponentArrays, Optimisers
+A complete grid world environment demonstrating GFlowNet's high-level interface.
+Uses GFlowNet's built-in functions for neural network creation and training.
+"""
+
+using GFlowNet, Random, Dates, ComponentArrays, Optimisers, Statistics
+
+# Include report generation functions
+include("report_generation.jl")
 
 println("🎯 Grid World GFlowNet Example")
 println("=" ^ 50)
@@ -36,7 +41,11 @@ const REWARD_POSITIONS = Dict((3, 3) => 10.0, (1, 5) => 5.0, (5, 1) => 5.0)
 # =============================================================================
 
 function GFlowNet.state_to_features(state::GridState)
-    return Float32[(state.x-1)/(GRID_SIZE-1), (state.y-1)/(GRID_SIZE-1), state.is_terminal ? 1.0f0 : 0.0f0]
+    # More Zygote-friendly: explicit type conversions and avoid array comprehensions
+    x_norm = Float32((state.x-1)/(GRID_SIZE-1))
+    y_norm = Float32((state.y-1)/(GRID_SIZE-1))
+    terminal_flag = state.is_terminal ? Float32(1.0) : Float32(0.0)
+    return Float32[x_norm, y_norm, terminal_flag]
 end
 
 function GFlowNet.is_applicable(action::GridAction, state::GridState)
@@ -51,11 +60,14 @@ end
 
 function GFlowNet.apply_action(action::GridAction, state::GridState)
     isa(action, Terminate) && return GridState(state.x, state.y, true)
-    x, y = state.x, state.y
-    isa(action, MoveUp) && (y += 1)
-    isa(action, MoveDown) && (y -= 1)  
-    isa(action, MoveLeft) && (x -= 1)
-    isa(action, MoveRight) && (x += 1)
+
+    # Avoid mutations - use conditional expressions instead
+    x = isa(action, MoveLeft) ? state.x - 1 :
+        isa(action, MoveRight) ? state.x + 1 : state.x
+
+    y = isa(action, MoveUp) ? state.y + 1 :
+        isa(action, MoveDown) ? state.y - 1 : state.y
+
     return GridState(x, y, false)
 end
 
@@ -63,7 +75,16 @@ GFlowNet.is_terminal_state(state::GridState) = state.is_terminal
 
 function GFlowNet.reward(state::GridState)
     !state.is_terminal && return 0.0f0
-    return Float32(get(REWARD_POSITIONS, (state.x, state.y), 1.0))
+
+    # FIXED: Make Zygote-compatible by avoiding dictionary get() calls
+    # Use conditional logic instead of dictionary lookup
+    if state.x == 3 && state.y == 3
+        return 10.0f0  # High reward position
+    elseif (state.x == 1 && state.y == 5) || (state.x == 5 && state.y == 1)
+        return 5.0f0   # Medium reward positions
+    else
+        return 1.0f0   # Default reward
+    end
 end
 
 # =============================================================================
@@ -76,10 +97,11 @@ function create_gflownet_model()
     initial_state = GridState(1, 1, false)
     actions = GridAction[UP, DOWN, LEFT, RIGHT, TERMINATE]
     
-    # Create DAG using core GFlowNet function
-    reachable_terminal_states = [GridState(x, y, true) for x in 1:GRID_SIZE, y in 1:GRID_SIZE] |> vec
+    # Create DAG - the warnings are actually OK, they just mean some terminal states
+    # might not be reachable in practice, but the DAG structure is still valid
+    terminal_states = [GridState(x, y, true) for x in 1:GRID_SIZE for y in 1:GRID_SIZE]
     terminal_sink = GridState(0, 0, true)
-    dag = GFlowNet.create_dag(initial_state, reachable_terminal_states, terminal_sink, actions)
+    dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
     
     # Use HIGH-LEVEL GFlowNet functions to create neural networks automatically
     input_dim, hidden_dim, n_actions = 3, 64, 5
@@ -133,19 +155,16 @@ end
 function train_gflownet_high_level(model)
     println("\n🚀 Training using HIGH-LEVEL GFlowNet interface...")
     
-    # Create training configuration following working examples exactly
+    # Training configuration optimized for demonstrating learning progress
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
         partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
-        n_iterations=50,
+        n_iterations=20,  # Shorter for demonstration
         batch_size=16,
         learning_rate=0.01,
-        early_stopping_patience=10,
+        early_stopping_patience=15,
         validation_frequency=5,
-        partition_update_frequency=10,
-        sub_trajectory_config=Dict{Symbol, Any}(
-            :max_grad_norm => 1.0
-        )
+        partition_update_frequency=5
     )
     
     println("✅ Using GFlowNet's TrainingConfig:")
@@ -159,14 +178,19 @@ function train_gflownet_high_level(model)
     
     try
         training_history = GFlowNet.train_gflownet(model, config; verbose=true)
-        
+
         println("✅ HIGH-LEVEL training completed!")
         return model, training_history
-        
+
     catch e
         println("⚠️  High-level training encountered an issue: $e")
+        println("🔍 Full error details:")
+        for (exc, bt) in Base.catch_stack()
+            showerror(stdout, exc, bt)
+            println()
+        end
         println("🔄 Falling back to simplified sampling for demonstration...")
-        
+
         # Simple fallback to demonstrate sampling still works
         println("📊 Testing core sampling function:")
         for i in 1:5
@@ -179,7 +203,7 @@ function train_gflownet_high_level(model)
                 println("   Sample $i: Error in sampling - $e2")
             end
         end
-        
+
         return model, Dict()
     end
 end
@@ -240,93 +264,7 @@ function evaluate_gflownet_model(model; n_trajectories=50)
 end
 
 # =============================================================================
-# Results Saving
-# =============================================================================
-
-function save_gflownet_results(training_history, eval_trajectories, eval_rewards)
-    println("\n📊 Saving comprehensive results...")
-    
-    mkpath("results")
-    timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-    
-    # Save evaluation trajectories
-    if !isempty(eval_trajectories)
-        open("results/grid_world_trajectories.csv", "w") do f
-            println(f, "trajectory_id,step,x,y,is_terminal,reward")
-            for (i, traj) in enumerate(eval_trajectories)
-                for (j, state) in enumerate(traj.states)
-                    reward = j == length(traj.states) ? GFlowNet.reward(state) : 0.0
-                    println(f, "$i,$j,$(state.x),$(state.y),$(state.is_terminal),$reward")
-                end
-            end
-        end
-    end
-    
-    # Save rewards summary
-    if !isempty(eval_rewards)
-        open("results/grid_world_rewards.csv", "w") do f
-            println(f, "trajectory_id,final_reward,trajectory_length")
-            for (i, (traj, reward)) in enumerate(zip(eval_trajectories, eval_rewards))
-                println(f, "$i,$reward,$(length(traj.states))")
-            end
-        end
-    end
-    
-    # Save training history if available
-    if !isempty(training_history)
-        open("results/grid_world_training.csv", "w") do f
-            println(f, "iteration,loss")
-            if haskey(training_history, :losses)
-                for (i, loss) in enumerate(training_history[:losses])
-                    println(f, "$i,$loss")
-                end
-            end
-        end
-    end
-    
-    # Save comprehensive summary
-    open("results/grid_world_results_$timestamp.txt", "w") do f
-        println(f, "Grid World GFlowNet HIGH-LEVEL Interface Results")
-        println(f, "=" ^ 60)
-        println(f, "Execution time: $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
-        
-        println(f, "\n🔧 HIGH-LEVEL Functions Used:")
-        println(f, "✅ GFlowNet.create_forward_policy() - automatic neural network creation")
-        println(f, "✅ GFlowNet.create_flow_estimator() - automatic neural network creation")
-        println(f, "✅ GFlowNet.TrainingConfig() - configuration management")
-        println(f, "✅ GFlowNet.train_gflownet() - high-level training interface")
-        println(f, "✅ GFlowNet.sample_trajectory() - core sampling")
-        
-        println(f, "\n📊 Evaluation Results:")
-        if !isempty(eval_rewards)
-            println(f, "Number of trajectories: $(length(eval_trajectories))")
-            println(f, "Mean reward: $(round(sum(eval_rewards) / length(eval_rewards), digits=2))")
-            println(f, "Max reward: $(maximum(eval_rewards))")
-            println(f, "High-reward trajectories (≥5.0): $(count(r -> r >= 5.0, eval_rewards))")
-        else
-            println(f, "No evaluation data available")
-        end
-        
-        if !isempty(training_history)
-            println(f, "\n📈 Training History Available: $(length(training_history)) metrics")
-        else
-            println(f, "\n📈 Training History: Interface demonstration completed")
-        end
-    end
-    
-    println("✅ Results saved to results/ directory:")
-    if !isempty(eval_trajectories)
-        println("   - grid_world_trajectories.csv (sampled paths)")
-        println("   - grid_world_rewards.csv (reward summary)")
-    end
-    println("   - grid_world_results_$timestamp.txt (full summary)")
-    if !isempty(training_history)
-        println("   - grid_world_training.csv (training history)")
-    end
-end
-
-# =============================================================================
-# Main Execution Demonstrating HIGH-LEVEL Interface
+# Main Execution Demonstrating HIGH-LEVEL Interface  
 # =============================================================================
 
 function main()
@@ -341,33 +279,20 @@ function main()
         # Create model using HIGH-LEVEL functions
         model = create_gflownet_model()
         
-        # Train using HIGH-LEVEL interface
-        trained_model, training_history = train_gflownet_high_level(model)
-        
-        # Evaluate using core functions
-        eval_trajectories, eval_rewards = evaluate_gflownet_model(trained_model)
-        
-        # Save comprehensive results
-        save_gflownet_results(training_history, eval_trajectories, eval_rewards)
-        
-        # Summary
-        if !isempty(eval_rewards)
-            high_reward_rate = count(r -> r >= 5.0, eval_rewards) / length(eval_rewards)
-            avg_reward = sum(eval_rewards) / length(eval_rewards)
-            
-            println("\n🎯 HIGH-LEVEL Interface Results:")
-            println("   - Success rate: $(round(high_reward_rate * 100, digits=1))%")
-            println("   - Average reward: $(round(avg_reward, digits=2))")
-            println("   - Proper interface usage demonstrated!")
-        end
-        
-        println("\n✅ GFlowNet HIGH-LEVEL interface example completed!")
-        println("🔧 Used ONLY high-level GFlowNet functions:")
-        println("   • create_forward_policy() for neural networks")
-        println("   • create_flow_estimator() for neural networks") 
-        println("   • TrainingConfig() for training parameters")
-        println("   • train_gflownet() for training")
-        println("   • NO manual Chain() or Dense() definitions!")
+        # Train using HIGH-LEVEL functions
+        model, training_history = train_gflownet_high_level(model)
+
+        # Evaluate model
+        println("\n📊 Evaluating model...")
+        eval_trajectories, eval_rewards = evaluate_gflownet_model(model)
+
+        # Generate comprehensive results after we have all the data
+        println("\n📄 Generating comprehensive results and HTML report...")
+        html_path = generate_comprehensive_results(training_history, eval_trajectories, eval_rewards)
+
+        println("\n🎯 Comprehensive GFlowNet example completed successfully!")
+        println("📄 HTML Report: $html_path")
+        println("📊 All results saved in 'results/' directory")
         
     catch e
         println("❌ Error: $e")
@@ -379,4 +304,4 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     main()
     println("=" ^ 50)
-end 
+end

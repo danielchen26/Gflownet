@@ -34,9 +34,44 @@ flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(input_dim, hid
 All examples must use these high-level functions:
 
 1. **Neural Network Creation:**
-   - `GFlowNet.create_forward_policy()`
-   - `GFlowNet.create_flow_estimator()`
+   - `GFlowNet.create_forward_policy(input_dim, hidden_dim, n_actions, rng)`
+   - `GFlowNet.create_flow_estimator(input_dim, hidden_dim, rng)`
    - `GFlowNet.create_backward_policy()` (if needed)
+
+2. **Training:**
+   - `GFlowNet.TrainingConfig()` for configuration
+   - `GFlowNet.train_gflownet(model, config; verbose=true)` for training
+
+3. **Evaluation:**
+   - `GFlowNet.sample_trajectory(model)` for sampling
+
+## ✅ Complete Working Example Pattern
+
+```julia
+# 1. Create model using HIGH-LEVEL functions
+forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(3, 64, 5, rng)
+flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(3, 64, rng)
+
+# 2. Setup parameters with ComponentArray
+parameters = ComponentArray(
+    forward=ComponentArray(forward_ps),
+    flow=ComponentArray(flow_ps)
+)
+
+# 3. Use high-level training
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.TRAJECTORY_BALANCE,
+    partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
+    n_iterations=50,
+    batch_size=16,
+    learning_rate=0.01
+)
+
+training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+
+# 4. Use high-level evaluation
+trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:50]
+```
 
 2. **Training Configuration:**
    - `GFlowNet.TrainingConfig()`
