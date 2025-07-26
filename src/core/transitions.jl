@@ -15,16 +15,12 @@ using Lux
 Convert a state to a feature vector that can be used as input to neural networks.
 This function must be implemented for each concrete state type.
 
-For SimpleState, we use the data vector directly.
+Domain-specific implementations are found in:
+- src/applications/molecular_design.jl (for MoleculeState)
+- src/applications/causal_discovery.jl (for DAGState)
+- src/applications/active_learning.jl (for ExperimentState)
+- test/test_utilities.jl (for SimpleState - testing only)
 """
-function state_to_features(state::SimpleState)
-    features = Float32.(state.data)
-    
-    # Validate features before returning
-    validate_state_features(features, "SimpleState features")
-    
-    return features
-end
 
 # =============================================================================
 # Forward Transition Probabilities
@@ -38,7 +34,7 @@ Compute the forward transition probability from source to target state.
 function forward_transition_prob(model::GFlowNetModel, source::AbstractState, target::AbstractState)
     # Use the forward policy to compute transition probability
     features = state_to_features(source)
-    
+
     # Use safe model call helper
     logits, _ = safe_model_call(
         model.forward_policy.model,
@@ -46,16 +42,16 @@ function forward_transition_prob(model::GFlowNetModel, source::AbstractState, ta
         model.parameters.forward,
         model.states.forward
     )
-    
+
     # Get all possible next states from source
     next_states = get_next_states(model.dag, source)
     if isempty(next_states) || target ∉ next_states
         return 0.0
     end
-    
+
     # Apply softmax to get probabilities
     probs = softmax(logits)
-    
+
     # Find index of target state and return probability
     target_index = findfirst(s -> s == target, next_states)
     return isnothing(target_index) ? 0.0 : Float64(probs[target_index])
@@ -69,7 +65,7 @@ Compute the backward transition probability from target back to source state.
 function backward_transition_prob(model::GFlowNetModel, target::AbstractState, source::AbstractState)
     # Convert target state to features
     features = state_to_features(target)
-    
+
     # Use safe model call helper
     logits, _ = safe_model_call(
         model.backward_policy.model,
@@ -77,16 +73,16 @@ function backward_transition_prob(model::GFlowNetModel, target::AbstractState, s
         model.parameters.backward,
         model.states.backward
     )
-    
+
     # Get all possible previous states to target
     prev_states = get_previous_states(model.dag, target)
     if isempty(prev_states) || source ∉ prev_states
         return 0.0
     end
-    
+
     # Apply softmax to get probabilities
     probs = softmax(logits)
-    
+
     # Find index of source state and return probability
     source_index = findfirst(s -> s == source, prev_states)
     return isnothing(source_index) ? 0.0 : Float64(probs[source_index])
@@ -123,7 +119,7 @@ function flow(model::GFlowNetModel, state::AbstractState)
     if is_terminal_state(state)
         return reward(state)
     end
-    
+
     # Use flow estimator if available
     if !isnothing(model.flow_estimator)
         return compute_flow_estimate(model, model.flow_estimator, state)
@@ -133,45 +129,71 @@ function flow(model::GFlowNetModel, state::AbstractState)
     end
 end
 
-# Use thread-local cache instead of global cache to avoid thread safety issues
-const FLOW_CACHE = Ref{Dict{Tuple{Any, Any}, Float64}}()
+# Thread-safe flow cache using ReentrantLock
+struct ThreadSafeFlowCache
+    cache::Dict{Tuple{Any,Any},Float64}
+    lock::ReentrantLock
+
+    ThreadSafeFlowCache() = new(Dict{Tuple{Any,Any},Float64}(), ReentrantLock())
+end
+
+# Global thread-safe cache instance
+const FLOW_CACHE = ThreadSafeFlowCache()
 
 """
     compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)
 
-Memoized version of recursive flow computation to prevent infinite recursion
+Thread-safe memoized version of recursive flow computation to prevent infinite recursion
 and improve performance for repeated computations.
 """
 function compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)
-    # Initialize thread-local cache if needed
-    if !isassigned(FLOW_CACHE)
-        FLOW_CACHE[] = Dict{Tuple{Any, Any}, Float64}()
+    # Create cache key using object IDs for uniqueness
+    cache_key = (objectid(model), hash(state))
+
+    # Thread-safe cache access with lock
+    lock(FLOW_CACHE.lock) do
+        # Check if already computed
+        if haskey(FLOW_CACHE.cache, cache_key)
+            return FLOW_CACHE.cache[cache_key]
+        end
+
+        # Compute flow (this may recurse, but we're outside the critical section)
+        # We need to release the lock during computation to avoid deadlock
+        nothing
     end
-    
-    # Create cache key
-    cache_key = (objectid(model), objectid(state))
-    
-    # Check if already computed in thread-local cache
-    if haskey(FLOW_CACHE[], cache_key)
-        return FLOW_CACHE[][cache_key]
-    end
-    
-    # Compute flow and cache result
+
+    # Compute flow without holding lock to avoid deadlock on recursion
     flow_value = compute_recursive_flow(model, state)
-    FLOW_CACHE[][cache_key] = flow_value
-    
+
+    # Store result in thread-safe manner
+    lock(FLOW_CACHE.lock) do
+        FLOW_CACHE.cache[cache_key] = flow_value
+    end
+
     return flow_value
+end
+
+"""
+    get_cached_flow(model::GFlowNetModel, state::AbstractState)
+
+Thread-safe getter for cached flow values.
+"""
+function get_cached_flow(model::GFlowNetModel, state::AbstractState)
+    cache_key = (objectid(model), hash(state))
+
+    lock(FLOW_CACHE.lock) do
+        return get(FLOW_CACHE.cache, cache_key, nothing)
+    end
 end
 
 """
     clear_flow_cache!()
 
-Clear the flow computation cache. Should be called when model parameters change.
+Thread-safe cache clearing. Should be called when model parameters change.
 """
 function clear_flow_cache!()
-    # Clear thread-local cache without locking
-    if isassigned(FLOW_CACHE)
-        empty!(FLOW_CACHE[])
+    lock(FLOW_CACHE.lock) do
+        empty!(FLOW_CACHE.cache)
     end
 end
 
@@ -215,7 +237,7 @@ end
 Compute flow recursively using proper GFlowNet flow conservation equations.
 
 This implements the fundamental GFlowNet flow equations:
-- Terminal states: F(s) = R(s) 
+- Terminal states: F(s) = R(s)
 - Non-terminal states: F(s) = Σ_{s'} F(s') * P_B(s'→s)
 
 # Arguments
@@ -231,7 +253,7 @@ function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)
         # Terminal states: F(s) = R(s)
         return reward(state)
     end
-    
+
     # Check if this is the initial state
     if state == model.dag.initial_state
         # Initial state flow equals partition function
@@ -242,29 +264,29 @@ function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)
             return estimate_partition_function(model)
         end
     end
-    
+
     # Non-terminal states - use incoming flow computation
     # F(s) = Σ_{s_prev} F(s_prev) * P_F(s_prev→s) where s_prev are previous states
     total_flow = 0.0
     prev_states = get_previous_states(model.dag, state)
-    
+
     if isempty(prev_states)
         # No incoming edges - this shouldn't happen unless it's the initial state
         @warn "Non-terminal, non-initial state with no incoming edges: $state"
         return 1e-6
     end
-    
+
     for prev_state in prev_states
         # Recursively compute flow of previous state
         prev_flow = flow(model, prev_state)
-        
+
         # Get forward probability P_F(s_prev→s)
         forward_prob = forward_transition_prob(model, prev_state, state)
-        
+
         # Add contribution: F(s_prev) * P_F(s_prev→s)
         total_flow += prev_flow * forward_prob
     end
-    
+
     return max(total_flow, 1e-6)  # Ensure positive flow
 end
 
@@ -363,4 +385,4 @@ function compute_flow_logits(flow_estimator::FlowEstimator, features::Vector{Flo
 
     # Extract scalar log flow value
     return Float32(raw_output[1, 1])
-end 
+end

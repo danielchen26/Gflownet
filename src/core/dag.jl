@@ -5,7 +5,7 @@ using Graphs
 # where forward and backward transitions have different semantics
 
 """
-    create_dag(initial_state::S, terminal_states::Vector{S}, 
+    create_dag(initial_state::S, terminal_states::Vector{S},
                terminal_sink::S, actions::Vector{A}) where {S <: AbstractState, A <: AbstractAction}
 
 Create a DirectedAcyclicGraph from given states and actions.
@@ -33,18 +33,18 @@ actions = [AddAtomAction(:C, (1.0, 1.0, 1.0)), TerminateMoleculeAction()]
 dag = create_dag(initial, terminals, sink, actions)
 ```
 """
-function create_dag(initial_state::S, terminal_states::Vector{S}, 
-                   terminal_sink::S, actions::Vector{A}) where {S <: AbstractState, A <: AbstractAction}
-    
+function create_dag(initial_state::S, terminal_states::Vector{S},
+    terminal_sink::S, actions::Vector{A}) where {S<:AbstractState,A<:AbstractAction}
+
     # Create an initial DAG with just the states
     all_states = [initial_state; terminal_states; [terminal_sink]]
     unique_states = unique(all_states)
-    
+
     state_to_idx = Dict(state => i for (i, state) in enumerate(unique_states))
-    
+
     # Initialize an empty directed graph
     graph = SimpleDiGraph(length(unique_states))
-    
+
     # Generate all possible transitions
     for action in actions
         for state in unique_states
@@ -56,20 +56,20 @@ function create_dag(initial_state::S, terminal_states::Vector{S},
             end
         end
     end
-    
+
     # Add edges from terminal states to sink
     for term_state in terminal_states
         add_edge!(graph, state_to_idx[term_state], state_to_idx[terminal_sink])
     end
-    
+
     # Comprehensive DAG validation
     validate_dag_construction(graph, unique_states, actions, initial_state, terminal_states, terminal_sink)
-    
+
     # Build action cache for efficient lookups
     S_type = typeof(initial_state)
     A_type = eltype(actions)  # Use the abstract action type
-    action_cache = Dict{S_type, Vector{A_type}}()
-    
+    action_cache = Dict{S_type,Vector{A_type}}()
+
     for state in unique_states
         applicable_actions = A_type[action for action in actions if is_applicable(action, state)]
         action_cache[state] = applicable_actions
@@ -172,10 +172,7 @@ This is a core interface method that must be implemented for each domain.
 This is a generic fallback that throws an error. Domain-specific implementations
 should override this method for their concrete state types.
 """
-function is_terminal_state(state::AbstractState)
-    error("is_terminal_state not implemented for state type $(typeof(state)). " *
-          "Please implement this method for your domain-specific types.")
-end
+
 
 """
     get_next_states(dag::DirectedAcyclicGraph, state::S) where {S <: AbstractState}
@@ -190,11 +187,11 @@ Returns a vector of states that can be reached by applying valid actions.
 # Returns
 - Vector of states that can be reached from the current state
 """
-function get_next_states(dag::DirectedAcyclicGraph, state::S) where {S <: AbstractState}
+function get_next_states(dag::DirectedAcyclicGraph, state::S) where {S<:AbstractState}
     if !(state in dag.states)
         return AbstractState[]
     end
-    
+
     state_idx = dag.state_to_idx[state]
     neighbors = outneighbors(dag.graph, state_idx)  # Works correctly with SimpleDiGraph
     return [dag.states[i] for i in neighbors]
@@ -213,11 +210,11 @@ Returns a vector of states that can lead to the current state.
 # Returns
 - Vector of states that can lead to the current state
 """
-function get_previous_states(dag::DirectedAcyclicGraph, state::S) where {S <: AbstractState}
+function get_previous_states(dag::DirectedAcyclicGraph, state::S) where {S<:AbstractState}
     if !(state in dag.states)
         return AbstractState[]
     end
-    
+
     state_idx = dag.state_to_idx[state]
     neighbors = inneighbors(dag.graph, state_idx)  # Works correctly with SimpleDiGraph
     return [dag.states[i] for i in neighbors]
@@ -237,15 +234,15 @@ Uses efficient action filtering instead of checking all actions.
 # Returns
 - Vector of (source_state, action) tuples representing incoming edges
 """
-function get_incoming_edges(dag::DirectedAcyclicGraph, state::S) where {S <: AbstractState}
+function get_incoming_edges(dag::DirectedAcyclicGraph, state::S) where {S<:AbstractState}
     prev_states = get_previous_states(dag, state)
-    edges = Tuple{AbstractState, AbstractAction}[]
-    
+    edges = Tuple{AbstractState,AbstractAction}[]
+
     # Use cached applicable actions for maximum efficiency
     for prev_state in prev_states
         # Use pre-computed applicable actions from cache
         applicable_actions = get(dag.action_cache, prev_state, eltype(dag.actions)[])
-        
+
         for action in applicable_actions
             if apply_action(action, prev_state) == state
                 push!(edges, (prev_state, action))
@@ -253,7 +250,7 @@ function get_incoming_edges(dag::DirectedAcyclicGraph, state::S) where {S <: Abs
             end
         end
     end
-    
+
     return edges
 end
 
@@ -271,21 +268,21 @@ Uses efficient action filtering and early termination.
 # Returns
 - Vector of (action, target_state) tuples representing outgoing edges
 """
-function get_outgoing_edges(dag::DirectedAcyclicGraph, state::S) where {S <: AbstractState}
+function get_outgoing_edges(dag::DirectedAcyclicGraph, state::S) where {S<:AbstractState}
     next_states = get_next_states(dag, state)
-    edges = Tuple{AbstractAction, AbstractState}[]
-    
+    edges = Tuple{AbstractAction,AbstractState}[]
+
     # Use cached applicable actions and Set for O(1) lookups
     applicable_actions = get(dag.action_cache, state, eltype(dag.actions)[])
     next_states_set = Set(next_states)  # O(1) lookup instead of O(n) with Vector
-    
+
     for action in applicable_actions
         next_state = apply_action(action, state)
         if next_state in next_states_set
             push!(edges, (action, next_state))
         end
     end
-    
+
     return edges
 end
 
@@ -311,36 +308,36 @@ function validate_dag_construction(graph, states, actions, initial_state, termin
     if is_cyclic(graph)
         throw(ArgumentError("The constructed graph contains cycles, which is not allowed for a DAG"))
     end
-    
+
     # Validate states
     if isempty(states)
         throw(ArgumentError("DAG must contain at least one state"))
     end
-    
+
     if !(initial_state in states)
         throw(ArgumentError("Initial state must be in the states vector"))
     end
-    
+
     if !(terminal_sink in states)
         throw(ArgumentError("Terminal sink must be in the states vector"))
     end
-    
+
     for term_state in terminal_states
         if !(term_state in states)
             throw(ArgumentError("Terminal state $term_state must be in the states vector"))
         end
     end
-    
+
     # Validate actions
     if isempty(actions)
         @warn "DAG has no actions - this may indicate an incomplete specification"
     end
-    
+
     # Check connectivity
     if nv(graph) != length(states)
         throw(ArgumentError("Graph vertex count ($(nv(graph))) doesn't match state count ($(length(states)))"))
     end
-    
+
     # Validate initial state has outgoing edges (unless it's also terminal)
     if initial_state ∉ terminal_states
         initial_idx = findfirst(s -> s == initial_state, states)
@@ -348,7 +345,7 @@ function validate_dag_construction(graph, states, actions, initial_state, termin
             throw(ArgumentError("Initial state has no outgoing edges"))
         end
     end
-    
+
     # Validate terminal states have incoming edges (unless they're also initial)
     for term_state in terminal_states
         if term_state != initial_state
@@ -358,7 +355,7 @@ function validate_dag_construction(graph, states, actions, initial_state, termin
             end
         end
     end
-    
+
     # Check for isolated vertices (states with no connections)
     isolated_count = 0
     for i in 1:nv(graph)
@@ -366,11 +363,11 @@ function validate_dag_construction(graph, states, actions, initial_state, termin
             isolated_count += 1
         end
     end
-    
+
     if isolated_count > 0
         @warn "DAG contains $isolated_count isolated vertices (states with no connections)"
     end
-    
+
     @debug "DAG validation passed: $(length(states)) states, $(ne(graph)) edges, $(length(actions)) actions"
 end
 
@@ -394,73 +391,9 @@ function apply_action end
 # SimpleState/SimpleAction Implementation
 # =============================================================================
 
-"""
-    is_applicable(action::SimpleAction, state::SimpleState)
 
-Check if a SimpleAction is applicable to a SimpleState.
 
-For SimpleAction, we implement a simple rule-based system:
-- Action value 0: Always applicable (represents "do nothing" or "terminate")
-- Action value 1: Applicable if state data sum < 10 (represents "increment")
-- Action value 2: Applicable if state data sum > 0 (represents "decrement")
-- Action value -1: Always applicable (represents "terminate to sink")
-"""
-function is_applicable(action::SimpleAction, state::SimpleState)
-    data_sum = sum(state.data)
 
-    if action.value == 0
-        return true  # "Do nothing" always applicable
-    elseif action.value == 1
-        return data_sum < 10  # "Increment" only if sum < 10
-    elseif action.value == 2
-        return data_sum > 0   # "Decrement" only if sum > 0
-    elseif action.value == -1
-        return true  # "Terminate" always applicable
-    else
-        return false  # Unknown action
-    end
-end
-
-"""
-    apply_action(action::SimpleAction, state::SimpleState)
-
-Apply a SimpleAction to a SimpleState, returning the new state.
-
-Action semantics:
-- Action value 0: Return same state (no change)
-- Action value 1: Increment first element by 1
-- Action value 2: Decrement first element by 1
-- Action value -1: Return terminal sink state ([-1])
-"""
-function apply_action(action::SimpleAction, state::SimpleState)
-    if action.value == 0
-        # No change
-        return SimpleState(copy(state.data))
-    elseif action.value == 1
-        # Increment first element
-        new_data = copy(state.data)
-        if !isempty(new_data)
-            new_data[1] += 1
-        else
-            new_data = [1]
-        end
-        return SimpleState(new_data)
-    elseif action.value == 2
-        # Decrement first element
-        new_data = copy(state.data)
-        if !isempty(new_data)
-            new_data[1] -= 1
-        else
-            new_data = [-1]
-        end
-        return SimpleState(new_data)
-    elseif action.value == -1
-        # Terminate to sink
-        return SimpleState([-1])
-    else
-        error("Unknown SimpleAction value: $(action.value)")
-    end
-end
 
 # =============================================================================
 # Basic DAG Manipulation Functions
@@ -514,7 +447,7 @@ Updates action cache when adding new actions.
 function add_action!(dag::DirectedAcyclicGraph, action)
     if !(action in dag.actions)
         push!(dag.actions, action)
-        
+
         # Update action cache for all states when new action is added
         for state in dag.states
             if is_applicable(action, state)

@@ -11,7 +11,7 @@ rather than direct inheritance where possible.
 abstract type AbstractState end
 
 """
-    AbstractAction 
+    AbstractAction
 
 Abstract type representing an action in a GFlowNet.
 Concrete implementations should define specific actions for domain-specific operations.
@@ -44,120 +44,30 @@ This is a parametric type that specializes on concrete state and action types.
 - `terminal_sink`: Special sink state that connects to all terminal states
 - `action_cache`: OPTIMIZED: Cache of applicable actions per state for performance
 """
-struct DirectedAcyclicGraph{S<:AbstractState, A<:AbstractAction}
+struct DirectedAcyclicGraph{S<:AbstractState,A<:AbstractAction}
     graph::SimpleDiGraph
     states::Vector{S}
     actions::Vector{A}
-    state_to_idx::Dict{S, Int}
+    state_to_idx::Dict{S,Int}
     initial_state::S
     terminal_states::Vector{S}
     terminal_sink::S
-    action_cache::Dict{S, Vector{A}}  # Cache applicable actions per state
+    action_cache::Dict{S,Vector{A}}  # Cache applicable actions per state
 end
 
-# Define a simple state type for testing
-"""
-    SimpleState
+# Simple test types moved to test/test_utilities.jl (for testing only)
+# For production implementations, see:
+# - src/applications/molecular_design.jl (MoleculeState, MoleculeData)
+# - src/applications/causal_discovery.jl (DAGState, DAGData)
+# - src/applications/active_learning.jl (ExperimentState, ExperimentData)
 
-A simple state type for testing and basic usage.
-"""
-struct SimpleState <: AbstractState
-    data::Vector{Int}
-end
+# Default constructor removed - use domain-specific constructors instead
+# For DAG construction examples, see the applications/ directory
 
-# Implement equality comparison for SimpleState
-Base.:(==)(s1::SimpleState, s2::SimpleState) = s1.data == s2.data
-Base.hash(s::SimpleState, h::UInt) = hash(s.data, h)
-
-# Define a simple action type for testing
-"""
-    SimpleAction
-
-A simple action type for testing and basic usage.
-"""
-struct SimpleAction <: AbstractAction
-    value::Int
-end
-
-# Implement equality comparison for SimpleAction
-Base.:(==)(a1::SimpleAction, a2::SimpleAction) = a1.value == a2.value
-Base.hash(a::SimpleAction, h::UInt) = hash(a.value, h)
-
-# Add default constructor for simple cases
-"""
-    DirectedAcyclicGraph()
-
-Create an empty DirectedAcyclicGraph with simple state and action types.
-This is useful for testing and simple cases where specific types aren't needed.
-"""
-function DirectedAcyclicGraph()
-    # Use simple concrete state and action types
-    S = SimpleState
-    A = SimpleAction
-
-    # Create empty components
-            graph = SimpleDiGraph(0)
-    states = S[]
-    actions = A[]
-    state_to_idx = Dict{S, Int}()
-
-    # Create placeholder initial and terminal states
-    initial_state = SimpleState([0])  # Simple initial state
-    terminal_states = S[]
-    terminal_sink = SimpleState([-1])  # Special sink state
-
-    return DirectedAcyclicGraph{S, A}(
-        graph, states, actions, state_to_idx,
-        initial_state, terminal_states, terminal_sink,
-        Dict{S, Vector{A}}()  # Initialize empty action cache
-    )
-end
-
-# Define domain-specific data structures for composition
-"""
-    MoleculeData
-
-Data structure for molecular information. Used with composition pattern
-to create domain-specific states.
-
-# Fields
-- `atoms`: Vector of atom types
-- `bonds`: Vector of bonds as tuples (atom1, atom2, bond_type)
-"""
-struct MoleculeData
-    atoms::Vector{Symbol}
-    bonds::Vector{Tuple{Int, Int, Int}}  # (atom1, atom2, bond_type)
-end
-
-"""
-    DAGData
-
-Data structure for causal graph information. Used with composition pattern
-to create domain-specific states.
-
-# Fields
-- `adjacency_matrix`: Binary adjacency matrix
-- `node_names`: Names of nodes/variables
-"""
-struct DAGData
-    adjacency_matrix::Matrix{Int}
-    node_names::Vector{String}
-end
-
-"""
-    ExperimentData
-
-Data structure for experimental design information. Used with composition pattern
-to create domain-specific states.
-
-# Fields
-- `experiments`: Vector of experiment indices
-- `features`: Feature matrix for experiments
-"""
-struct ExperimentData
-    experiments::Vector{Int}
-    features::Matrix{Float64}
-end
+# Domain-specific data structures moved to src/applications/
+# - MoleculeData → src/applications/molecular_design.jl
+# - DAGData → src/applications/causal_discovery.jl
+# - ExperimentData → src/applications/active_learning.jl
 
 """
     AbstractGFlowNetObjective
@@ -284,51 +194,51 @@ GFlowNetModel(;
 )
 ```
 """
-mutable struct GFlowNetModel
+mutable struct GFlowNetModel{P<:ComponentArray}
     dag::DirectedAcyclicGraph
     forward_policy::ForwardPolicy
-    backward_policy::Union{Nothing, BackwardPolicy}
-    flow_estimator::Union{Nothing, FlowEstimator}
-    partition_function::Union{Nothing, Float64}
+    backward_policy::Union{Nothing,BackwardPolicy}
+    flow_estimator::Union{Nothing,FlowEstimator}
+    partition_function::Union{Nothing,Float64}
     objectives::Vector{AbstractGFlowNetObjective}
     optimizer
-    parameters::ComponentArray  # Use ComponentArray for gradient compatibility
+    parameters::P  # Strictly typed as ComponentArray
     states::NamedTuple
-    
+
     # Keyword constructor
     function GFlowNetModel(;
         dag::DirectedAcyclicGraph,
         forward_policy::ForwardPolicy,
-        backward_policy::Union{Nothing, BackwardPolicy} = nothing,
-        flow_estimator::Union{Nothing, FlowEstimator} = nothing,
-        partition_function::Union{Nothing, Float64} = nothing,
-        objectives::Vector{<:AbstractGFlowNetObjective} = AbstractGFlowNetObjective[],
-        optimizer = nothing,
+        backward_policy::Union{Nothing,BackwardPolicy}=nothing,
+        flow_estimator::Union{Nothing,FlowEstimator}=nothing,
+        partition_function::Union{Nothing,Float64}=nothing,
+        objectives::Vector{<:AbstractGFlowNetObjective}=AbstractGFlowNetObjective[],
+        optimizer=nothing,
         parameters::ComponentArray,
         states::NamedTuple
     )
         # Validate GFlowNetModel construction
-        validate_gflownet_model_construction(dag, forward_policy, backward_policy, 
-                                            flow_estimator, partition_function, 
-                                            parameters, states)
-        
-        new(dag, forward_policy, backward_policy, flow_estimator, 
+        validate_gflownet_model_construction(dag, forward_policy, backward_policy,
+            flow_estimator, partition_function,
+            parameters, states)
+
+        new{typeof(parameters)}(dag, forward_policy, backward_policy, flow_estimator,
             partition_function, objectives, optimizer, parameters, states)
     end
-    
+
     # Positional constructor for backward compatibility
     function GFlowNetModel(
         dag::DirectedAcyclicGraph,
         forward_policy::ForwardPolicy,
-        backward_policy::Union{Nothing, BackwardPolicy},
-        flow_estimator::Union{Nothing, FlowEstimator},
-        partition_function::Union{Nothing, Float64},
+        backward_policy::Union{Nothing,BackwardPolicy},
+        flow_estimator::Union{Nothing,FlowEstimator},
+        partition_function::Union{Nothing,Float64},
         objectives::Vector{AbstractGFlowNetObjective},
         optimizer,
         parameters::ComponentArray,
         states::NamedTuple
     )
-        new(dag, forward_policy, backward_policy, flow_estimator, 
+        new{typeof(parameters)}(dag, forward_policy, backward_policy, flow_estimator,
             partition_function, objectives, optimizer, parameters, states)
     end
 end
@@ -357,6 +267,7 @@ new_params = to_component_array(old_params)
 ```
 """
 function to_component_array(params::NamedTuple)
+    @warn "Converting NamedTuple to ComponentArray. Consider using ComponentArray directly for better performance."
     return ComponentArray(params)
 end
 
@@ -367,6 +278,15 @@ Identity function for ComponentArray parameters (no conversion needed).
 """
 function to_component_array(params::ComponentArray)
     return params
+end
+
+"""
+    to_component_array(params::AbstractArray)
+
+Convert any array-like parameter structure to ComponentArray.
+"""
+function to_component_array(params::AbstractArray)
+    return ComponentArray(params)
 end
 
 """
@@ -383,7 +303,14 @@ This provides backward compatibility while enforcing the standardized parameter 
 - `GFlowNetModel` with ComponentArray parameters
 """
 function create_gflownet_model_safe(; parameters, kwargs...)
-    standardized_params = to_component_array(parameters)
+    # Ensure parameters are ComponentArray
+    if !isa(parameters, ComponentArray)
+        @warn "Parameters should be ComponentArray. Converting automatically."
+        standardized_params = to_component_array(parameters)
+    else
+        standardized_params = parameters
+    end
+
     return GFlowNetModel(; parameters=standardized_params, kwargs...)
 end
 
@@ -392,8 +319,8 @@ end
 # =============================================================================
 
 """
-    validate_gflownet_model_construction(dag, forward_policy, backward_policy, 
-                                        flow_estimator, partition_function, 
+    validate_gflownet_model_construction(dag, forward_policy, backward_policy,
+                                        flow_estimator, partition_function,
                                         parameters, states)
 
 Comprehensive validation for GFlowNetModel construction.
@@ -411,59 +338,59 @@ Ensures all components are compatible and properly configured.
 # Throws
 - `ArgumentError` if model configuration is invalid
 """
-function validate_gflownet_model_construction(dag, forward_policy, backward_policy, 
-                                             flow_estimator, partition_function, 
-                                             parameters, states)
+function validate_gflownet_model_construction(dag, forward_policy, backward_policy,
+    flow_estimator, partition_function,
+    parameters, states)
     # Validate DAG
     if isempty(dag.states)
         throw(ArgumentError("GFlowNetModel requires a DAG with states"))
     end
-    
+
     # Validate forward policy is required
     if isnothing(forward_policy)
         throw(ArgumentError("GFlowNetModel requires a forward policy"))
     end
-    
+
     # Validate parameters structure
     if !haskey(parameters, :forward)
         throw(ArgumentError("Model parameters must include :forward policy parameters"))
     end
-    
+
     if !isnothing(backward_policy) && !haskey(parameters, :backward)
         throw(ArgumentError("Backward policy provided but :backward parameters missing"))
     end
-    
+
     if !isnothing(flow_estimator) && !haskey(parameters, :flow)
         throw(ArgumentError("Flow estimator provided but :flow parameters missing"))
     end
-    
+
     # Validate states structure
     if !haskey(states, :forward)
         throw(ArgumentError("Model states must include :forward policy states"))
     end
-    
+
     if !isnothing(backward_policy) && !haskey(states, :backward)
         throw(ArgumentError("Backward policy provided but :backward states missing"))
     end
-    
+
     if !isnothing(flow_estimator) && !haskey(states, :flow)
         throw(ArgumentError("Flow estimator provided but :flow states missing"))
     end
-    
+
     # Validate partition function
     if !isnothing(partition_function)
         if isnan(partition_function) || isinf(partition_function)
             throw(ArgumentError("Partition function must be finite"))
         end
-        
+
         if partition_function <= 0.0
             throw(ArgumentError("Partition function must be positive"))
         end
     end
-    
+
     # Validate parameter consistency
     validate_model_parameters(parameters, "GFlowNetModel parameters")
-    
+
     @debug "GFlowNetModel validation passed"
 end
 
@@ -532,9 +459,9 @@ Adaptive estimator that switches between different methods based on training pro
 mutable struct AdaptivePartitionFunctionEstimator <: AbstractPartitionFunctionEstimator
     simple_estimator::SimplePartitionFunctionEstimator
     sampling_estimator::SamplingPartitionFunctionEstimator
-    learnable_estimator::Union{Nothing, LearnablePartitionFunctionEstimator}
+    learnable_estimator::Union{Nothing,LearnablePartitionFunctionEstimator}
     method::Symbol
-    switch_thresholds::Dict{Symbol, Float64}
+    switch_thresholds::Dict{Symbol,Float64}
     training_iteration::Int
 end
 
@@ -593,15 +520,15 @@ struct TrainingConfig
     partition_update_frequency::Int
     validation_frequency::Int
     early_stopping_patience::Int
-    sub_trajectory_config::Dict{Symbol, Any}
-    
+    sub_trajectory_config::Dict{Symbol,Any}
+
     # Keyword constructor with defaults
-    function TrainingConfig(; objective=TRAJECTORY_BALANCE, 
-                           partition_function_method=SIMPLE_ESTIMATION,
-                           batch_size=32, learning_rate=0.001, n_iterations=1000,
-                           partition_update_frequency=10, validation_frequency=50,
-                           early_stopping_patience=100, sub_trajectory_config=Dict())
-        
+    function TrainingConfig(; objective=TRAJECTORY_BALANCE,
+        partition_function_method=SIMPLE_ESTIMATION,
+        batch_size=32, learning_rate=0.001, n_iterations=1000,
+        partition_update_frequency=10, validation_frequency=50,
+        early_stopping_patience=100, sub_trajectory_config=Dict())
+
         # Default sub-trajectory configuration
         default_sub_config = Dict(
             :min_length => 2,
@@ -612,11 +539,11 @@ struct TrainingConfig
             :flow_consistency_mode => :STATE_LEVEL,  # Default flow consistency mode
             :max_grad_norm => 1.0  # Default gradient clipping norm
         )
-        
+
         merged_sub_config = merge(default_sub_config, sub_trajectory_config)
-        
+
         return new(objective, partition_function_method, batch_size, learning_rate,
-                  n_iterations, partition_update_frequency, validation_frequency,
-                  early_stopping_patience, merged_sub_config)
+            n_iterations, partition_update_frequency, validation_frequency,
+            early_stopping_patience, merged_sub_config)
     end
 end

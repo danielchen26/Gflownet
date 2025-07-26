@@ -43,34 +43,34 @@ function safe_model_call(model, features, parameters, states)
     # Comprehensive input validation
     validate_neural_network_input(features, "features")
     validate_model_parameters(parameters, "parameters")
-    
+
     # Convert to Float32 to ensure type stability
     features = convert(Array{Float32}, features)
-    
+
     # Reshape features to ensure they're a matrix with correct dimensions
     # Lux expects input in the format [features, batch]
     if features isa Vector
         features = reshape(features, :, 1)
     end
-    
+
     # Additional safety: clamp extreme values to prevent overflow
     features = clamp.(features, Float32(-1e10), Float32(1e10))
-    
+
     try
         # Use proper Lux API for model application
         outputs, new_states = model(features, parameters, states)
-        
+
         # Validate outputs before returning
         validate_neural_network_output(outputs, "model output")
-        
+
         # If outputs have batch dimension of 1, flatten to a vector
         if size(outputs, 2) == 1
             outputs = vec(outputs)
         end
-        
+
         return outputs, new_states
     catch e
-        @error "Neural network model call failed" error=e features_shape=size(features) features_stats=(min=minimum(features), max=maximum(features), mean=mean(features))
+        @error "Neural network model call failed" error = e features_shape = size(features) features_stats = (min=minimum(features), max=maximum(features), mean=mean(features))
         rethrow(e)
     end
 end
@@ -85,77 +85,95 @@ end
     sample_trajectory(model::GFlowNetModel; rng=nothing)
 
 Sample a complete trajectory from the GFlowNet using learned stochastic policy.
-FIXED: Now properly generic - works for any domain, not just grid worlds.
+Zygote-compatible version that avoids all mutations and uses functional programming.
 """
 function sample_trajectory(model::GFlowNetModel; rng=nothing)
     if isnothing(rng)
         rng = Random.default_rng()
     end
-    
-    # FIXED: Use concrete type annotations for type stability
-    states = AbstractState[model.dag.initial_state]
-    current_state::AbstractState = model.dag.initial_state
-    
-    while !is_terminal_state(current_state)
-        # Get state features using the interface function
-        features = state_to_features(current_state)
-        
-        # Use safe model call to get action logits
-        logits, _ = safe_model_call(
-            model.forward_policy.model,
-            features,
-            model.parameters.forward,
-            model.states.forward
-        )
-        
-        # FIXED: Use proper interface functions instead of hardcoded logic
-        # Get all applicable actions for current state using functional approach
-        applicable_actions = Vector{AbstractAction}()
-        for action in model.dag.actions
-            if is_applicable(action, current_state)
-                # FIXED: Use vcat instead of push! to avoid Zygote mutation error
-                applicable_actions = vcat(applicable_actions, [action])
-            end
-        end
-        
-        if isempty(applicable_actions)
-            break
-        end
-        
-        # FIXED: Use action indices directly (1 to length(actions))
-        # Assumes neural network outputs probabilities for all possible actions
-        action_indices = Vector{Int}(1:length(applicable_actions))
-        
-        # Get relevant logits for applicable actions only
-        if length(action_indices) <= length(logits)
-            relevant_logits = logits[action_indices]
-        else
-            # Fallback: use available logits
-            relevant_logits = logits[1:min(length(logits), length(action_indices))]
-        end
-        
-        # Add numerical stability
-        relevant_logits = clamp.(relevant_logits, Float32(-20.0), Float32(20.0))
-        probs = softmax(relevant_logits)
-        
-        # Ensure probabilities are valid (no NaN/Inf)
-        if any(isnan.(probs)) || any(isinf.(probs))
-            # Fallback to uniform distribution if numerical issues
-            probs = fill(Float32(1.0) / length(applicable_actions), length(applicable_actions))
-        end
-        
-        # Sample action according to learned policy
-        action_idx = sample(1:length(applicable_actions), Weights(probs))
-        chosen_action = applicable_actions[action_idx]
-        
-        # Apply the chosen action to get next state
-        next_state = apply_action(chosen_action, current_state)
 
-        # FIXED: Use vcat instead of push! to avoid Zygote mutation error
-        states = vcat(states, [next_state])
-        current_state = next_state
-    end
+    # Pre-allocate trajectory to avoid mutations during sampling
+    max_trajectory_length = 100  # Reasonable default
 
-    return Trajectory(states)
+    return _sample_trajectory_recursive(
+        model,
+        model.dag.initial_state,
+        AbstractState[],
+        max_trajectory_length,
+        rng
+    )
 end
 
+"""
+    _sample_trajectory_recursive(model, current_state, states_so_far, remaining_steps, rng)
+
+Recursive helper for Zygote-compatible trajectory sampling.
+Uses functional approach with no mutations.
+"""
+function _sample_trajectory_recursive(
+    model::GFlowNetModel,
+    current_state::AbstractState,
+    states_so_far::Vector{AbstractState},
+    remaining_steps::Int,
+    rng
+)
+    # Base cases
+    if is_terminal_state(current_state) || remaining_steps <= 0
+        return Trajectory(vcat(states_so_far, [current_state]))
+    end
+
+    # Get applicable actions using filter (functional approach)
+    applicable_actions = filter(
+        action -> is_applicable(action, current_state),
+        model.dag.actions
+    )
+
+    if isempty(applicable_actions)
+        return Trajectory(vcat(states_so_far, [current_state]))
+    end
+
+    # Get state features
+    features = state_to_features(current_state)
+
+    # Get action probabilities
+    logits, _ = safe_model_call(
+        model.forward_policy.model,
+        features,
+        model.parameters.forward,
+        model.states.forward
+    )
+
+    # Compute action probabilities safely
+    n_actions = length(applicable_actions)
+    relevant_logits = if n_actions <= length(logits)
+        logits[1:n_actions]
+    else
+        # Pad with zeros if needed
+        vcat(logits, zeros(Float32, n_actions - length(logits)))
+    end
+
+    # Numerical stability
+    stable_logits = clamp.(relevant_logits, Float32(-20.0), Float32(20.0))
+    probs = softmax(stable_logits)
+
+    # Handle numerical issues
+    if any(isnan.(probs)) || any(isinf.(probs)) || sum(probs) ≈ 0.0
+        probs = fill(Float32(1.0) / n_actions, n_actions)
+    end
+
+    # Sample action
+    action_idx = sample(rng, 1:n_actions, Weights(probs))
+    chosen_action = applicable_actions[action_idx]
+
+    # Apply action to get next state
+    next_state = apply_action(chosen_action, current_state)
+
+    # Recursive call with updated state list
+    return _sample_trajectory_recursive(
+        model,
+        next_state,
+        vcat(states_so_far, [current_state]),
+        remaining_steps - 1,
+        rng
+    )
+end

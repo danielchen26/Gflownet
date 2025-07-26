@@ -28,6 +28,7 @@ using GraphRecipes
 # Core types and data structures
 include("core/types.jl")
 include("core/dag.jl")
+include("core/interfaces.jl")
 include("core/transitions.jl")
 
 # Core algorithms
@@ -81,7 +82,7 @@ include("utils/visualization.jl")
 export State, Action, Trajectory, TrajectorySet
 export DAG, TerminalSink, create_dag, add_state!, add_action!
 export is_terminal, get_parents, get_children, get_actions
-export DirectedAcyclicGraph, SimpleState, SimpleAction
+export DirectedAcyclicGraph
 
 # =============================================================================
 # Exports - GFlowNet Model and Components
@@ -90,6 +91,16 @@ export DirectedAcyclicGraph, SimpleState, SimpleAction
 export GFlowNetModel, ForwardPolicy, BackwardPolicy, FlowEstimator
 export to_component_array, create_gflownet_model_safe
 export validate_reward, validate_state_features, validate_neural_network_input, validate_neural_network_output, validate_numerical_array, validate_model_parameters
+
+# =============================================================================
+# Exports - Core Interfaces
+# =============================================================================
+
+export AbstractState, AbstractAction, AbstractGFlowNetObjective, AbstractPolicy, AbstractPartitionFunctionEstimator
+export is_terminal_state, state_to_features, reward
+export is_applicable, apply_action
+export get_applicable_actions, get_next_states, get_previous_states
+export validate_state_interface, validate_action_interface
 export forward_transition_prob, backward_transition_prob, flow, sample_trajectory, clear_flow_cache!
 export state_to_features, edge_flow, is_terminal_state
 export get_next_states, get_previous_states, get_possible_actions
@@ -166,7 +177,7 @@ export compute_reward, ensure_positive
 export GFlowNetLogger, log_metric!, log_iteration!, get_metric, get_last_metric, reset!, save_metrics
 export summarize_performance, time_execution, benchmark_sampling
 
-# Visualization utilities 
+# Visualization utilities
 export visualize_dag, visualize_flows, visualize_trajectory
 export visualize_reward_distribution, visualize_training_progress
 

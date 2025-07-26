@@ -34,7 +34,7 @@ Standard implementation of a reward context that provides state, trajectory, and
 struct StandardContext <: RewardContext
     state::Any
     trajectory::Any
-    env_data::Dict{Symbol, Any}
+    env_data::Dict{Symbol,Any}
 end
 
 """
@@ -171,28 +171,8 @@ function reward(state::AbstractState, env_data=Dict())
     end
 end
 
-"""
-    _compute_default_reward(state::SimpleState)
-
-Default reward computation for SimpleState.
-
-The reward is based on the mathematical properties of the state:
-- For terminal sink state ([-1]): reward = 1.0
-- For other states: reward = exp(-||data||²/2) + 0.1
-
-This creates a reward landscape that encourages certain state configurations
-while ensuring all terminal states have positive rewards.
-"""
-function _compute_default_reward(state::SimpleState)
-    if state.data == [-1]
-        # Terminal sink state
-        return 1.0
-    else
-        # Gaussian-like reward based on distance from origin
-        data_norm_sq = sum(x^2 for x in state.data)
-        return exp(-data_norm_sq / 2.0) + 0.1  # Ensure minimum positive reward
-    end
-end
+# SimpleState-specific reward computation moved to test/test_utilities.jl
+# Domain-specific reward implementations are in src/applications/
 
 # Generic fallback for other state types
 function _compute_default_reward(state::AbstractState)
@@ -208,4 +188,4 @@ Override this in your application code.
 """
 function _domain_specific_reward(state, env_data)
     return 1.0  # Placeholder
-end 
+end
