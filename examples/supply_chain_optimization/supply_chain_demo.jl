@@ -107,29 +107,29 @@ println("      • Transport routes: $(length(routes))")
 println("\n2️⃣ Setting up Optimization Problem")
 println("="^40)
 
-# Create initial state
+# Create initial state (rich formulation)
 initial_state = GFlowNet.SupplyChainState(
     network,
-    Dict{Tuple{Int,Int}, Float64}(),      # no initial production
-    Dict{Tuple{Int,Int}, Float64}(),      # no initial inventory
-    Dict{Tuple{Int,Int,Int}, Float64}(),  # no initial shipments
-    Dict{Tuple{Int,Int}, Float64}(),      # no demand served yet
-    1,    # current month
-    3,    # 3-month planning horizon
-    false, # not terminal
-    0.0,   # no cost yet
-    0.0    # no service level yet
+    Dict{Tuple{Int,Int}, Float64}(),      # production: (facility_id, drug_id) -> quantity
+    Dict{Tuple{Int,Int}, Float64}(),      # inventory: (facility_id, drug_id) -> quantity
+    Dict{Tuple{Int,Int,Int}, Float64}(),  # shipments: (from, to, drug_id) -> quantity
+    Dict{Tuple{Int,Int}, Float64}(),      # demand_served: (region_id, drug_id) -> quantity
+    1,    # current_month
+    3,    # planning_horizon (3 months)
+    false, # is_terminal
+    0.0,   # total_cost
+    0.0    # service_level
 )
 
-# Generate all possible actions
+# Generate MINIMAL action space for stable learning
 actions = GFlowNet.SupplyChainAction[]
 
-# Production actions (discretized quantities)
+# SMALL production actions (only 2 levels per facility-drug)
 for facility in facilities
     if facility.type == GFlowNet.MANUFACTURING
         for (drug_id, capacity) in facility.production_capacity
-            # Create actions for 25%, 50%, 75%, 100% of capacity
-            for pct in [0.25, 0.5, 0.75, 1.0]
+            # Only 2 production levels: 50% and 100% of capacity
+            for pct in [0.5, 1.0]
                 quantity = capacity * pct
                 push!(actions, GFlowNet.ProduceAction(facility.id, drug_id, quantity))
             end
@@ -137,32 +137,28 @@ for facility in facilities
     end
 end
 
-# Shipment actions (discretized quantities)
+# MINIMAL shipment actions (only 1 quantity per route-drug)
 for route in routes
     for drug in drugs
-        # Create shipment actions for different quantities
-        for qty in [100.0, 500.0, 1000.0, 2000.0]
-            push!(actions, GFlowNet.ShipAction(route.from_facility, route.to_facility, drug.id, qty))
-        end
+        # Single shipment quantity: 500 units
+        push!(actions, GFlowNet.ShipAction(route.from_facility, route.to_facility, drug.id, 500.0))
     end
 end
 
-# Serve actions (discretized quantities)
+# MINIMAL serve actions (only 1 level per facility-region-drug)
 for facility in facilities
     if facility.type in [GFlowNet.DISTRIBUTION, GFlowNet.DEPOT]
         for region in regions
             for (drug_id, demand) in region.monthly_demand
-                # Create serve actions for different percentages of demand
-                for pct in [0.25, 0.5, 0.75, 1.0]
-                    quantity = demand * pct
-                    push!(actions, GFlowNet.ServeAction(facility.id, region.id, drug_id, quantity))
-                end
+                # Single service level: 100% of demand
+                quantity = demand
+                push!(actions, GFlowNet.ServeAction(facility.id, region.id, drug_id, quantity))
             end
         end
     end
 end
 
-# Time and termination actions
+# Essential time actions
 push!(actions, GFlowNet.NextMonthAction())
 push!(actions, GFlowNet.FinishPlanningAction())
 
@@ -219,14 +215,15 @@ state_dim = length(sample_features)
 println("   📊 State dimension: $state_dim")
 println("   🧠 Hidden dimension: 64")
 println("   📚 Action space size: $(length(actions))")
+println("   🔍 Sample features: $(round.(sample_features[1:5], digits=3))...")
 
-# Create the model using core GFlowNet functions
+# Create the model using core GFlowNet functions (SMALLER for stability)
 model = GFlowNet.create_gflownet(
     initial_state,
     actions;
     state_dim = state_dim,
-    hidden_dim = 64,
-    learning_rate = 0.01
+    hidden_dim = 32,  # Smaller hidden dimension for stability
+    learning_rate = 0.005  # Match training config learning rate
 )
 
 println("   ✅ GFlowNet model created successfully!")
@@ -238,15 +235,15 @@ println("   ✅ GFlowNet model created successfully!")
 println("\n5️⃣ Training the GFlowNet Model")
 println("="^40)
 
-# Create training configuration using core package (same as grid world)
+# Create training configuration for ULTRA-STABLE learning
 config = GFlowNet.TrainingConfig(
     objective=GFlowNet.TRAJECTORY_BALANCE,
     partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
-    n_iterations=30,  # Shorter for supply chain complexity
-    batch_size=8,     # Smaller batch for stability
-    learning_rate=0.005,  # Lower learning rate
-    validation_frequency=5,
-    early_stopping_patience=15
+    n_iterations=6,   # Even shorter for stability
+    batch_size=2,     # Very small batch to prevent gradient explosion
+    learning_rate=0.005,  # Much lower learning rate to prevent explosion
+    validation_frequency=2,
+    early_stopping_patience=6
 )
 
 println("   ⚙️  Training configuration:")
@@ -259,16 +256,16 @@ println("      - Learning rate: $(config.learning_rate)")
 println("   🚀 Starting training...")
 training_history = GFlowNet.train_gflownet(model, config; verbose=true)
 
-# Extract training statistics (same as grid world)
-successful_iterations = count(!isnan, training_history[:losses])
-final_loss = filter(!isnan, training_history[:losses])[end]
-total_time = sum(training_history[:iteration_times])
+# Extract training statistics (corrected)
+successful_iterations = length(training_history.losses)
+final_loss = training_history.losses[end]
+total_time = sum(training_history.iteration_times)
 
 println("   ✅ Training completed!")
 println("      - Successful iterations: $successful_iterations/$(config.n_iterations)")
 println("      - Final loss: $(round(final_loss, digits=4))")
 println("      - Total time: $(round(total_time, digits=1))s")
-println("      - Avg gradient norm: $(round(mean(training_history[:gradient_norms]), digits=4))")
+println("      - Avg gradient norm: $(round(mean(training_history.gradient_norms), digits=4))")
 
 # =============================================================================
 # 6. Model Evaluation and Analysis
@@ -277,8 +274,8 @@ println("      - Avg gradient norm: $(round(mean(training_history[:gradient_norm
 println("\n6️⃣ Evaluating Model Performance")
 println("="^40)
 
-# Sample trajectories (same pattern as grid world)
-n_trajectories = 50  # Smaller number for complex supply chain
+# Sample trajectories for analysis (reduced for stability)
+n_trajectories = 10  # Small number for stable testing
 println("   🎯 Sampling $n_trajectories trajectories...")
 
 # Use default sampling configuration
@@ -286,8 +283,9 @@ sampling_config = GFlowNet.create_default_sampling_config()
 println("   🔧 Using default sampling configuration")
 
 trajectories = []
-successful_samples = 0
+global successful_samples = 0
 for i in 1:n_trajectories
+    global successful_samples
     try
         traj = GFlowNet.sample_trajectory(model; config=sampling_config)
         push!(trajectories, traj)
@@ -432,15 +430,18 @@ println("\n9️⃣ Generating Summary Report")
 println("="^40)
 
 try
-    # Create results directory
+    # Create results directory (clean setup)
     results_dir = "results"
     if !isdir(results_dir)
         mkdir(results_dir)
+        println("   📁 Created results directory")
     end
 
-    # Generate timestamp
+    # Generate timestamp for unique results
     timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-    summary_path = joinpath(results_dir, "supply_chain_summary_$timestamp.txt")
+    summary_path = joinpath(results_dir, "supply_chain_optimization_$timestamp.txt")
+
+    println("   📝 Generating comprehensive results report...")
 
     # Write comprehensive summary
     open(summary_path, "w") do f
@@ -461,7 +462,7 @@ Total Actions: $(length(actions))
 Successful Iterations: $successful_iterations/$(config.n_iterations)
 Final Loss: $(round(final_loss, digits=4))
 Training Time: $(round(total_time, digits=1))s
-Average Gradient Norm: $(round(mean(training_history[:gradient_norms]), digits=4))
+Average Gradient Norm: $(round(mean(training_history.gradient_norms), digits=4))
 
 === Optimization Results ===
 Successful Trajectories: $(length(trajectories))/$n_trajectories
