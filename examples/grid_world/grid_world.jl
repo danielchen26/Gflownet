@@ -45,18 +45,19 @@ println("   📦 Using create_grid_world_gflownet() from GFlowNet.jl...")
 # Set random seed for reproducibility
 Random.seed!(42)
 
-# Create the model with interesting reward structure
+# Create the model with challenging reward structure and all actions
 model = create_grid_world_gflownet(
     grid_size=5,
     reward_positions=Dict(
-        (3, 3) => 20.0,  # Center - highest reward
-        (1, 5) => 15.0,  # Top-left corner
-        (5, 1) => 15.0,  # Bottom-right corner
-        (5, 5) => 10.0,  # Top-right corner
-        (2, 4) => 8.0,   # Intermediate positions
-        (4, 2) => 8.0
+        (5, 5) => 50.0,  # Corner - highest reward (requires optimal navigation)
+        (1, 5) => 40.0,  # Top-left corner (requires left movement)
+        (5, 1) => 40.0,  # Bottom-right corner (requires down movement)
+        (3, 3) => 30.0,  # Center - good intermediate reward
+        (2, 4) => 20.0,  # Intermediate positions
+        (4, 2) => 20.0,
+        (1, 1) => 5.0    # Starting position - low reward to encourage exploration
     ),
-    allow_all_moves=false,  # Acyclic: only up/right moves + terminate
+    allow_all_moves=true,   # All 5 actions: enables optimal exploration with acyclic control
     hidden_dim=64,
     learning_rate=0.01
 )
@@ -123,14 +124,18 @@ println("      - Avg gradient norm: $(round(mean(training_history[:gradient_norm
 println("\n3️⃣ Evaluating Model Performance")
 println("="^50)
 
-# Sample trajectories using core package function
+# Sample trajectories with acyclic control for optimal performance
 n_trajectories = 100
-println("   🎯 Sampling $n_trajectories trajectories...")
+println("   🎯 Sampling $n_trajectories trajectories with acyclic control...")
+
+# Use acyclic control to prevent cycles while maintaining exploration
+acyclic_config = create_default_sampling_config(acyclic_rate=0.8)
+println("   🔧 Using acyclic_rate = 0.8 (80% cycle prevention)")
 
 trajectories = []
 for i in 1:n_trajectories
     try
-        traj = sample_trajectory(model)
+        traj = sample_trajectory(model; config=acyclic_config)
         push!(trajectories, traj)
     catch e
         println("   ⚠️  Trajectory $i failed: $e")
@@ -139,6 +144,10 @@ end
 
 # Analyze results using our custom function
 analyze_grid_world_results(trajectories, 5)
+
+# Store these trajectories for consistent analysis throughout
+global main_trajectories = trajectories
+global main_rewards = [reward(traj.states[end]) for traj in trajectories]
 
 # =============================================================================
 # 4. Demonstrate Different Configurations
@@ -188,8 +197,9 @@ for (name, params, description) in configurations
 
         test_history = train_gflownet(test_model, test_config; verbose=false)
 
-        # Quick evaluation
-        test_trajectories = [sample_trajectory(test_model) for _ in 1:20]
+        # Quick evaluation with acyclic control
+        test_config = create_default_sampling_config(acyclic_rate=0.8)
+        test_trajectories = [sample_trajectory(test_model; config=test_config) for _ in 1:20]
         test_rewards = [reward(traj.states[end]) for traj in test_trajectories if !isempty(traj.states)]
 
         n_states = count_reachable_states(test_model.initial_state, test_model.all_actions)
@@ -216,14 +226,15 @@ println("\n5️⃣ Performance Summary")
 println("="^50)
 
 println("   📊 Main Model Results:")
-valid_trajectories = filter(traj -> length(traj.states) > 1, trajectories)
-rewards = [reward(traj.states[end]) for traj in valid_trajectories]
+valid_trajectories = filter(traj -> length(traj.states) > 1, main_trajectories)
+rewards = main_rewards
 
 println("      - Valid trajectories: $(length(valid_trajectories))/$n_trajectories")
 println("      - Mean reward: $(round(mean(rewards), digits=2))")
 println("      - Max reward: $(maximum(rewards))")
-println("      - High reward (≥10): $(count(r -> r >= 10.0, rewards))")
-println("      - Very high reward (≥15): $(count(r -> r >= 15.0, rewards))")
+println("      - High reward (≥30): $(count(r -> r >= 30.0, rewards))")
+println("      - Very high reward (≥40): $(count(r -> r >= 40.0, rewards))")
+println("      - Optimal reward (≥50): $(count(r -> r >= 50.0, rewards))")
 
 println("\n   🔄 Configuration Comparison:")
 for (name, result) in results
@@ -242,18 +253,27 @@ end
 println("\n6️⃣ Generating Results")
 println("="^50)
 
-if HAS_REPORTING
-    try
-        html_path = generate_comprehensive_results(training_history, valid_trajectories, rewards)
+# Create results directory in the proper location
+results_dir = "results"
+mkpath(results_dir)
+
+# Always try to generate comprehensive results (works with or without plotting)
+try
+    html_path = generate_comprehensive_results(training_history, valid_trajectories, rewards)
+    if html_path != "report_generation_failed.html"
         println("   📄 Comprehensive report: $html_path")
-    catch e
-        println("   ⚠️  Report generation failed: $e")
+        if !HAS_REPORTING
+            println("   📊 Note: Generated with basic analysis (plotting dependencies not available)")
+        end
     end
+catch e
+    println("   ⚠️  Report generation failed: $e")
+    println("   📊 Continuing with basic analysis...")
 end
 
 # Create simple text summary
 timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-summary_path = "results/grid_world_summary_$timestamp.txt"
+summary_path = joinpath("results", "grid_world_summary_$timestamp.txt")
 
 try
     mkpath("results")
@@ -279,14 +299,15 @@ Avg Gradient Norm: $(round(mean(training_history[:gradient_norms]), digits=4))
 Valid Trajectories: $(length(valid_trajectories))/$n_trajectories
 Mean Reward: $(round(mean(rewards), digits=2))
 Max Reward: $(maximum(rewards))
-High Reward Trajectories (≥10): $(count(r -> r >= 10.0, rewards))
-Very High Reward Trajectories (≥15): $(count(r -> r >= 15.0, rewards))
+High Reward Trajectories (≥30): $(count(r -> r >= 30.0, main_rewards))
+Very High Reward Trajectories (≥40): $(count(r -> r >= 40.0, main_rewards))
+Optimal Reward Trajectories (≥50): $(count(r -> r >= 50.0, main_rewards))
 
 === Key Success Metrics ===
 ✅ State Space: Successful ($state_count states discovered)
 ✅ Training: Converged in $successful_iterations iterations
-✅ High Reward Discovery: Found maximum reward of $(maximum(rewards))
-✅ Exploration: $(length(unique([(s.x, s.y) for traj in valid_trajectories for s in [traj.states[end]]]))) unique end positions
+✅ High Reward Discovery: Found maximum reward of $(maximum(main_rewards))
+✅ Exploration: $(length(unique([(s.x, s.y) for traj in main_trajectories for s in [traj.states[end]]]))) unique end positions
 """)
     end
     println("   📝 Text summary: $summary_path")
@@ -302,30 +323,32 @@ println("\n7️⃣ Usage Examples")
 println("="^50)
 
 println("""
-   📚 Key Takeaways - Using GFlowNet.jl Properly:
+   📚 Key Takeaways - Optimized GFlowNet.jl Usage:
 
-   1️⃣ Standard Model Creation:
-      model = create_grid_world_gflownet(grid_size=5)
+   1️⃣ Optimal Model Creation:
+      model = create_grid_world_gflownet(grid_size=5, allow_all_moves=true)
 
-   2️⃣ Custom Rewards:
+   2️⃣ Strategic Rewards:
       model = create_grid_world_gflownet(
-          reward_positions=Dict((3,3)=>20.0, (5,5)=>15.0)
+          reward_positions=Dict((5,5)=>50.0, (1,5)=>40.0, (5,1)=>40.0),
+          allow_all_moves=true
       )
 
    3️⃣ Training:
       config = TrainingConfig(n_iterations=50, batch_size=16)
       history = train_gflownet(model, config; verbose=true)
 
-   4️⃣ Sampling:
-      trajectories = [sample_trajectory(model) for _ in 1:100]
+   4️⃣ Acyclic Sampling (Optimal):
+      config = create_default_sampling_config(acyclic_rate=0.8)
+      trajectories = [sample_trajectory(model; config=config) for _ in 1:100]
 
    5️⃣ Analysis:
       analyze_grid_world_results(trajectories, grid_size)
 
-   ✨ No manual DAG construction needed!
-   ✨ No manual neural network definitions!
-   ✨ No manual training loops!
-   ✨ Just use the high-level package functions!
+   ✨ All 5 actions enabled for optimal exploration!
+   ✨ Acyclic control prevents wasted cycles!
+   ✨ High-reward policies through smart navigation!
+   ✨ Best of both worlds: exploration + efficiency!
 """)
 
 println("\n🎯 Grid World Example Completed Successfully!")

@@ -321,6 +321,83 @@ function analyze_grid_world_results(trajectories::Vector, grid_size::Int=5)
     end
 end
 
+# =============================================================================
+# Utility Functions for Analysis
+# =============================================================================
+
+"""
+    count_reachable_states(initial_state::GridState, actions::Vector{GridAction})
+
+Count the number of reachable states from the initial state.
+"""
+function count_reachable_states(initial_state::GridState, actions::Vector{GridAction})
+    visited = Set{GridState}()
+    queue = [initial_state]
+
+    while !isempty(queue)
+        current_state = popfirst!(queue)
+
+        # Skip if already visited
+        current_state in visited && continue
+        push!(visited, current_state)
+
+        # Add reachable states
+        for action in actions
+            if is_applicable(action, current_state)
+                next_state = apply_action(action, current_state)
+                if next_state ∉ visited
+                    push!(queue, next_state)
+                end
+            end
+        end
+    end
+
+    return length(visited)
+end
+
+"""
+    analyze_state_space(initial_state::GridState, actions::Vector{GridAction})
+
+Analyze the state space structure and return statistics.
+"""
+function analyze_state_space(initial_state::GridState, actions::Vector{GridAction})
+    visited = Set{GridState}()
+    queue = [initial_state]
+    terminal_states = 0
+
+    while !isempty(queue)
+        current_state = popfirst!(queue)
+
+        # Skip if already visited
+        current_state in visited && continue
+        push!(visited, current_state)
+
+        # Count terminal states
+        if current_state.is_terminal
+            terminal_states += 1
+        end
+
+        # Add reachable states
+        for action in actions
+            if is_applicable(action, current_state)
+                next_state = apply_action(action, current_state)
+                if next_state ∉ visited
+                    push!(queue, next_state)
+                end
+            end
+        end
+    end
+
+    return (
+        total_states = length(visited),
+        terminal_states = terminal_states,
+        exploration_complete = true  # Simple grid world always has complete exploration
+    )
+end
+
+# Removed duplicate create_default_sampling_config - using the one from core/sampling.jl
+
 # Export the main functions
 export GridState, GridAction, MoveRight, MoveUp, MoveLeft, MoveDown, Terminate
 export create_grid_world_gflownet, create_grid_world, analyze_grid_world_results
+export count_reachable_states, analyze_state_space

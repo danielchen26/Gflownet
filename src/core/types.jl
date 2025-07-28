@@ -211,7 +211,7 @@ Standard container for training metrics.
 - `gradient_norms::Vector{Float64}` - Gradient norms per iteration
 - `iteration_times::Vector{Float64}` - Time per iteration
 """
-struct TrainingHistory
+mutable struct TrainingHistory
     losses::Vector{Float64}
     gradient_norms::Vector{Float64}
     iteration_times::Vector{Float64}

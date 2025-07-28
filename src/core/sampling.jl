@@ -185,33 +185,7 @@ function create_exploration_sampling_config(temperature::Float64=2.0; acyclic_ra
     )
 end
 
-"""
-    create_acyclic_sampling_config(acyclic_rate::Float64=0.8; strategy=STOCHASTIC_SAMPLING)
 
-Create a sampling configuration with acyclic control enabled.
-Use this to prevent cycles during trajectory sampling.
-
-# Arguments
-- `acyclic_rate::Float64=0.8`: Rate of cycle prevention (0.0=no control, 1.0=strict)
-- `strategy`: Sampling strategy to use
-
-# Example
-```julia
-# 80% cycle prevention
-config = create_acyclic_sampling_config(0.8)
-trajectories = [sample_trajectory(model; config=config) for _ in 1:100]
-```
-"""
-function create_acyclic_sampling_config(acyclic_rate::Float64=0.8; strategy=STOCHASTIC_SAMPLING)
-    return SamplingConfig(
-        strategy=strategy,
-        max_trajectory_length=100,
-        temperature=1.0,
-        enable_early_stopping=true,
-        validation_mode=false,
-        acyclic_rate=acyclic_rate
-    )
-end
 
 # =============================================================================
 # Trajectory Analysis Utilities

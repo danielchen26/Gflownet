@@ -168,8 +168,7 @@ export SamplingConfig
 export sample_trajectory, sample_trajectory_batch, sample_backward_trajectory
 export sample_action_with_strategy
 
-# Sampling configuration utilities
-export create_acyclic_sampling_config
+
 
 # Trajectory analysis
 export trajectory_probability, log_trajectory_probability, validate_trajectory
@@ -198,7 +197,7 @@ export compute_gradients, clip_gradients!
 # =============================================================================
 
 # Training configuration
-export TrainingConfig, TrainingState, TrainingMetrics
+export TrainingConfig, TrainingState, TrainingMetrics, TrainingHistory
 export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, COMBINED_OBJECTIVES
 export PartitionFunctionMethod, OptimizationMethod
 export SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, LEARNABLE_ESTIMATION, ADAPTIVE_ESTIMATION

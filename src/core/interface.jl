@@ -98,7 +98,33 @@ end
 
 Sample trajectory using Zygote-safe operations.
 """
-function sample_trajectory(model::GFlowNetModel; config::SamplingConfig = SamplingConfig())
+function sample_trajectory(model::GFlowNetModel; config = SamplingConfig())
+    # Handle both SamplingConfig and named tuple configs
+    if isa(config, NamedTuple)
+        # Convert named tuple to SamplingConfig
+        acyclic_rate = get(config, :acyclic_rate, 0.0)
+        strategy = get(config, :strategy, :stochastic)
+        temperature = get(config, :temperature, 1.0)
+
+        # Convert strategy symbol to enum
+        strategy_enum = if strategy == :stochastic
+            STOCHASTIC_SAMPLING
+        elseif strategy == :greedy
+            GREEDY_SAMPLING
+        elseif strategy == :temperature
+            TEMPERATURE_SAMPLING
+        else
+            STOCHASTIC_SAMPLING
+        end
+
+        config = SamplingConfig(
+            strategy=strategy_enum,
+            temperature=temperature,
+            acyclic_rate=acyclic_rate
+        )
+    elseif !isa(config, SamplingConfig)
+        config = SamplingConfig()
+    end
     trajectory_states = [model.initial_state]
     trajectory_actions = AbstractAction[]
 
