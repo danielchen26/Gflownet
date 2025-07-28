@@ -1,0 +1,611 @@
+# Flow Conservation and Computation
+# Mathematical foundations of flow F(s) and flow conservation in GFlowNets
+
+using Zygote
+
+# =============================================================================
+# Flow Conservation - Mathematical Foundation
+# =============================================================================
+
+"""
+    FlowComputationMethod
+
+Enumeration of methods for computing flows in GFlowNet.
+
+# Mathematical Foundation
+Different approaches to computing the flow F(s) through each state:
+- `:recursive`: F(s) = Σ_{s'} P_F(s'|s) * F(s') (recursive definition)
+- `:direct`: F(s) = Z(s) (direct estimation via flow network)
+- `:mixed`: Combination of recursive and direct methods
+"""
+@enum FlowComputationMethod begin
+    RECURSIVE_FLOW
+    DIRECT_FLOW
+    MIXED_FLOW
+end
+
+# =============================================================================
+# Flow Caching System
+# =============================================================================
+
+"""
+Global flow cache for memoization of expensive flow computations.
+
+# Mathematical Foundation
+Caches computed flow values F(s) to avoid recomputation since:
+- Flow values are deterministic given model parameters
+- Recursive computation can be expensive for deep DAGs
+- Many training objectives require repeated flow queries
+"""
+const FLOW_CACHE = Dict{Tuple{Any,Any}, Float64}()
+
+"""
+    clear_flow_cache!()
+
+Clear the global flow cache.
+
+# Usage
+Should be called when model parameters change to ensure cache consistency.
+"""
+function clear_flow_cache!()
+    empty!(FLOW_CACHE)
+    return nothing
+end
+
+"""
+    get_cache_key(model::GFlowNetModel, state::AbstractState)
+
+Generate a unique cache key for flow memoization.
+
+# Mathematical Foundation
+Creates a key that uniquely identifies the (model, state) pair for caching.
+Uses parameter hash to ensure cache invalidation when model changes.
+"""
+function get_cache_key(model::GFlowNetModel, state::AbstractState)
+    # Use hash of parameters to ensure cache invalidation on parameter changes
+    param_hash = hash(model.parameters)
+    return (param_hash, state)
+end
+
+# =============================================================================
+# Terminal State Flow - Mathematical Foundation
+# =============================================================================
+
+"""
+    terminal_flow(state::AbstractState)::Float64
+
+Compute flow for terminal states: F(s) = R(s).
+
+# Mathematical Foundation
+For terminal states s ∈ S_T, the flow is defined as:
+F(s) = R(s)
+
+where R(s) is the reward function. This is the boundary condition for
+flow conservation equations.
+
+# Arguments
+- `state::AbstractState`: Terminal state
+
+# Returns
+- `Float64`: Flow value F(s) = R(s)
+
+# Mathematical Requirements
+- State must be terminal: is_terminal_state(state) == true
+- Reward must be positive: R(s) > 0 (GFlowNet requirement)
+"""
+function terminal_flow(state::AbstractState)::Float64
+    if !is_terminal_state(state)
+        throw(ArgumentError("terminal_flow can only be called on terminal states"))
+    end
+
+    reward_value = reward(state)
+
+    # Validate reward positivity (mathematical requirement)
+    if reward_value <= 0
+        throw(ArgumentError("Terminal state reward must be positive: got $reward_value"))
+    end
+
+    return Float64(reward_value)
+end
+
+# =============================================================================
+# Recursive Flow Computation - Mathematical Foundation
+# =============================================================================
+
+"""
+    compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Float64
+
+Compute flow using recursive flow conservation equation.
+
+# Mathematical Foundation
+For non-terminal states, flow is computed recursively as:
+F(s) = Σ_{s' ∈ children(s)} P_F(s'|s) * F(s')
+
+For terminal states:
+F(s) = R(s)
+
+This implements the fundamental flow conservation equation of GFlowNets.
+
+# Arguments
+- `model::GFlowNetModel`: Complete GFlowNet model
+- `state::AbstractState`: State to compute flow for
+
+# Returns
+- `Float64`: Flow value F(s)
+
+# Mathematical Properties
+- Satisfies flow conservation by construction
+- Terminates at terminal states with F(s) = R(s)
+- Result is deterministic given model parameters
+"""
+function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Float64
+    # Base case: terminal states
+    if is_terminal_state(state)
+        return terminal_flow(state)
+    end
+
+    # Get next states (children in DAG)
+    next_states = get_next_states(model.dag, state)
+
+    # If no next states but not terminal, flow is zero
+    if isempty(next_states)
+        @warn "Non-terminal state $state has no outgoing transitions. Flow set to 0."
+        return 0.0
+    end
+
+    # Recursive case: sum over all possible next states
+    flow_sum = 0.0
+
+    for next_state in next_states
+        # Compute transition probability P_F(s'|s)
+        transition_prob = forward_transition_probability(model, state, next_state)
+
+        # Compute flow of next state F(s')
+        next_flow = compute_recursive_flow(model, next_state)
+
+        # Add contribution: P_F(s'|s) * F(s')
+        flow_sum += transition_prob * next_flow
+    end
+
+    return flow_sum
+end
+
+"""
+    compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
+
+Compute recursive flow with memoization for performance.
+
+# Mathematical Foundation
+Same as compute_recursive_flow but uses caching to avoid recomputing
+flow values for states that have already been processed.
+
+# Performance Benefits
+- O(|S|) time complexity instead of potentially exponential
+- Essential for large DAGs with many shared substructures
+- Maintains mathematical correctness while improving efficiency
+"""
+function compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
+    # Check cache first
+    cache_key = get_cache_key(model, state)
+    if haskey(FLOW_CACHE, cache_key)
+        return FLOW_CACHE[cache_key]
+    end
+
+    # Compute flow value
+    flow_value = compute_recursive_flow(model, state)
+
+    # Cache result
+    FLOW_CACHE[cache_key] = flow_value
+
+    return flow_value
+end
+
+# =============================================================================
+# Direct Flow Estimation - Mathematical Foundation
+# =============================================================================
+
+"""
+    compute_flow_estimate(model::GFlowNetModel, state::AbstractState)::Float64
+
+Compute flow using direct flow estimator network Z(s).
+
+# Mathematical Foundation
+Uses the flow estimator network to directly predict:
+F(s) ≈ Z(s) = exp(z_θ(s))
+
+where z_θ(s) is the log-flow estimate from the neural network.
+
+# Arguments
+- `model::GFlowNetModel`: Model with flow estimator
+- `state::AbstractState`: State to estimate flow for
+
+# Returns
+- `Float64`: Estimated flow value Z(s)
+
+# Requirements
+- Model must have flow estimator: model.flow_estimator ≠ nothing
+"""
+function compute_flow_estimate(model::GFlowNetModel, state::AbstractState)::Float64
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError("Model must have flow estimator for direct flow computation"))
+    end
+
+    return flow_estimate(
+        model.flow_estimator, state,
+        model.parameters.flow, model.states.flow
+    )
+end
+
+# =============================================================================
+# Unified Flow Interface - Mathematical Foundation
+# =============================================================================
+
+"""
+    flow(model::GFlowNetModel, state::AbstractState; method::FlowComputationMethod=RECURSIVE_FLOW)::Float64
+
+Unified interface for computing flow F(s) using different methods.
+
+# Mathematical Foundation
+Computes the flow F(s) through state s using the specified method:
+- RECURSIVE_FLOW: Uses flow conservation equation recursively
+- DIRECT_FLOW: Uses flow estimator network Z(s)
+- MIXED_FLOW: Combines both methods with validation
+
+# Arguments
+- `model::GFlowNetModel`: Complete GFlowNet model
+- `state::AbstractState`: State to compute flow for
+- `method::FlowComputationMethod`: Computation method to use
+
+# Returns
+- `Float64`: Flow value F(s)
+
+# Method Selection Guidelines
+- RECURSIVE_FLOW: Mathematically exact, slower for large DAGs
+- DIRECT_FLOW: Fast approximation, requires trained flow estimator
+- MIXED_FLOW: Uses both methods for validation and robustness
+"""
+function flow(model::GFlowNetModel, state::AbstractState;
+              method::FlowComputationMethod=RECURSIVE_FLOW)::Float64
+
+    if method == RECURSIVE_FLOW
+        return compute_recursive_flow_memoized(model, state)
+
+    elseif method == DIRECT_FLOW
+        return compute_flow_estimate(model, state)
+
+    elseif method == MIXED_FLOW
+        # Compute using both methods
+        recursive_flow = compute_recursive_flow_memoized(model, state)
+
+        if !isnothing(model.flow_estimator)
+            direct_flow = compute_flow_estimate(model, state)
+
+            # Check consistency (non-differentiable validation)
+            Zygote.@ignore begin
+                relative_error = abs(recursive_flow - direct_flow) / max(recursive_flow, direct_flow, 1e-8)
+                if relative_error > 0.1  # 10% tolerance
+                    @warn "Flow computation methods disagree" recursive=recursive_flow direct=direct_flow relative_error=relative_error
+                end
+            end
+
+            # Return average for robustness
+            return (recursive_flow + direct_flow) / 2.0
+        else
+            return recursive_flow
+        end
+    else
+        throw(ArgumentError("Unknown flow computation method: $method"))
+    end
+end
+
+# =============================================================================
+# Edge Flow Computation - Mathematical Foundation
+# =============================================================================
+
+"""
+    edge_flow(model::GFlowNetModel, source_state::AbstractState, target_state::AbstractState)::Float64
+
+Compute flow along edge from source to target state.
+
+# Mathematical Foundation
+The edge flow is defined as:
+F(s→s') = P_F(s'|s) * F(s)
+
+This represents the amount of flow passing through the specific edge s→s'.
+
+# Arguments
+- `model::GFlowNetModel`: Complete GFlowNet model
+- `source_state::AbstractState`: Source state s
+- `target_state::AbstractState`: Target state s'
+
+# Returns
+- `Float64`: Edge flow F(s→s')
+
+# Mathematical Properties
+- Non-negative: F(s→s') ≥ 0
+- Flow conservation: Σ_{s'} F(s→s') = F(s)
+- Zero if no valid transition exists
+"""
+function edge_flow(model::GFlowNetModel, source_state::AbstractState, target_state::AbstractState)::Float64
+    # Check if edge exists in DAG
+    next_states = get_next_states(model.dag, source_state)
+    if target_state ∉ next_states
+        return 0.0
+    end
+
+    # Compute transition probability P_F(s'|s)
+    transition_prob = forward_transition_probability(model, source_state, target_state)
+
+    # Compute source flow F(s)
+    source_flow = flow(model, source_state)
+
+    # Edge flow: F(s→s') = P_F(s'|s) * F(s)
+    return transition_prob * source_flow
+end
+
+# =============================================================================
+# Partition Function Computation - Mathematical Foundation
+# =============================================================================
+
+"""
+    partition_function(model::GFlowNetModel)::Float64
+
+Compute the partition function Z = F(s₀) for the GFlowNet.
+
+# Mathematical Foundation
+The partition function is the total flow from the initial state:
+Z = F(s₀)
+
+This represents the sum of rewards over all possible trajectories,
+weighted by their forward probabilities.
+
+# Arguments
+- `model::GFlowNetModel`: Complete GFlowNet model
+
+# Returns
+- `Float64`: Partition function Z
+
+# Mathematical Significance
+- Z appears in trajectory balance and other training objectives
+- Measures the "mass" of the probability distribution over trajectories
+- Essential for proper normalization in GFlowNet training
+"""
+function partition_function(model::GFlowNetModel)::Float64
+    # Get root state (initial state)
+    root_state = get_root_state(model.dag)
+
+    if isnothing(root_state)
+        throw(ArgumentError("DAG must have exactly one root state for partition function computation"))
+    end
+
+    return flow(model, root_state)
+end
+
+# =============================================================================
+# Flow Validation and Consistency Checks
+# =============================================================================
+
+"""
+    validate_flow_conservation(model::GFlowNetModel, state::AbstractState; tolerance::Float64=1e-6)::Bool
+
+Validate flow conservation equation for a specific state.
+
+# Mathematical Foundation
+Checks that the flow conservation equation holds:
+F(s) = Σ_{s'} P_F(s'|s) * F(s')
+
+# Arguments
+- `model::GFlowNetModel`: Model to validate
+- `state::AbstractState`: State to check conservation for
+- `tolerance::Float64`: Numerical tolerance for equality check
+
+# Returns
+- `Bool`: true if conservation holds within tolerance
+
+# Mathematical Validation
+This is a critical test of GFlowNet mathematical consistency.
+Violations indicate either:
+- Numerical instability in policy or flow networks
+- Bugs in implementation
+- Insufficient training of the model
+"""
+function validate_flow_conservation(model::GFlowNetModel, state::AbstractState; tolerance::Float64=1e-6)::Bool
+    # Skip validation for terminal states (boundary condition)
+    if is_terminal_state(state)
+        return true
+    end
+
+    # Compute left side: F(s)
+    left_side = flow(model, state)
+
+    # Compute right side: Σ_{s'} P_F(s'|s) * F(s')
+    next_states = get_next_states(model.dag, state)
+    right_side = 0.0
+
+    for next_state in next_states
+        transition_prob = forward_transition_probability(model, state, next_state)
+        next_flow = flow(model, next_state)
+        right_side += transition_prob * next_flow
+    end
+
+    # Check conservation within tolerance
+    conservation_error = abs(left_side - right_side)
+    relative_error = conservation_error / max(left_side, right_side, 1e-8)
+
+    is_conserved = relative_error <= tolerance
+
+    if !is_conserved
+        @warn "Flow conservation violation detected" state=state left_side=left_side right_side=right_side relative_error=relative_error
+    end
+
+    return is_conserved
+end
+
+"""
+    validate_flow_consistency(model::GFlowNetModel; sample_size::Int=min(50, length(model.dag.states)))::Float64
+
+Validate flow conservation across multiple states in the DAG.
+
+# Arguments
+- `model::GFlowNetModel`: Model to validate
+- `sample_size::Int`: Number of states to sample for validation
+
+# Returns
+- `Float64`: Fraction of states that satisfy flow conservation
+
+# Mathematical Significance
+A well-trained GFlowNet should have flow conservation close to 1.0.
+Lower values indicate training issues or model problems.
+"""
+function validate_flow_consistency(model::GFlowNetModel; sample_size::Int=min(50, length(model.dag.states)))::Float64
+    # Sample states for validation
+    n_states = length(model.dag.states)
+    sample_indices = if n_states <= sample_size
+        1:n_states
+    else
+        sort(rand(1:n_states, sample_size))
+    end
+
+    conservation_count = 0
+    total_count = 0
+
+    for idx in sample_indices
+        state = model.dag.states[idx]
+
+        # Skip terminal states (always satisfy conservation)
+        if is_terminal_state(state)
+            continue
+        end
+
+        total_count += 1
+        if validate_flow_conservation(model, state)
+            conservation_count += 1
+        end
+    end
+
+    return total_count > 0 ? conservation_count / total_count : 1.0
+end
+
+# =============================================================================
+# Flow Debugging and Analysis Tools
+# =============================================================================
+
+"""
+    flow_analysis(model::GFlowNetModel, state::AbstractState)
+
+Comprehensive flow analysis for debugging purposes.
+
+# Returns
+Named tuple with flow analysis information:
+- `flow_value`: F(s)
+- `is_terminal`: Whether state is terminal
+- `next_states`: List of next states
+- `transition_probs`: P_F(s'|s) for each next state
+- `next_flows`: F(s') for each next state
+- `conservation_check`: Whether flow conservation holds
+"""
+function flow_analysis(model::GFlowNetModel, state::AbstractState)
+    flow_value = flow(model, state)
+    is_terminal = is_terminal_state(state)
+
+    if is_terminal
+        return (
+            flow_value = flow_value,
+            is_terminal = true,
+            next_states = AbstractState[],
+            transition_probs = Float64[],
+            next_flows = Float64[],
+            conservation_check = true,
+            conservation_error = 0.0
+        )
+    end
+
+    next_states = get_next_states(model.dag, state)
+    transition_probs = Float64[]
+    next_flows = Float64[]
+
+    for next_state in next_states
+        push!(transition_probs, forward_transition_probability(model, state, next_state))
+        push!(next_flows, flow(model, next_state))
+    end
+
+    # Check conservation
+    expected_flow = sum(transition_probs .* next_flows)
+    conservation_error = abs(flow_value - expected_flow)
+    conservation_check = conservation_error < 1e-6
+
+    return (
+        flow_value = flow_value,
+        is_terminal = false,
+        next_states = next_states,
+        transition_probs = transition_probs,
+        next_flows = next_flows,
+        conservation_check = conservation_check,
+        conservation_error = conservation_error
+    )
+end
+
+# =============================================================================
+# Performance Monitoring
+# =============================================================================
+
+"""
+    flow_computation_benchmark(model::GFlowNetModel, n_samples::Int=100)
+
+Benchmark flow computation performance across different methods.
+
+# Returns
+Named tuple with timing information for different computation methods.
+"""
+function flow_computation_benchmark(model::GFlowNetModel, n_samples::Int=100)
+    # Clear cache for fair comparison
+    clear_flow_cache!()
+
+    # Sample random states
+    sample_indices = rand(1:length(model.dag.states), n_samples)
+    sample_states = [model.dag.states[i] for i in sample_indices]
+
+    # Benchmark recursive method
+    clear_flow_cache!()
+    recursive_time = @elapsed begin
+        for state in sample_states
+            flow(model, state; method=RECURSIVE_FLOW)
+        end
+    end
+
+    # Benchmark direct method (if available)
+    direct_time = if !isnothing(model.flow_estimator)
+        @elapsed begin
+            for state in sample_states
+                flow(model, state; method=DIRECT_FLOW)
+            end
+        end
+    else
+        NaN
+    end
+
+    return (
+        recursive_time = recursive_time,
+        direct_time = direct_time,
+        n_samples = n_samples,
+        avg_recursive_time = recursive_time / n_samples,
+        avg_direct_time = isnan(direct_time) ? NaN : direct_time / n_samples
+    )
+end
+
+# =============================================================================
+# Display Methods
+# =============================================================================
+
+function Base.show(io::IO, method::FlowComputationMethod)
+    method_name = if method == RECURSIVE_FLOW
+        "Recursive Flow"
+    elseif method == DIRECT_FLOW
+        "Direct Flow Estimation"
+    elseif method == MIXED_FLOW
+        "Mixed Flow (Recursive + Direct)"
+    else
+        "Unknown Method"
+    end
+    print(io, method_name)
+end

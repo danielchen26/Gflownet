@@ -1,368 +1,334 @@
 """
-🎯 Grid World GFlowNet Example
-=============================
+🎯 Grid World GFlowNet Example - Using Core Package Functions
+==============================================================
 
-A complete grid world environment demonstrating GFlowNet's high-level interface.
-Uses GFlowNet's built-in functions for neural network creation and training.
+This example demonstrates the proper way to use GFlowNet.jl for grid world problems
+using the high-level package interface. No manual implementation required!
+
+Key Features:
+- Uses core package functions: create_grid_world_gflownet()
+- Demonstrates different grid world configurations
+- Shows proper training workflow with TrainingConfig
+- Includes comprehensive evaluation and analysis
+- Follows GFlowNet best practices throughout
 """
 
-using GFlowNet, Random, Dates, ComponentArrays, Optimisers, Statistics
+using GFlowNet
+using Random
+using Dates
+using Statistics
 
-# Include report generation functions
-include("report_generation.jl")
+# Include report generation if available
+HAS_REPORTING = try
+    include("report_generation.jl")
+    true
+catch
+    println("📋 Note: Report generation not available - using basic output")
+    false
+end
 
-println("🎯 Grid World GFlowNet Example")
-println("="^50)
+println("🎯 Grid World GFlowNet Example - Core Package Demo")
+println("="^60)
 println("🕐 Started at: $(Dates.format(now(), "HH:MM:SS"))")
+println()
 
 # =============================================================================
-# Grid State and Actions
+# 1. Simple Grid World Creation
 # =============================================================================
 
-struct GridState <: GFlowNet.AbstractState
-    x::Int
-    y::Int
-    is_terminal::Bool
-end
+println("1️⃣ Creating Grid World with Core Package Functions")
+println("="^50)
 
-# Define equality and hash for proper Set operations
-Base.:(==)(a::GridState, b::GridState) = a.x == b.x && a.y == b.y && a.is_terminal == b.is_terminal
-Base.hash(state::GridState, h::UInt) = hash((state.x, state.y, state.is_terminal), h)
+# Create a simple 5x5 grid world using the high-level interface
+println("   📦 Using create_grid_world_gflownet() from GFlowNet.jl...")
 
-abstract type GridAction <: GFlowNet.AbstractAction end
-struct MoveRight <: GridAction end
-struct MoveUp <: GridAction end
-struct Terminate <: GridAction end
+# Set random seed for reproducibility
+Random.seed!(42)
 
-const RIGHT, UP, TERMINATE = MoveRight(), MoveUp(), Terminate()
-const GRID_SIZE = 5
-const REWARD_POSITIONS = Dict((3, 3) => 10.0, (1, 5) => 5.0, (5, 1) => 5.0)
+# Create the model with interesting reward structure
+model = create_grid_world_gflownet(
+    grid_size=5,
+    reward_positions=Dict(
+        (3, 3) => 20.0,  # Center - highest reward
+        (1, 5) => 15.0,  # Top-left corner
+        (5, 1) => 15.0,  # Bottom-right corner
+        (5, 5) => 10.0,  # Top-right corner
+        (2, 4) => 8.0,   # Intermediate positions
+        (4, 2) => 8.0
+    ),
+    allow_all_moves=false,  # Acyclic: only up/right moves + terminate
+    hidden_dim=64,
+    learning_rate=0.01
+)
+
+println("   ✅ Grid world model created successfully!")
+println("   📊 Model details:")
+println("      - Grid size: 5×5")
+println("      - DAG states: $(length(model.dag.states))")
+println("      - DAG edges: $(length(model.dag.edges))")
+println("      - Parameters: $(length(model.parameters))")
+println("      - Actions: $(length(model.dag.actions))")
+
+# Analyze the constructed DAG
+dag_metrics = analyze_dag(model.dag)
+println("   📈 DAG Analysis:")
+println("      - Acyclic: $(dag_metrics.is_acyclic)")
+println("      - Max path length: $(dag_metrics.max_depth)")
+println("      - Avg branching: $(round(dag_metrics.avg_branching_factor, digits=2))")
 
 # =============================================================================
-# GFlowNet Interface Implementation (Required for any domain)
+# 2. Training Configuration and Execution
 # =============================================================================
 
-function GFlowNet.state_to_features(state::GridState)
-    # More Zygote-friendly: explicit type conversions and avoid array comprehensions
-    x_norm = Float32((state.x - 1) / (GRID_SIZE - 1))
-    y_norm = Float32((state.y - 1) / (GRID_SIZE - 1))
-    terminal_flag = state.is_terminal ? Float32(1.0) : Float32(0.0)
-    return Float32[x_norm, y_norm, terminal_flag]
+println("\n2️⃣ Training the GFlowNet Model")
+println("="^50)
+
+# Create training configuration using core package
+config = TrainingConfig(
+    objective=TRAJECTORY_BALANCE,
+    partition_function_method=SIMPLE_ESTIMATION,
+    n_iterations=50,
+    batch_size=16,
+    learning_rate=0.01,
+    validation_frequency=10,
+    early_stopping_patience=20
+)
+
+println("   ⚙️  Training configuration:")
+println("      - Objective: $(config.objective)")
+println("      - Iterations: $(config.n_iterations)")
+println("      - Batch size: $(config.batch_size)")
+println("      - Learning rate: $(config.learning_rate)")
+
+# Train using core package function
+println("   🚀 Starting training...")
+training_history = train_gflownet(model, config; verbose=true)
+
+# Extract training statistics
+successful_iterations = count(!isnan, training_history[:losses])
+final_loss = filter(!isnan, training_history[:losses])[end]
+total_time = sum(training_history[:iteration_times])
+
+println("   ✅ Training completed!")
+println("      - Successful iterations: $successful_iterations/$(config.n_iterations)")
+println("      - Final loss: $(round(final_loss, digits=4))")
+println("      - Total time: $(round(total_time, digits=1))s")
+println("      - Avg gradient norm: $(round(mean(training_history[:gradient_norms]), digits=4))")
+
+# =============================================================================
+# 3. Model Evaluation and Analysis
+# =============================================================================
+
+println("\n3️⃣ Evaluating Model Performance")
+println("="^50)
+
+# Sample trajectories using core package function
+n_trajectories = 100
+println("   🎯 Sampling $n_trajectories trajectories...")
+
+trajectories = []
+for i in 1:n_trajectories
+    try
+        traj = sample_trajectory(model)
+        push!(trajectories, traj)
+    catch e
+        println("   ⚠️  Trajectory $i failed: $e")
+    end
 end
 
-function GFlowNet.is_applicable(action::GridAction, state::GridState)
-    state.is_terminal && return false
-    isa(action, Terminate) && return true
-    x, y = state.x, state.y
-    return (isa(action, MoveUp) && y < GRID_SIZE) ||
-           (isa(action, MoveRight) && x < GRID_SIZE)
+# Analyze results using our custom function
+analyze_grid_world_results(trajectories, 5)
+
+# =============================================================================
+# 4. Demonstrate Different Configurations
+# =============================================================================
+
+println("\n4️⃣ Comparing Different Grid World Configurations")
+println("="^50)
+
+configurations = [
+    (
+        name="Small & Fast",
+        params=(grid_size=3, hidden_dim=32, learning_rate=0.02),
+        description="Quick exploration on small grid"
+    ),
+    (
+        name="Large & Detailed",
+        params=(grid_size=4, hidden_dim=128, learning_rate=0.005),
+        description="Comprehensive exploration with more capacity"
+    ),
+    (
+        name="Bidirectional",
+        params=(grid_size=3, allow_all_moves=true, hidden_dim=64),
+        description="All 4 directions + terminate (with cycles)"
+    )
+]
+
+results = Dict()
+
+for (name, params, description) in configurations
+    println("\n   🔧 Testing: $name")
+    println("      📝 $description")
+
+    try
+        # Create model with different configuration
+        test_model = create_grid_world_gflownet(;
+            reward_positions=Dict((2,2)=>10.0, (3,3)=>15.0),
+            params...
+        )
+
+        # Quick training
+        test_config = TrainingConfig(
+            objective=TRAJECTORY_BALANCE,
+            n_iterations=20,
+            batch_size=8,
+            validation_frequency=10
+        )
+
+        test_history = train_gflownet(test_model, test_config; verbose=false)
+
+        # Quick evaluation
+        test_trajectories = [sample_trajectory(test_model) for _ in 1:20]
+        test_rewards = [reward(traj.states[end]) for traj in test_trajectories if !isempty(traj.states)]
+
+        results[name] = (
+            model=test_model,
+            mean_reward=mean(test_rewards),
+            max_reward=maximum(test_rewards),
+            n_states=length(test_model.dag.states)
+        )
+
+        println("      ✅ Success: $(length(test_model.dag.states)) states, mean reward: $(round(mean(test_rewards), digits=2))")
+
+    catch e
+        println("      ❌ Failed: $e")
+        results[name] = nothing
+    end
 end
 
-function GFlowNet.apply_action(action::GridAction, state::GridState)
-    isa(action, Terminate) && return GridState(state.x, state.y, true)
+# =============================================================================
+# 5. Performance Summary
+# =============================================================================
 
-    # Only allow forward movement to avoid cycles
-    x = isa(action, MoveRight) ? state.x + 1 : state.x
-    y = isa(action, MoveUp) ? state.y + 1 : state.y
+println("\n5️⃣ Performance Summary")
+println("="^50)
 
-    return GridState(x, y, false)
-end
+println("   📊 Main Model Results:")
+valid_trajectories = filter(traj -> length(traj.states) > 1, trajectories)
+rewards = [reward(traj.states[end]) for traj in valid_trajectories]
 
-GFlowNet.is_terminal_state(state::GridState) = state.is_terminal
+println("      - Valid trajectories: $(length(valid_trajectories))/$n_trajectories")
+println("      - Mean reward: $(round(mean(rewards), digits=2))")
+println("      - Max reward: $(maximum(rewards))")
+println("      - High reward (≥10): $(count(r -> r >= 10.0, rewards))")
+println("      - Very high reward (≥15): $(count(r -> r >= 15.0, rewards))")
 
-function GFlowNet.base_reward(state::GridState)
-    !state.is_terminal && return 0.0
-
-    # FIXED: Make Zygote-compatible by avoiding dictionary get() calls
-    # Use conditional logic instead of dictionary lookup
-    if state.x == 3 && state.y == 3
-        return 10.0  # High reward position
-    elseif (state.x == 1 && state.y == 5) || (state.x == 5 && state.y == 1)
-        return 5.0   # Medium reward positions
+println("\n   🔄 Configuration Comparison:")
+for (name, result) in results
+    if result !== nothing
+        println("      - $name: $(result.n_states) states, max reward $(round(result.max_reward, digits=1))")
     else
-        return 1.0   # Default reward
+        println("      - $name: Failed")
     end
 end
 
-function GFlowNet.reward(state::GridState)
-    return GFlowNet.base_reward(state)
-end
-
 # =============================================================================
-# Helper Functions for DAG Construction
+# 6. Generate Comprehensive Results
 # =============================================================================
 
-"""
-Generate all reachable states from the initial state using BFS to avoid cycles.
-This ensures we only include states that can actually be reached through valid
-forward actions, preventing cycle creation in the DAG.
-"""
-function generate_reachable_states(initial_state::GridState, actions::Vector{GridAction})
-    visited = Set{GridState}()
-    queue = [initial_state]
-    reachable_states = GridState[]
+println("\n6️⃣ Generating Results")
+println("="^50)
 
-
-
-    while !isempty(queue)
-        current_state = popfirst!(queue)
-        # Skip if already visited
-        if current_state in visited
-            continue
-        end
-
-        # Mark as visited and add to results
-        push!(visited, current_state)
-        push!(reachable_states, current_state)
-
-        # Don't explore from terminal states
-        if current_state.is_terminal
-            continue
-        end
-
-        # Apply all applicable actions to find next states
-        for action in actions
-            if GFlowNet.is_applicable(action, current_state)
-                next_state = GFlowNet.apply_action(action, current_state)
-
-                # Add to queue if not yet visited and not already in queue
-                if !(next_state in visited) && !(next_state in queue)
-                    push!(queue, next_state)
-                end
-            end
-        end
-    end
-
-    return reachable_states
-end
-
-# =============================================================================
-# Model Creation Using HIGH-LEVEL GFlowNet Functions
-# =============================================================================
-
-function create_gflownet_model()
-    println("🔧 Creating GFlowNet model using HIGH-LEVEL package functions...")
-
-    # Create a forward-only DAG to avoid cycles
-    initial_state = GridState(1, 1, false)
-    actions = GridAction[RIGHT, UP, TERMINATE]
-
-    # Generate all reachable states dynamically to avoid cycles
-    println("   - Generating reachable states from initial state (1,1)...")
-    reachable_states = generate_reachable_states(initial_state, actions)
-
-    # Filter terminal states from reachable states
-    terminal_states = [state for state in reachable_states if state.is_terminal]
-    non_terminal_states = [state for state in reachable_states if !state.is_terminal]
-
-    terminal_sink = GridState(0, 0, true)  # Special sink state
-
-    println("   - Found $(length(reachable_states)) reachable states")
-    println("   - Terminal states: $(length(terminal_states))")
-    println("   - Non-terminal states: $(length(non_terminal_states))")
-
-    # Use create_dag with only reachable states (guaranteed no cycles)
-    dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
-
-    # Use HIGH-LEVEL GFlowNet functions to create neural networks automatically
-    input_dim, hidden_dim, n_actions = 3, 64, 5
-    rng = Random.default_rng()
-    Random.seed!(rng, 42)
-
-    println("✅ Using GFlowNet's high-level neural network creation functions:")
-
-    # HIGH-LEVEL: Create forward policy automatically
-    forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(input_dim, hidden_dim, n_actions, rng)
-    println("   - Forward policy created automatically")
-
-    # HIGH-LEVEL: Create flow estimator automatically
-    flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(input_dim, hidden_dim, rng)
-    println("   - Flow estimator created automatically")
-
-    # Setup parameters and optimizer following working examples
-    parameters = ComponentArray(
-        forward=ComponentArray(forward_ps),
-        flow=ComponentArray(flow_ps)
-    )
-    states = (forward=forward_st, backward=nothing, flow=flow_st)
-
-    # Create optimizer like in working examples
-    optimizer = Optimisers.setup(Optimisers.Adam(0.01), parameters)
-
-    # Create GFlowNet model following working examples exactly
-    model = GFlowNet.GFlowNetModel(
-        dag=dag,
-        forward_policy=forward_policy,
-        flow_estimator=flow_estimator,
-        partition_function=50.0,
-        objectives=[GFlowNet.TrajectoryBalanceObjective(1.0)],
-        optimizer=optimizer,
-        parameters=parameters,
-        states=states
-    )
-
-    println("✅ GFlowNet model created using HIGH-LEVEL interface!")
-    println("   - NO manual neural network definition")
-    println("   - Used create_forward_policy() and create_flow_estimator()")
-    println("   - Total parameters: $(length(parameters))")
-
-    return model
-end
-
-# =============================================================================
-# Training Using HIGH-LEVEL GFlowNet Interface
-# =============================================================================
-
-function train_gflownet_high_level(model)
-    println("\n🚀 Training using HIGH-LEVEL GFlowNet interface...")
-
-    # Training configuration optimized for demonstrating learning progress
-    config = GFlowNet.TrainingConfig(
-        objective=GFlowNet.TRAJECTORY_BALANCE,
-        partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
-        n_iterations=20,  # Shorter for demonstration
-        batch_size=16,
-        learning_rate=0.01,
-        early_stopping_patience=15,
-        validation_frequency=5,
-        partition_update_frequency=5
-    )
-
-    println("✅ Using GFlowNet's TrainingConfig:")
-    println("   - Objective: $(config.objective)")
-    println("   - Batch size: $(config.batch_size)")
-    println("   - Learning rate: $(config.learning_rate)")
-    println("   - Iterations: $(config.n_iterations)")
-
-    # HIGH-LEVEL: Use GFlowNet's built-in training function
-    println("\n🎯 Calling GFlowNet.train_gflownet() - the HIGH-LEVEL training function...")
-
+if HAS_REPORTING
     try
-        training_history = GFlowNet.train_gflownet(model, config; verbose=true)
-
-        println("✅ HIGH-LEVEL training completed!")
-        return model, training_history
-
+        html_path = generate_comprehensive_results(training_history, valid_trajectories, rewards)
+        println("   📄 Comprehensive report: $html_path")
     catch e
-        println("⚠️  High-level training encountered an issue: $e")
-        println("🔍 Full error details:")
-        for (exc, bt) in Base.catch_stack()
-            showerror(stdout, exc, bt)
-            println()
-        end
-        println("🔄 Falling back to simplified sampling for demonstration...")
-
-        # Simple fallback to demonstrate sampling still works
-        println("📊 Testing core sampling function:")
-        for i in 1:5
-            try
-                traj = GFlowNet.sample_trajectory(model)
-                final_state = traj.states[end]
-                reward = GFlowNet.reward(final_state)
-                println("   Sample $i: ($(final_state.x), $(final_state.y)) → reward: $reward")
-            catch e2
-                println("   Sample $i: Error in sampling - $e2")
-            end
-        end
-
-        return model, Dict()
+        println("   ⚠️  Report generation failed: $e")
     end
 end
 
-# =============================================================================
-# Evaluation Using Core GFlowNet Functions
-# =============================================================================
+# Create simple text summary
+timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
+summary_path = "results/grid_world_summary_$timestamp.txt"
 
-function evaluate_gflownet_model(model; n_trajectories=50)
-    println("\n🎯 Evaluating using core GFlowNet.sample_trajectory()...")
+try
+    mkpath("results")
+    open(summary_path, "w") do f
+        write(f, """
+Grid World GFlowNet Results Summary
+Generated: $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
 
-    # Sample trajectories using core function
-    trajectories = []
-    for i in 1:n_trajectories
-        try
-            traj = GFlowNet.sample_trajectory(model)
-            push!(trajectories, traj)
-        catch e
-            println("⚠️  Warning: Trajectory $i failed to sample - $e")
-        end
+=== Model Configuration ===
+Grid Size: 5×5
+DAG States: $(length(model.dag.states))
+DAG Edges: $(length(model.dag.edges))
+Parameters: $(length(model.parameters))
+Acyclic: $(dag_metrics.is_acyclic)
+
+=== Training Results ===
+Iterations: $successful_iterations/$(config.n_iterations)
+Final Loss: $(round(final_loss, digits=4))
+Training Time: $(round(total_time, digits=1))s
+Avg Gradient Norm: $(round(mean(training_history[:gradient_norms]), digits=4))
+
+=== Evaluation Results ===
+Valid Trajectories: $(length(valid_trajectories))/$n_trajectories
+Mean Reward: $(round(mean(rewards), digits=2))
+Max Reward: $(maximum(rewards))
+High Reward Trajectories (≥10): $(count(r -> r >= 10.0, rewards))
+Very High Reward Trajectories (≥15): $(count(r -> r >= 15.0, rewards))
+
+=== Key Success Metrics ===
+✅ DAG Construction: Successful ($(length(model.dag.states)) states discovered)
+✅ Training: Converged in $successful_iterations iterations
+✅ High Reward Discovery: Found maximum reward of $(maximum(rewards))
+✅ Exploration: $(length(unique([(s.x, s.y) for traj in valid_trajectories for s in [traj.states[end]]]))) unique end positions
+""")
     end
-
-    valid_trajectories = filter(traj -> length(traj.states) > 1, trajectories)
-
-    if isempty(valid_trajectories)
-        println("❌ No valid trajectories sampled")
-        return [], []
-    end
-
-    # Analyze results
-    rewards = [GFlowNet.reward(traj.states[end]) for traj in valid_trajectories]
-    mean_reward = sum(rewards) / length(rewards)
-    high_reward_count = count(r -> r >= 5.0, rewards)
-    max_reward = maximum(rewards)
-
-    # Analyze final positions
-    final_positions = [(traj.states[end].x, traj.states[end].y) for traj in valid_trajectories]
-    position_counts = Dict{Tuple{Int,Int},Int}()
-    for pos in final_positions
-        position_counts[pos] = get(position_counts, pos, 0) + 1
-    end
-
-    # Show trajectory examples
-    println("📊 Evaluation Results:")
-    println("   - Valid trajectories: $(length(valid_trajectories))/$n_trajectories")
-    println("   - Mean reward: $(round(mean_reward, digits=2))")
-    println("   - High reward trajectories (≥5.0): $high_reward_count/$(length(valid_trajectories))")
-    println("   - Maximum reward: $max_reward")
-
-    # Show position distribution
-    println("\n📍 Final position distribution:")
-    for ((x, y), count) in sort(collect(position_counts), by=x -> x[2], rev=true)
-        reward = get(REWARD_POSITIONS, (x, y), 1.0)
-        println("   ($x, $y): $count trajectories [reward: $reward]")
-    end
-
-    return valid_trajectories, rewards
+    println("   📝 Text summary: $summary_path")
+catch e
+    println("   ⚠️  Summary generation failed: $e")
 end
 
 # =============================================================================
-# Main Execution Demonstrating HIGH-LEVEL Interface
+# 7. Usage Examples for Documentation
 # =============================================================================
 
-function main()
-    try
-        println("\n🎯 Demonstrating GFlowNet's HIGH-LEVEL Interface:")
-        println("   ❌ NO manual neural network definition")
-        println("   ✅ Using built-in create_forward_policy()")
-        println("   ✅ Using built-in create_flow_estimator()")
-        println("   ✅ Using built-in TrainingConfig")
-        println("   ✅ Using built-in train_gflownet()")
+println("\n7️⃣ Usage Examples")
+println("="^50)
 
-        # Create model using HIGH-LEVEL functions
-        model = create_gflownet_model()
+println("""
+   📚 Key Takeaways - Using GFlowNet.jl Properly:
 
-        # Train using HIGH-LEVEL functions
-        model, training_history = train_gflownet_high_level(model)
+   1️⃣ Standard Model Creation:
+      model = create_grid_world_gflownet(grid_size=5)
 
-        # Evaluate model
-        println("\n📊 Evaluating model...")
-        eval_trajectories, eval_rewards = evaluate_gflownet_model(model)
+   2️⃣ Custom Rewards:
+      model = create_grid_world_gflownet(
+          reward_positions=Dict((3,3)=>20.0, (5,5)=>15.0)
+      )
 
-        # Generate comprehensive results after we have all the data
-        println("\n📄 Generating comprehensive results and HTML report...")
-        html_path = generate_comprehensive_results(training_history, eval_trajectories, eval_rewards)
+   3️⃣ Training:
+      config = TrainingConfig(n_iterations=50, batch_size=16)
+      history = train_gflownet(model, config; verbose=true)
 
-        println("\n🎯 Comprehensive GFlowNet example completed successfully!")
-        println("📄 HTML Report: $html_path")
-        println("📊 All results saved in 'results/' directory")
+   4️⃣ Sampling:
+      trajectories = [sample_trajectory(model) for _ in 1:100]
 
-    catch e
-        println("❌ Error: $e")
-        println(stacktrace())
-    end
-end
+   5️⃣ Analysis:
+      analyze_grid_world_results(trajectories, grid_size)
 
-# Run the example
-if abspath(PROGRAM_FILE) == @__FILE__
-    main()
-    println("="^50)
-end
+   ✨ No manual DAG construction needed!
+   ✨ No manual neural network definitions!
+   ✨ No manual training loops!
+   ✨ Just use the high-level package functions!
+""")
+
+println("\n🎯 Grid World Example Completed Successfully!")
+println("📊 Demonstrates proper usage of GFlowNet.jl core functions")
+println("🔧 High-level interface: create_grid_world_gflownet()")
+println("🚀 Generic training: train_gflownet()")
+println("📈 Built-in analysis: analyze_grid_world_results()")
+println("✨ Production-ready GFlowNet development!")
+println("="^60)

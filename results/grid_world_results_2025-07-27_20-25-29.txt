@@ -1,0 +1,16 @@
+Grid World GFlowNet Results Summary
+Generated: 2025-07-27_20-25-29
+==================================================
+
+PERFORMANCE METRICS:
+- Total trajectories: 50
+- Mean reward: 5.94
+- Max reward: 20.0
+- High-reward rate: 42.0%
+- Success trajectories: 21
+
+FILES GENERATED:
+- grid_world_trajectories.csv
+- grid_world_rewards.csv
+- grid_world_training.csv
+- comprehensive_gflownet_report_2025-07-27_20-25-29.html

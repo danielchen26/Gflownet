@@ -1,5 +1,5 @@
 Grid World GFlowNet Results Summary
-Generated: 2025-07-26_00-34-42
+Generated: 2025-07-27_20-16-32
 ==================================================
 
 PERFORMANCE METRICS:
@@ -13,4 +13,4 @@ FILES GENERATED:
 - grid_world_trajectories.csv
 - grid_world_rewards.csv
 - grid_world_training.csv
-- comprehensive_gflownet_report_2025-07-26_00-34-42.html
+- comprehensive_gflownet_report_2025-07-27_20-16-32.html
