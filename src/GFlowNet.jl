@@ -21,7 +21,6 @@ using NNlib
 
 # Graph Operations
 using Graphs
-using DataStructures
 
 # Utilities
 using StatsBase

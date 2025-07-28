@@ -39,17 +39,14 @@ function forward_probability(policy::ForwardPolicy, state, action,
     # Compute logits for all actions
     logits, _ = compute_forward_logits(policy, features, parameters, states)
 
-    # Get applicable actions directly
-    applicable_actions = [a for a in actions if is_applicable(a, state)]
+    # Get applicable actions directly with robust indexing (non-mutating for Zygote)
+    applicable_actions = [a for (i, a) in enumerate(actions) if is_applicable(a, state)]
+    applicable_indices = [i for (i, a) in enumerate(actions) if is_applicable(a, state)]
 
     # Check if the requested action is applicable
     if action ∉ applicable_actions
         return 0.0
     end
-
-    # Find indices of applicable actions and apply softmax
-    applicable_indices = [findfirst(a -> a == act, actions) for act in applicable_actions]
-    applicable_indices = filter(!isnothing, applicable_indices)
 
     if isempty(applicable_indices)
         return 0.0
@@ -61,18 +58,14 @@ function forward_probability(policy::ForwardPolicy, state, action,
     exp_logits = exp.(applicable_logits .- max_logit)
     probabilities = exp_logits ./ sum(exp_logits)
 
-    # Find the probability for the requested action
-    action_idx = findfirst(a -> a == action, actions)
-    if isnothing(action_idx)
-        return 0.0
+    # Find the probability for the requested action using direct indexing
+    for (i, a) in enumerate(applicable_actions)
+        if a == action
+            return Float64(probabilities[i])
+        end
     end
 
-    applicable_idx = findfirst(idx -> idx == action_idx, applicable_indices)
-    if isnothing(applicable_idx)
-        return 0.0
-    end
-
-    return Float64(probabilities[applicable_idx])
+    return 0.0
 end
 
 """

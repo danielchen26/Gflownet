@@ -64,17 +64,18 @@ model = create_grid_world_gflownet(
 println("   ✅ Grid world model created successfully!")
 println("   📊 Model details:")
 println("      - Grid size: 5×5")
-println("      - DAG states: $(length(model.dag.states))")
-println("      - DAG edges: $(length(model.dag.edges))")
+# Compute state space on-demand for analysis
+state_count = count_reachable_states(model.initial_state, model.all_actions)
+println("      - Reachable states: $state_count")
 println("      - Parameters: $(length(model.parameters))")
-println("      - Actions: $(length(model.dag.actions))")
+println("      - Actions: $(length(model.all_actions))")
 
-# Analyze the constructed DAG
-dag_metrics = analyze_dag(model.dag)
-println("   📈 DAG Analysis:")
-println("      - Acyclic: $(dag_metrics.is_acyclic)")
-println("      - Max path length: $(dag_metrics.max_depth)")
-println("      - Avg branching: $(round(dag_metrics.avg_branching_factor, digits=2))")
+# Analyze the state space structure
+space_analysis = analyze_state_space(model.initial_state, model.all_actions)
+println("   📈 State Space Analysis:")
+println("      - Total states: $(space_analysis.total_states)")
+println("      - Terminal states: $(space_analysis.terminal_states)")
+println("      - Complete exploration: $(space_analysis.exploration_complete)")
 
 # =============================================================================
 # 2. Training Configuration and Execution
@@ -191,14 +192,15 @@ for (name, params, description) in configurations
         test_trajectories = [sample_trajectory(test_model) for _ in 1:20]
         test_rewards = [reward(traj.states[end]) for traj in test_trajectories if !isempty(traj.states)]
 
+        n_states = count_reachable_states(test_model.initial_state, test_model.all_actions)
         results[name] = (
             model=test_model,
             mean_reward=mean(test_rewards),
             max_reward=maximum(test_rewards),
-            n_states=length(test_model.dag.states)
+            n_states=n_states
         )
 
-        println("      ✅ Success: $(length(test_model.dag.states)) states, mean reward: $(round(mean(test_rewards), digits=2))")
+        println("      ✅ Success: $n_states states, mean reward: $(round(mean(test_rewards), digits=2))")
 
     catch e
         println("      ❌ Failed: $e")
@@ -226,7 +228,8 @@ println("      - Very high reward (≥15): $(count(r -> r >= 15.0, rewards))")
 println("\n   🔄 Configuration Comparison:")
 for (name, result) in results
     if result !== nothing
-        println("      - $name: $(result.n_states) states, max reward $(round(result.max_reward, digits=1))")
+        n_states = count_reachable_states(result.model.initial_state, result.model.all_actions)
+        println("      - $name: $n_states states, max reward $(round(result.max_reward, digits=1))")
     else
         println("      - $name: Failed")
     end
@@ -261,10 +264,10 @@ Generated: $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
 
 === Model Configuration ===
 Grid Size: 5×5
-DAG States: $(length(model.dag.states))
-DAG Edges: $(length(model.dag.edges))
+Reachable States: $state_count
 Parameters: $(length(model.parameters))
-Acyclic: $(dag_metrics.is_acyclic)
+Actions: $(length(model.all_actions))
+Complete Exploration: $(space_analysis.exploration_complete)
 
 === Training Results ===
 Iterations: $successful_iterations/$(config.n_iterations)
@@ -280,7 +283,7 @@ High Reward Trajectories (≥10): $(count(r -> r >= 10.0, rewards))
 Very High Reward Trajectories (≥15): $(count(r -> r >= 15.0, rewards))
 
 === Key Success Metrics ===
-✅ DAG Construction: Successful ($(length(model.dag.states)) states discovered)
+✅ State Space: Successful ($state_count states discovered)
 ✅ Training: Converged in $successful_iterations iterations
 ✅ High Reward Discovery: Found maximum reward of $(maximum(rewards))
 ✅ Exploration: $(length(unique([(s.x, s.y) for traj in valid_trajectories for s in [traj.states[end]]]))) unique end positions

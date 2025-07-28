@@ -86,9 +86,11 @@ Training uses on-demand computation instead.
 function explore_state_space(initial_state::AbstractState, actions::Vector{<:AbstractAction}; max_states::Int=1000)
     visited = Set{AbstractState}([initial_state])
     queue = [initial_state]
+    queue_idx = 1
 
-    while !isempty(queue) && length(visited) < max_states
-        current_state = popfirst!(queue)
+    while queue_idx <= length(queue) && length(visited) < max_states
+        current_state = queue[queue_idx]
+        queue_idx += 1
 
         if is_terminal_state(current_state)
             continue

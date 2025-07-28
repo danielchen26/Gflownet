@@ -221,6 +221,19 @@ struct TrainingHistory
     end
 end
 
+# Add symbol indexing support for backwards compatibility
+Base.getindex(history::TrainingHistory, key::Symbol) = begin
+    if key == :losses
+        return history.losses
+    elseif key == :gradient_norms
+        return history.gradient_norms
+    elseif key == :iteration_times
+        return history.iteration_times
+    else
+        throw(KeyError(key))
+    end
+end
+
 """
     DomainInterface
 
