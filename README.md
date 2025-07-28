@@ -71,61 +71,90 @@ src/
     └── information.jl            # Information-theoretic objectives
 ```
 
-### 🧠 Architecture Mind Map
+### 🧠 Architecture Overview
 
+#### Simple Visual Hierarchy
+```
+                    🎯 GFlowNet.jl v1.0.0
+                    Production-Ready Package
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+    🔵 CORE             🟠 TRAINING      🟡 PROFESSIONAL
+   MATHEMATICAL           SYSTEM           TOOLING
+   FOUNDATION               │                │
+        │                   │                │
+   • types.jl          • configuration.jl   • visualization.jl
+   • graphs.jl         • TrainingConfig     • report.jl  
+   • policies.jl       • Validation         • logging.jl
+   • flows.jl          • Optimization       • utils.jl
+   • sampling.jl
+   • interface.jl
+        │
+        └─────────────┬─────────────┐
+                      │             │
+                🟢 APPLICATIONS  🟣 EXTENSIONS
+                     │             │
+                • grid_world.jl   • continuous.jl
+                • molecular.jl    • non_acyclic.jl
+                • causal.jl       • information.jl
+                • active_learn.jl
+                • features.jl
+```
+
+### 🧠 Detailed Architecture Overview
+
+#### Main Package Structure
 ```mermaid
-graph TD
-    A[GFlowNet.jl<br/>🎯 Main Package] --> B[Core Engine]
-    A --> C[Training System]
-    A --> D[Professional Tooling]
-    A --> E[Domain Applications]
-    A --> F[Advanced Extensions]
+graph TB
+    subgraph "🎯 GFlowNet.jl - Production Ready Package"
+        A["🔵 CORE ENGINE<br/><br/>Mathematical Foundation<br/>• Types & Graphs<br/>• Policies & Flows<br/>• Sampling & Objectives"]
+        B["🟠 TRAINING<br/><br/>Configuration System<br/>• TrainingConfig<br/>• Validation<br/>• Optimization"]
+        C["🟡 PROFESSIONAL TOOLS<br/><br/>Visualization & Export<br/>• Publication Plots<br/>• HTML Reports<br/>• CSV Data Export"]
+        D["🟢 APPLICATIONS<br/><br/>Domain Examples<br/>• Grid World (flagship)<br/>• Molecular Design<br/>• Causal Discovery"]
+        E["🟣 EXTENSIONS<br/><br/>Advanced Features<br/>• Continuous Spaces<br/>• Non-Acyclic Graphs<br/>• Information Theory"]
+    end
     
-    B --> B1[🔵 Mathematical Foundation]
-    B1 --> B11[types.jl<br/>AbstractState, GFlowNetModel]
-    B1 --> B12[graphs.jl<br/>DAG Construction & Analysis]
-    B1 --> B13[policies.jl<br/>P_F, P_B, Z Functions]
-    B1 --> B14[flows.jl<br/>Flow Conservation]
-    B1 --> B15[balance.jl<br/>TB, DB, FM Conditions]
-    B1 --> B16[sampling.jl<br/>Trajectory Generation]
-    B1 --> B17[objectives.jl<br/>Loss Functions]
-    B1 --> B18[interface.jl<br/>High-Level API]
+    A --> B
+    A --> C
+    A --> D
+    B --> D
+    C --> D
+    A --> E
     
-    C --> C1[🟠 Training Infrastructure]
-    C1 --> C11[configuration.jl<br/>TrainingConfig & Validation]
+    classDef coreStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:4px,color:#000,font-size:14px
+    classDef trainStyle fill:#fff3e0,stroke:#f57c00,stroke-width:4px,color:#000,font-size:14px
+    classDef utilStyle fill:#fff9c4,stroke:#f9a825,stroke-width:4px,color:#000,font-size:14px
+    classDef appStyle fill:#e8f5e8,stroke:#388e3c,stroke-width:4px,color:#000,font-size:14px
+    classDef extStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:4px,color:#000,font-size:14px
     
-    D --> D1[🟡 Professional Tooling]
-    D1 --> D11[validation.jl<br/>Input Validation]
-    D1 --> D12[logging.jl<br/>Progress Monitoring]
-    D1 --> D13[visualization.jl<br/>Publication Plots]
-    D1 --> D14[report.jl<br/>HTML/CSV Export]
-    D1 --> D15[utils.jl<br/>General Utilities]
+    class A coreStyle
+    class B trainStyle
+    class C utilStyle
+    class D appStyle
+    class E extStyle
+```
+
+#### Core Mathematical Engine
+```mermaid
+graph LR
+    subgraph "🔵 Core Mathematical Foundation"
+        A1["types.jl<br/>States & Models"]
+        A2["graphs.jl<br/>DAG Operations"]
+        A3["policies.jl<br/>P_F, P_B, Z"]
+        A4["flows.jl<br/>Conservation"]
+        A5["sampling.jl<br/>Trajectories"]
+        A6["interface.jl<br/>High-Level API"]
+    end
     
-    E --> E1[🟢 Domain Applications]
-    E1 --> E11[grid_world.jl<br/>Navigation & Rewards]
-    E1 --> E12[molecular_design.jl<br/>Chemical Synthesis]
-    E1 --> E13[causal_discovery.jl<br/>DAG Learning]
-    E1 --> E14[active_learning.jl<br/>Experiment Selection]
-    E1 --> E15[feature_acquisition.jl<br/>Feature Selection]
+    A1 --> A2
+    A2 --> A3
+    A3 --> A4
+    A4 --> A5
+    A5 --> A6
     
-    F --> F1[🟣 Advanced Extensions]
-    F1 --> F11[continuous.jl<br/>Continuous Spaces]
-    F1 --> F12[non_acyclic.jl<br/>Cyclic Structures]
-    F1 --> F13[information.jl<br/>Info Theory]
-    
-    classDef coreClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef trainClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef utilClass fill:#fff9c4,stroke:#f9a825,stroke-width:2px
-    classDef appClass fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef extClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef mainClass fill:#ffebee,stroke:#d32f2f,stroke-width:3px
-    
-    class A mainClass
-    class B,B1,B11,B12,B13,B14,B15,B16,B17,B18 coreClass
-    class C,C1,C11 trainClass
-    class D,D1,D11,D12,D13,D14,D15 utilClass
-    class E,E1,E11,E12,E13,E14,E15 appClass
-    class F,F1,F11,F12,F13 extClass
+    classDef coreFile fill:#e3f2fd,stroke:#1976d2,stroke-width:3px,font-size:12px
+    class A1,A2,A3,A4,A5,A6 coreFile
 ```
 
 ### 🔗 Component Relationships
