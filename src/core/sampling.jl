@@ -44,13 +44,15 @@ struct SamplingConfig
     temperature::Float64
     enable_early_stopping::Bool
     validation_mode::Bool
+    acyclic_rate::Float64
 
     function SamplingConfig(;
         strategy::SamplingStrategy=STOCHASTIC_SAMPLING,
         max_trajectory_length::Int=100,
         temperature::Float64=1.0,
         enable_early_stopping::Bool=true,
-        validation_mode::Bool=false
+        validation_mode::Bool=false,
+        acyclic_rate::Float64=0.0
     )
         if max_trajectory_length <= 0
             throw(ArgumentError("max_trajectory_length must be positive"))
@@ -58,8 +60,11 @@ struct SamplingConfig
         if temperature <= 0.0
             throw(ArgumentError("temperature must be positive"))
         end
+        if !(0.0 <= acyclic_rate <= 1.0)
+            throw(ArgumentError("acyclic_rate must be in [0.0, 1.0]"))
+        end
 
-        new(strategy, max_trajectory_length, temperature, enable_early_stopping, validation_mode)
+        new(strategy, max_trajectory_length, temperature, enable_early_stopping, validation_mode, acyclic_rate)
     end
 end
 
@@ -137,13 +142,14 @@ end
 
 Create a default sampling configuration with standard settings.
 """
-function create_default_sampling_config(; strategy=STOCHASTIC_SAMPLING)
+function create_default_sampling_config(; strategy=STOCHASTIC_SAMPLING, acyclic_rate=0.0)
     return SamplingConfig(
         strategy=strategy,
         max_trajectory_length=100,
         temperature=1.0,
         enable_early_stopping=true,
-        validation_mode=false
+        validation_mode=false,
+        acyclic_rate=acyclic_rate
     )
 end
 
@@ -152,13 +158,14 @@ end
 
 Create a sampling configuration for greedy (deterministic) sampling.
 """
-function create_greedy_sampling_config()
+function create_greedy_sampling_config(; acyclic_rate=0.0)
     return SamplingConfig(
         strategy=GREEDY_SAMPLING,
         max_trajectory_length=100,
         temperature=1.0,  # Not used for greedy
         enable_early_stopping=true,
-        validation_mode=false
+        validation_mode=false,
+        acyclic_rate=acyclic_rate
     )
 end
 
@@ -167,13 +174,42 @@ end
 
 Create a sampling configuration for exploration with temperature scaling.
 """
-function create_exploration_sampling_config(temperature::Float64=2.0)
+function create_exploration_sampling_config(temperature::Float64=2.0; acyclic_rate=0.0)
     return SamplingConfig(
         strategy=TEMPERATURE_SAMPLING,
         max_trajectory_length=100,
         temperature=temperature,
         enable_early_stopping=true,
-        validation_mode=false
+        validation_mode=false,
+        acyclic_rate=acyclic_rate
+    )
+end
+
+"""
+    create_acyclic_sampling_config(acyclic_rate::Float64=0.8; strategy=STOCHASTIC_SAMPLING)
+
+Create a sampling configuration with acyclic control enabled.
+Use this to prevent cycles during trajectory sampling.
+
+# Arguments
+- `acyclic_rate::Float64=0.8`: Rate of cycle prevention (0.0=no control, 1.0=strict)
+- `strategy`: Sampling strategy to use
+
+# Example
+```julia
+# 80% cycle prevention
+config = create_acyclic_sampling_config(0.8)
+trajectories = [sample_trajectory(model; config=config) for _ in 1:100]
+```
+"""
+function create_acyclic_sampling_config(acyclic_rate::Float64=0.8; strategy=STOCHASTIC_SAMPLING)
+    return SamplingConfig(
+        strategy=strategy,
+        max_trajectory_length=100,
+        temperature=1.0,
+        enable_early_stopping=true,
+        validation_mode=false,
+        acyclic_rate=acyclic_rate
     )
 end
 
@@ -245,6 +281,9 @@ function Base.show(io::IO, config::SamplingConfig)
     if config.strategy == TEMPERATURE_SAMPLING
         print(io, ", temp=$(config.temperature)")
     end
+    if config.acyclic_rate > 0.0
+        print(io, ", acyclic_rate=$(config.acyclic_rate)")
+    end
     print(io, ")")
 end
 
@@ -255,6 +294,7 @@ function Base.show(io::IO, ::MIME"text/plain", config::SamplingConfig)
     println(io, "  Temperature: $(config.temperature)")
     println(io, "  Early stopping: $(config.enable_early_stopping)")
     println(io, "  Validation mode: $(config.validation_mode)")
+    println(io, "  Acyclic rate: $(config.acyclic_rate)")
 end
 
 # =============================================================================

@@ -168,6 +168,9 @@ export SamplingConfig
 export sample_trajectory, sample_trajectory_batch, sample_backward_trajectory
 export sample_action_with_strategy
 
+# Sampling configuration utilities
+export create_acyclic_sampling_config
+
 # Trajectory analysis
 export trajectory_probability, log_trajectory_probability, validate_trajectory
 export benchmark_sampling, get_trajectory_summary
