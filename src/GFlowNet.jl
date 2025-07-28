@@ -76,6 +76,7 @@ include("utils/utils.jl")
 include("applications/molecular_design.jl")
 include("applications/causal_discovery.jl")
 include("applications/active_learning.jl")
+include("applications/supply_chain_optimization.jl")
 include("applications/grid_world.jl")
 
 include("extensions/continuous.jl")
@@ -256,6 +257,20 @@ export causal_reward, causal_features
 # Active learning application
 export ActiveLearningState, ActiveLearningAction, create_active_learning_gflownet
 export active_learning_reward, active_learning_features
+
+# Supply chain application
+export SupplyChainState, SupplyChainAction, SupplyChainNode, SupplyChainConnection, SupplyChainNetwork
+export AddConnectionAction, AddNodeAction, TerminateSupplyChainAction
+export NodeType, SUPPLIER, WAREHOUSE, CUSTOMER
+export create_supply_chain_gflownet, create_initial_supply_chain_state, create_supply_chain_actions
+
+# Supply chain optimization application
+export SupplyChainState, SupplyChainAction, SupplyChainNetwork
+export Drug, Facility, PatientRegion, TransportRoute
+export DrugType, ONCOLOGY, VACCINES, GENERICS, BIOLOGICS
+export FacilityType, MANUFACTURING, DISTRIBUTION, DEPOT
+export StorageType, AMBIENT, COLD, FROZEN
+export ProduceAction, ShipAction, ServeAction, NextMonthAction, FinishPlanningAction
 
 # Grid world application
 export GridState, GridAction, MoveRight, MoveUp, MoveLeft, MoveDown, Terminate

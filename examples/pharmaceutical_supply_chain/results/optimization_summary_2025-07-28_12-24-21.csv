@@ -1,0 +1,7 @@
+Method,Best_Reward,Mean_Reward,Std_Dev,Diversity,Coverage,N_Solutions,Elapsed_Time
+GFlowNets,0.0,0.0,0.0,0.0,0.2,0,0.0
+Nonlinear Programming,0.0,0.0,0.0,0.0,0.2,1,0.2702341079711914
+Hill Climbing,0.0,0.0,0.0,0.0,0.2,0,0.0
+Greedy,0.0,0.0,0.0,0.0,0.2,0,0.0
+Simulated Annealing,0.0,0.0,0.0,0.01,0.0,100,0.06563901901245117
+Random Search,0.0,0.0,0.0,0.0,0.2,0,0.0
