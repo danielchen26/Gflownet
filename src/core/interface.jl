@@ -105,11 +105,17 @@ function sample_trajectory(model::GFlowNetModel; config::SamplingConfig = Sampli
     current_state = model.initial_state
     steps = 0
 
+    # Acyclic tracking disabled for now
+    acyclic_tracker = nothing
+    acyclic_config = nothing
+
     while !is_terminal_state(current_state) && steps < config.max_trajectory_length
         steps += 1
 
         # Get applicable actions - computed fresh each time (on-demand approach)
         applicable_actions = Zygote.@ignore get_applicable_actions(current_state, model.all_actions)
+
+        # Acyclic constraints disabled for now
 
         if isempty(applicable_actions)
             break
@@ -120,6 +126,8 @@ function sample_trajectory(model::GFlowNetModel; config::SamplingConfig = Sampli
 
         # Apply action
         next_state = compute_next_state(action, current_state)
+
+        # Acyclic tracker update disabled for now
 
         # Update trajectory (non-mutating pattern for Zygote)
         trajectory_actions = [trajectory_actions..., action]

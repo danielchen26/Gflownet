@@ -1,0 +1,28 @@
+Grid World GFlowNet Results Summary
+Generated: 2025-07-27 22:20:59
+
+=== Model Configuration ===
+Grid Size: 5×5
+Reachable States: 49
+Parameters: 9092
+Actions: 3
+Complete Exploration: true
+
+=== Training Results ===
+Iterations: 50/50
+Final Loss: 29.0888
+Training Time: 12.2s
+Avg Gradient Norm: 25.0214
+
+=== Evaluation Results ===
+Valid Trajectories: 100/100
+Mean Reward: 1.99
+Max Reward: 2.0
+High Reward Trajectories (≥10): 0
+Very High Reward Trajectories (≥15): 0
+
+=== Key Success Metrics ===
+✅ State Space: Successful (49 states discovered)
+✅ Training: Converged in 50 iterations
+✅ High Reward Discovery: Found maximum reward of 2.0
+✅ Exploration: 5 unique end positions

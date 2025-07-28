@@ -280,6 +280,8 @@ function create_grid_world(grid_size::Int=5)
     )
 end
 
+
+
 """
     analyze_grid_world_results(trajectories::Vector, grid_size::Int=5)
 
