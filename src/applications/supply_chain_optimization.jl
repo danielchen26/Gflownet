@@ -367,7 +367,7 @@ GFlowNet.is_terminal_state(state::SupplyChainState) = state.is_terminal
 """
     GFlowNet.reward(state::SupplyChainState)
 
-Calculate reward that REQUIRES business activity (production + service).
+ULTRA-STABLE reward function to prevent training divergence.
 """
 function GFlowNet.reward(state::SupplyChainState)::Float64
     !state.is_terminal && return 0.0
@@ -376,28 +376,20 @@ function GFlowNet.reward(state::SupplyChainState)::Float64
     total_production = sum(values(state.production))
     total_demand_served = sum(values(state.demand_served))
 
-    # PENALIZE doing nothing - require minimum business activity
-    if total_production == 0.0 && total_demand_served == 0.0
-        return 1.0  # Very low reward for doing nothing
-    end
+    # ULTRA-STABLE reward with minimal variation
+    base_reward = 10.0  # Fixed base
 
-    # Base reward for having business activity
-    base_reward = 5.0
+    # Small bonuses to encourage activity but prevent large variations
+    production_bonus = min(total_production / 5000.0, 2.0)  # Max 2 points
+    service_bonus = state.service_level * 3.0  # Max 3 points
 
-    # Production bonus (0-3 points) - reward for producing
-    production_bonus = min(total_production / 1000.0, 3.0)
+    # Tiny cost penalty to prevent extreme costs
+    cost_penalty = min(state.total_cost / 1_000_000.0, 1.0)  # Max 1 point penalty
 
-    # Service bonus (0-5 points) - reward for serving demand
-    service_bonus = state.service_level * 5.0
-
-    # Cost penalty (0-2 points) - light penalty for high costs
-    normalized_cost = min(state.total_cost / 200_000.0, 1.0)
-    cost_penalty = normalized_cost * 2.0
-
-    # Final reward (range: 1-13, but requires activity)
+    # Final reward (very stable range: 9-15)
     reward_value = base_reward + production_bonus + service_bonus - cost_penalty
 
-    return max(reward_value, 1.0)
+    return max(reward_value, 8.0)  # Minimum 8, maximum ~15
 end
 
 # =============================================================================
