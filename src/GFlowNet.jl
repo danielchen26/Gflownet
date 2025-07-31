@@ -172,7 +172,7 @@ export sample_action_with_strategy
 
 
 # Trajectory analysis
-export trajectory_probability, log_trajectory_probability, validate_trajectory
+export is_valid_trajectory  # Only this function actually exists
 export benchmark_sampling, get_trajectory_summary
 
 # =============================================================================

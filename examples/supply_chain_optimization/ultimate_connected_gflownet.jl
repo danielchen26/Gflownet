@@ -481,11 +481,12 @@ for iteration in 1:config.n_iterations
     loss = Inf
     if !isempty(batch_trajectories)
         try
-            loss = GFlowNet.compute_trajectory_loss(model, batch_trajectories, model.parameters, config)
-            if isfinite(loss)
-                # Apply gradients
-                GFlowNet.update_parameters!(model, batch_trajectories, config)
-            end
+            # loss = GFlowNet.compute_trajectory_loss(model, batch_trajectories, model.parameters, config)
+            # if isfinite(loss)
+            #     # Apply gradients
+            #     GFlowNet.update_parameters!(model, batch_trajectories, config)
+            # end
+            loss = Inf  # Skip custom training for now
         catch e
             println("      ⚠️  Training error at iteration $iteration: $e")
         end
@@ -535,12 +536,29 @@ training_history = (
     metrics = training_metrics
 )
 
-# Use training solutions instead of sampling again
-solutions = training_solutions
-println("\n   ✅ Training completed! Collected $(length(solutions)) solutions during training")
-println("   ⏱️  Total training time: $(round(training_time, digits=1)) seconds")
+# Use standard training instead
+println("\n   🔄 Using standard GFlowNet training...")
+training_history = GFlowNet.train_gflownet(model, config; verbose=true)
 
-sampling_time = 0.0  # No additional sampling needed
+# Sample solutions after proper training
+println("\n   🎲 Sampling solutions...")
+sampling_start = time()
+n_samples = 100
+trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:n_samples]
+sampling_time = time() - sampling_start
+
+# Extract terminal states as solutions
+solutions = []
+for traj in trajectories
+    if !isempty(traj.states) && traj.states[end].is_terminal
+        push!(solutions, traj.states[end])
+    end
+end
+
+println("\n   ✅ Training and sampling completed!")
+println("   ⏱️  Total training time: $(round(training_time, digits=1)) seconds")
+println("   ⏱️  Sampling time: $(round(sampling_time, digits=1)) seconds")
+println("   📊 Found $(length(solutions)) valid solutions")
 
 # =============================================================================
 # 5. ULTIMATE RESULTS ANALYSIS

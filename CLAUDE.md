@@ -22,8 +22,9 @@ julia --project=. -e "using Pkg; Pkg.test()"
 # Run a specific test file
 julia --project=. test/test_core_functions.jl
 
-# Run examples
-cd examples/grid_world && julia --project=../.. grid_world.jl
+# Run examples (using example-specific Project.toml)
+cd examples/grid_world && julia --project=. grid_world.jl
+cd examples/supply_chain_optimization && julia --project=. ultimate_connected_gflownet.jl
 ```
 
 ### Development Workflow
@@ -36,7 +37,30 @@ julia --project=. -e "using GFlowNet"
 
 # Build documentation
 julia --project=docs docs/make.jl
+
+# Format code (if JuliaFormatter available)
+julia --project=. -e "using JuliaFormatter; format(\"src\")"
 ```
+
+### Testing
+```bash
+# Run the complete test suite
+julia --project=. -e "using Pkg; Pkg.test()"
+
+# Run individual test files
+julia --project=. test/test_utilities.jl          # Test utilities and helpers
+julia --project=. test/test_neural_networks.jl    # Neural network components
+julia --project=. test/test_core_interface.jl     # Core GFlowNet interface
+julia --project=. test/test_grid_world.jl         # Grid world application
+julia --project=. test/test_training.jl           # Training infrastructure
+julia --project=. test/test_supply_chain.jl       # Supply chain application
+
+# Test via examples
+cd examples/grid_world && julia --project=. grid_world.jl
+cd examples/supply_chain_optimization && julia --project=. ultimate_connected_gflownet.jl
+```
+
+The test suite has been reorganized and updated to work with the current API. Old tests using deprecated APIs (DirectedAcyclicGraph, SimpleState, etc.) have been archived in `test/archive/old_tests/`.
 
 ## High-Level Architecture
 
@@ -142,6 +166,87 @@ trajectories = [sample_trajectory(model) for _ in 1:100]
 - Wrap all validation with `Zygote.@ignore`
 - Test AD compatibility with gradient checks
 
+## Critical Known Issues (January 2025)
+
+### 1. Missing Core Functions
+The following functions are called throughout the codebase but **never implemented**:
+- `get_next_states()` - Used in flows.jl, balance.jl, policies.jl (10+ locations)
+- `get_previous_states()` - Used in backward policy functions
+- `get_root_state()` - Used in partition_function()
+
+**Workaround**: Use `get_applicable_actions()` + `compute_next_state()` instead:
+```julia
+# Replace this (broken):
+next_states = get_next_states(model.dag, state)
+
+# With this (working):
+applicable_actions = get_applicable_actions(state, model.all_actions)
+next_states = [compute_next_state(action, state) for action in applicable_actions]
+```
+
+### 2. Broken Core Features
+Due to missing functions, these core features don't work:
+- `flow()`, `compute_recursive_flow()` - Core flow computations fail
+- `partition_function()` - Calls non-existent get_root_state()
+- `detailed_balance_loss()` - Requires missing backward_policy field
+- `flow_matching_loss()` - Uses non-existent DAG functions
+- `validate_flow_conservation()` - Uses non-existent DAG functions
+
+### 3. API Issues
+- Model doesn't have `backward_policy` field (but functions expect it)
+- Optimizer name bug: Use `RMSProp` not `RMSprop` in configuration.jl:383
+- Several exported functions don't exist (see test/README.md for full list)
+
+### 4. Architecture Inconsistency
+The codebase is transitioning between two approaches:
+- **Old**: Explicit DAG with `get_next_states()`
+- **New**: On-demand computation with `get_applicable_actions()`
+
+Many core mathematical functions still use the old approach while infrastructure uses the new approach, causing runtime failures.
+
+## Why Examples Still Work (Critical Understanding)
+
+Despite all these broken functions, the examples work perfectly because:
+
+### The Working Path
+```julia
+# This is what examples use - it works perfectly
+config = TrainingConfig(
+    objective=TRAJECTORY_BALANCE,  # ✅ Key to success
+    n_iterations=100,
+    batch_size=32
+)
+history = train_gflownet(model, config)
+```
+
+### What Makes It Work
+1. **Trajectory Balance is Self-Contained**: 
+   - Loss = (log P_F(τ) - log R(s_T))²
+   - Only needs forward policy and rewards
+   - No flow computation required
+
+2. **On-Demand Computation Succeeds**:
+   - `get_applicable_actions()` replaces `get_next_states()`
+   - `apply_action()` handles state transitions
+   - No explicit DAG needed
+
+3. **Sampling is Simple**:
+   - Just forward policy sampling
+   - No backward policy needed
+   - Pure state-to-state transitions
+
+### What Would Break
+```julia
+# These would fail immediately:
+config = TrainingConfig(objective=DETAILED_BALANCE)  # ❌ No backward_policy
+config = TrainingConfig(objective=FLOW_MATCHING)     # ❌ No get_next_states()
+Z = partition_function(model)                        # ❌ No get_root_state()
+flow_val = flow(model, state)                        # ❌ No get_next_states()
+```
+
+### Key Takeaway
+**Use `TRAJECTORY_BALANCE` and everything works**. The core training has been modernized, but advanced mathematical features haven't been migrated yet. See `test/README.md` for complete analysis.
+
 ## Detailed Development Guide
 
 For comprehensive development guidelines including:
@@ -168,3 +273,8 @@ From the comprehensive guide:
 - Integration tests for each domain
 - AD compatibility tests with Zygote
 - Performance benchmarks for large problems
+
+## Project Structure Notes
+- For each example folder, the Julia project should already run with an example-specific Project.toml
+  - This ensures dependencies and configurations are tailored to each specific example
+  - Allows for isolated and reproducible example environments

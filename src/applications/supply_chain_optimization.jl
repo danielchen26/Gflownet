@@ -554,5 +554,128 @@ function GFlowNet.apply_action(action::FinishPlanningAction, state::SupplyChainS
     )
 end
 
+# =============================================================================
+# High-Level Interface
+# =============================================================================
+
+"""
+    create_supply_chain_gflownet(; network::SupplyChainNetwork, hidden_dim::Int=64, 
+                                  learning_rate::Float64=0.01, rng::AbstractRNG=Random.default_rng())
+
+Create a GFlowNet model for supply chain optimization.
+
+# Arguments
+- `network`: The supply chain network structure
+- `hidden_dim`: Hidden dimension for neural networks (default: 64)
+- `learning_rate`: Learning rate for optimization (default: 0.01)
+- `rng`: Random number generator
+
+# Returns
+- `GFlowNetModel`: Configured GFlowNet model for supply chain optimization
+"""
+function create_supply_chain_gflownet(;
+    network::SupplyChainNetwork,
+    hidden_dim::Int = 64,
+    learning_rate::Float64 = 0.01,
+    rng::AbstractRNG = Random.default_rng()
+)
+    # Create initial state
+    initial_state = SupplyChainState(
+        network = network,
+        production = Dict{Tuple{Int,Int}, Float64}(),
+        inventory = Dict{Tuple{Int,Int}, Float64}(),
+        shipments = Dict{Tuple{Int,Int,Int}, Float64}(),
+        demand_served = Dict{Tuple{Int,Int}, Float64}(),
+        current_month = 1,
+        planning_horizon = 3,
+        is_terminal = false,
+        total_cost = 0.0,
+        service_level = 0.0
+    )
+    
+    # Create comprehensive action space
+    actions = create_supply_chain_actions(network)
+    
+    # Calculate state feature dimension
+    state_dim = length(state_to_features(initial_state))
+    
+    # Use generic GFlowNet creation
+    return create_gflownet(
+        initial_state,
+        actions;
+        state_dim = state_dim,
+        hidden_dim = hidden_dim,
+        learning_rate = learning_rate,
+        rng = rng
+    )
+end
+
+"""
+    create_supply_chain_actions(network::SupplyChainNetwork)
+
+Create comprehensive action space for supply chain domain.
+"""
+function create_supply_chain_actions(network::SupplyChainNetwork)
+    actions = SupplyChainAction[]
+    
+    # Production actions - granular amounts
+    for facility in network.facilities
+        if facility.type == MANUFACTURING
+            for drug in network.drugs
+                if haskey(facility.production_capacity, drug.id) && facility.production_capacity[drug.id] > 0
+                    capacity = facility.production_capacity[drug.id]
+                    # Create 10 granular production levels
+                    for level in 1:10
+                        amount = (capacity * level) / 10
+                        push!(actions, ProduceAction(facility.id, drug.id, amount))
+                    end
+                end
+            end
+        end
+    end
+    
+    # Shipping actions - between all connected facilities
+    for route in network.routes
+        for drug in network.drugs
+            # Create 8 granular shipping amounts
+            base_amounts = [100.0, 300.0, 500.0, 750.0, 1000.0, 1250.0, 1500.0, 2000.0]
+            for amount in base_amounts
+                push!(actions, ShipAction(route.from_facility, route.to_facility, drug.id, amount))
+            end
+        end
+    end
+    
+    # Service actions - from facilities to regions
+    for facility in network.facilities
+        for region in network.regions
+            for drug in network.drugs
+                if haskey(region.monthly_demand, drug.id) && region.monthly_demand[drug.id] > 0
+                    demand = region.monthly_demand[drug.id]
+                    # Create 14 granular service levels for high precision
+                    service_levels = [0.8, 0.85, 0.88, 0.9, 0.91, 0.92, 0.93, 
+                                    0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1.0]
+                    for level in service_levels
+                        amount = demand * level
+                        push!(actions, ServeAction(facility.id, region.id, drug.id, amount))
+                    end
+                end
+            end
+        end
+    end
+    
+    # Time advancement action
+    push!(actions, AdvanceTimeAction())
+    
+    return actions
+end
+
+# =============================================================================
+# Exports
+# =============================================================================
+
+export Drug, Facility, PatientRegion, TransportRoute, SupplyChainNetwork
+export SupplyChainState, SupplyChainAction, ProduceAction, ShipAction, ServeAction, AdvanceTimeAction
+export create_supply_chain_network, create_supply_chain_gflownet
+
 # Supply chain optimization implementation complete
 # All GFlowNet interface functions implemented following grid world pattern
