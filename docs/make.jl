@@ -17,7 +17,8 @@ makedocs(
         "Getting Started" => [
             "guide/getting_started.md",
             "guide/core_concepts.md", 
-            "guide/examples.md"
+            "guide/examples.md",
+            "guide/learnable_partition_function.md"
         ],
         "Manual" => [
             "manual/overview.md",
@@ -37,6 +38,7 @@ makedocs(
             "api/core_types.md",
             "api/policies.md",
             "api/training.md",
+            "api/partition_function.md",
             "api/flow_computation.md",
             "api/flow_networks.md",
             "api/utils.md"

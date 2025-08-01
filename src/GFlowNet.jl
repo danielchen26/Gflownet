@@ -245,6 +245,10 @@ export create_training_logger, close_training_logger!
 export plot_training_progress, plot_dag_structure, plot_trajectory_analysis
 export generate_training_report, save_training_artifacts
 
+# Z learning validation (LEARNABLE_ESTIMATION)
+export validate_z_learning, validate_z_gradients, monitor_z_learning
+export validate_z_mathematical_properties, compute_trajectory_log_probability
+
 # =============================================================================
 # Applications - Domain Implementations
 # =============================================================================

@@ -120,10 +120,16 @@ function _standard_trajectory_balance_loss(model::GFlowNetModel, trajectory::Tra
     initial_state = trajectory.states[1]
     terminal_state = trajectory.states[end]
 
-    # For simplified trajectory balance, we assume Z(s_0) = 1, so log(Z) = 0
-    # This is mathematically valid when the initial state is fixed
-    # TODO: In future, implement proper flow estimation if needed
-    log_initial_flow = 0.0
+    # Compute log(Z) based on partition function method
+    log_initial_flow = if isnothing(model.log_partition_function)
+        # SIMPLE_ESTIMATION: Z(s_0) = 1, so log(Z) = 0
+        # This is mathematically valid when the initial state is fixed
+        0.0
+    else
+        # LEARNABLE_ESTIMATION: Use learnable parameter from parameters structure
+        # The actual optimization happens on model.parameters.log_Z, but we use the model field for consistency
+        model.log_partition_function
+    end
 
     # Compute sum of log forward probabilities: Σ log(P_F(s_{i+1}|s_i))
     log_forward_prob_sum = 0.0

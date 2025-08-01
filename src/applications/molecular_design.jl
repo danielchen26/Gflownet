@@ -326,18 +326,9 @@ function create_molecular_design_model(atom_types=[:C, :H, :O, :N], max_atoms=10
     # For demonstration purposes only:
     forward_policy = ForwardPolicy(identity) # Placeholder
 
-    # Create the GFlowNet model
-    return GFlowNetModel(
-        dag,
-        forward_policy,
-        nothing,  # No backward policy
-        nothing,  # No flow estimator
-        nothing,  # No partition function
-        [TrajectoryBalanceObjective(1.0)],
-        nothing,  # No optimizer
-        (forward=nothing, backward=nothing, flow=nothing),  # No parameters
-        (forward=nothing, backward=nothing, flow=nothing)   # No states
-    )
+    # NOTE: This molecular design model is outdated and needs to be migrated
+    # to the new API. For now, throw an informative error.
+    throw(ArgumentError("Molecular design model needs to be updated to new API. Use create_grid_world_gflownet() as a reference."))
 end
 
 # Function to visualize molecules using the composition-based approach

@@ -41,13 +41,18 @@ This document lists current limitations in GFlowNet.jl and planned improvements.
 
 ### 3. Multiple Initial States
 
-**Status**: Not supported
+**Status**: Partial support via LEARNABLE_ESTIMATION
 
-**Limitation**: Current implementation assumes single fixed initial state.
+**Current State**: 
+- Single initial state with learnable Z implemented
+- LEARNABLE_ESTIMATION learns partition function as trainable parameter
+- Improves exploration and theoretical correctness
 
-**Impact**: 
-- Cannot handle problems with multiple starting points
-- Cannot learn Z(s₀) for different initial states
+**Still Limited**: 
+- Cannot handle multiple different starting points
+- Cannot learn separate Z(s₀) for each initial state
+
+**Future**: Multi-start GFlowNets with per-initial-state Z values
 - Transfer learning is limited
 
 **Workaround**: Train separate models for each initial state.

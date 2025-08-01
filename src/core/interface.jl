@@ -13,7 +13,7 @@ using Statistics
 # =============================================================================
 
 """
-    create_gflownet(initial_state, all_actions; state_dim, hidden_dim=64, learning_rate=0.01, include_backward=false, rng=Random.default_rng())
+    create_gflownet(initial_state, all_actions; kwargs...)
 
 Create a GFlowNet model using proper Lux+ComponentArray+Zygote patterns.
 
@@ -21,10 +21,34 @@ Create a GFlowNet model using proper Lux+ComponentArray+Zygote patterns.
 - `initial_state`: Starting state s₀
 - `all_actions`: Complete action space
 - `state_dim`: Dimension of state features
-- `hidden_dim`: Hidden layer size for neural networks
-- `learning_rate`: Learning rate for optimizer
-- `include_backward`: Whether to include backward policy for full trajectory balance
-- `rng`: Random number generator
+- `hidden_dim=64`: Hidden layer size for neural networks
+- `learning_rate=0.01`: Learning rate for optimizer
+- `include_backward=false`: Whether to include backward policy for full trajectory balance
+- `partition_function_method=SIMPLE_ESTIMATION`: How to handle partition function Z:
+  - `SIMPLE_ESTIMATION`: Z = 1 (default, fixed)
+  - `LEARNABLE_ESTIMATION`: Learn Z as trainable parameter (recommended for complex environments)
+- `rng=Random.default_rng()`: Random number generator
+
+# Returns
+`GFlowNetModel` with all components initialized
+
+# Example
+```julia
+# With fixed Z (default)
+model = create_gflownet(
+    initial_state, all_actions;
+    state_dim = 10,
+    hidden_dim = 64
+)
+
+# With learnable Z (recommended)
+model = create_gflownet(
+    initial_state, all_actions;
+    state_dim = 10,
+    hidden_dim = 64,
+    partition_function_method = LEARNABLE_ESTIMATION
+)
+```
 
 Follows official Lux documentation patterns for gradient computation compatibility.
 """
@@ -35,6 +59,7 @@ function create_gflownet(
     hidden_dim::Int = 64,
     learning_rate::Float64 = 0.01,
     include_backward::Bool = false,
+    partition_function_method::PartitionFunctionMethod = SIMPLE_ESTIMATION,
     rng = Random.default_rng()
 )
     n_actions = length(all_actions)
@@ -43,27 +68,51 @@ function create_gflownet(
     forward_policy, forward_ps, forward_st = create_forward_policy(state_dim, hidden_dim, n_actions, rng)
     flow_estimator, flow_ps, flow_st = create_flow_estimator(state_dim, hidden_dim, rng)
     
+    # Initialize partition function parameter based on method
+    log_partition_function = if partition_function_method == LEARNABLE_ESTIMATION
+        0.0  # Initialize log Z to 0 (Z = 1)
+    else
+        nothing  # For SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, etc.
+    end
+
     # Optionally create backward policy
     if include_backward
         backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
         
-        # Organize parameters with backward policy
-        parameters = ComponentArray(
-            forward = forward_ps,
-            backward = backward_ps,
-            flow = flow_ps
-        )
+        # Organize parameters with backward policy and optional Z parameter
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps,
+                flow = flow_ps,
+                log_Z = log_partition_function  # Add Z as learnable parameter
+            )
+        else
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps,
+                flow = flow_ps
+            )
+        end
         
         # Network states
         states = (forward = forward_st, backward = backward_st, flow = flow_st)
     else
         backward_policy = nothing
         
-        # Organize parameters without backward policy
-        parameters = ComponentArray(
-            forward = forward_ps,
-            flow = flow_ps
-        )
+        # Organize parameters without backward policy and optional Z parameter  
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                flow = flow_ps,
+                log_Z = log_partition_function  # Add Z as learnable parameter
+            )
+        else
+            ComponentArray(
+                forward = forward_ps,
+                flow = flow_ps
+            )
+        end
         
         # Network states
         states = (forward = forward_st, flow = flow_st)
@@ -80,6 +129,7 @@ function create_gflownet(
         forward_policy,
         backward_policy,
         flow_estimator,
+        log_partition_function,
         parameters,
         optimizer,
         states
@@ -288,9 +338,49 @@ end
 # =============================================================================
 
 """
-    train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::Bool = false)
+    train_gflownet(model::GFlowNetModel, config::TrainingConfig; kwargs...)
 
-Train GFlowNet using proper Lux+Zygote patterns.
+Train GFlowNet using proper Lux+Zygote patterns with optional learnable partition function.
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model to train
+- `config::TrainingConfig`: Training configuration including:
+  - `objective`: Training objective (e.g., TRAJECTORY_BALANCE)
+  - `partition_function_method`: How to handle Z (SIMPLE_ESTIMATION or LEARNABLE_ESTIMATION)
+  - `n_iterations`: Number of training iterations
+  - `batch_size`: Batch size for trajectory sampling
+  - `learning_rate`: Learning rate for optimizer
+
+# Keyword Arguments
+- `verbose::Bool=false`: Whether to print training progress
+- `validation_data=nothing`: Optional validation data
+- `callback=nothing`: Optional callback function(model, history, iteration)
+
+# Returns
+`TrainingHistory` containing:
+- `losses`: Training loss per iteration
+- `partition_function_estimates`: Z values over time (if using LEARNABLE_ESTIMATION)
+- Other metrics based on configuration
+
+# Example
+```julia
+# Train with learnable partition function
+config = TrainingConfig(
+    objective = TRAJECTORY_BALANCE,
+    partition_function_method = LEARNABLE_ESTIMATION,
+    n_iterations = 1000,
+    batch_size = 64,
+    learning_rate = 0.001
+)
+
+history = train_gflownet(model, config; verbose=true)
+
+# Access learned Z
+if model.partition_function_method == LEARNABLE_ESTIMATION
+    learned_Z = exp(model.parameters.log_Z)
+    println("Learned partition function: \$learned_Z")
+end
+```
 """
 function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::Bool = false)
     history = TrainingHistory()
@@ -383,6 +473,11 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
     # Update model state (mutation after gradient computation is safe)
     model.optimizer = optimizer_state
     model.parameters = parameters
+    
+    # Synchronize log_partition_function field with parameter if using LEARNABLE_ESTIMATION
+    if haskey(parameters, :log_Z)
+        model.log_partition_function = parameters.log_Z
+    end
 
     return loss_val, gradient_norm
 end
@@ -488,10 +583,18 @@ function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajec
         terminal_reward = 1e-8
     end
 
-    # CORRECTED Trajectory Balance Loss: (log P_F(τ) - log R(s_T))²
-    # This enforces P_F(τ) ∝ R(s_T) which is the correct GFlowNet objective
+    # Trajectory Balance Loss with optional learnable Z parameter
+    # Standard form: (log Z + log P_F(τ) - log R(s_T))²
     log_reward = log(terminal_reward)
-    trajectory_balance_error = log_prob_sum - log_reward
+    
+    # Add log Z term if using LEARNABLE_ESTIMATION
+    log_Z = if haskey(params, :log_Z)
+        params.log_Z  # Use learnable Z parameter
+    else
+        0.0  # SIMPLE_ESTIMATION: Z = 1, so log Z = 0
+    end
+    
+    trajectory_balance_error = log_Z + log_prob_sum - log_reward
 
     return trajectory_balance_error^2
 end

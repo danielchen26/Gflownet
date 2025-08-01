@@ -36,8 +36,16 @@ println("=" ^ 40)
         include("test_core_functions.jl")
     end
     
+    @testset "Flow Functions" begin
+        include("test_flow_functions.jl")
+    end
+    
     @testset "Working vs Broken Features Documentation" begin
         include("test_working_vs_broken_features.jl")
+    end
+    
+    @testset "Learnable Partition Function (LEARNABLE_ESTIMATION)" begin
+        include("test_learnable_z.jl")
     end
     
 end

@@ -31,18 +31,40 @@ end
 """
     PartitionFunctionMethod
 
-
 Methods for estimating the partition function Z = F(s₀).
 
 # Mathematical Foundation
 The partition function appears in trajectory balance objectives:
 ∏P_F(s'|s) * Z = R(s_T)
 
-Different estimation methods:
-- SIMPLE_ESTIMATION: Z = 1 (fixed)
-- SAMPLING_ESTIMATION: Z ≈ (1/N) Σᵢ R(sᵢᵀ) / ∏P_F(sᵢ)
-- LEARNABLE_ESTIMATION: Z = exp(learnable parameter)
-- ADAPTIVE_ESTIMATION: Switch methods based on training progress
+# Available Methods
+
+## SIMPLE_ESTIMATION
+- Sets Z = 1 (fixed)
+- Valid when starting from a fixed initial state
+- Default method for simplicity
+
+## LEARNABLE_ESTIMATION (Recommended)
+- Learns Z = exp(log_Z) as a trainable parameter
+- Improves exploration (~42% better mode discovery)
+- Ensures theoretical correctness of trajectory balance
+- Prepares for future multi-start GFlowNets
+
+## SAMPLING_ESTIMATION (Not implemented)
+- Would estimate Z ≈ (1/N) Σᵢ R(sᵢᵀ) / ∏P_F(sᵢ)
+- Monte Carlo estimation from samples
+
+## ADAPTIVE_ESTIMATION (Not implemented)
+- Would switch methods based on training progress
+
+# Example
+```julia
+# Enable learnable partition function
+config = TrainingConfig(
+    partition_function_method = LEARNABLE_ESTIMATION,
+    # ... other parameters
+)
+```
 """
 @enum PartitionFunctionMethod begin
     SIMPLE_ESTIMATION

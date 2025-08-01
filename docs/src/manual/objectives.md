@@ -42,8 +42,9 @@ config = TrainingConfig(
 ```
 
 ### Notes
-- Assumes $Z = 1$ (valid for fixed initial state)
-- Now supports optional backward policy with `include_backward=true`
+- Assumes $Z = 1$ by default (valid for fixed initial state)
+- Now supports learnable $Z$ with `partition_function_method=LEARNABLE_ESTIMATION`
+- Supports optional backward policy with `include_backward=true`
 - Most efficient for simple domains
 
 ## General Trajectory Balance (Not Yet Implemented)
