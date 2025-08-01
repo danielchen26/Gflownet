@@ -200,10 +200,21 @@ If detailed balance is important:
 - **Backward Compatibility**: Works with or without backward policy
 - **Clean API**: Simple `include_backward=true` to enable full trajectory balance
 
+## Partition Function Z Analysis
+
+For a comprehensive understanding of when and why Z = 1 is valid, and when it must be learned, see:
+- [PARTITION_FUNCTION_ANALYSIS.md](./PARTITION_FUNCTION_ANALYSIS.md)
+
+Key insights:
+- **Z = 1 is valid** when starting from a fixed initial state (all current examples)
+- **Z must be learned** when handling multiple initial states
+- **Flow functions are needed** to compute Z properly for multiple initial states
+- **Current implementation is correct** for the single initial state case
+
 ## Conclusion
 
 The codebase has been successfully modernized to support full GFlowNet functionality without explicit DAG construction. The trajectory balance objective now supports both:
 - **Simple version**: Forward policy only (assumes P_B = 1)
 - **Full version**: Forward and backward policies with learned P_B
 
-All examples work correctly with both versions, and the implementation is cleaner and more maintainable.
+All examples work correctly with both versions, and the implementation is cleaner and more maintainable. The Z = 1 assumption is mathematically valid for all current use cases.

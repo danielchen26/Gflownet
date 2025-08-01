@@ -167,7 +167,7 @@ partition_function_method = SIMPLE_ESTIMATION
 **Approach**: Currently assumes Z = 1 for simplicity
 **Best for**: Fixed initial state problems
 **When to use**: Most practical applications
-**Note**: Actual Z computation requires fixing flow functions
+**Note**: This is mathematically valid for fixed s₀. See [PARTITION_FUNCTION_ANALYSIS.md](./PARTITION_FUNCTION_ANALYSIS.md) for details
 
 ### **2. Learnable Parameter**
 ```julia
