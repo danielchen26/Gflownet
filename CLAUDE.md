@@ -49,6 +49,18 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - Clean separation: interface.jl now only has model creation
    - Better modularity and maintainability
 
+8. **SUB_TRAJECTORY_BALANCE Objective** ✅
+   - Implemented sub-trajectory balance loss for O(T²) learning signals
+   - Better credit assignment for long trajectories
+   - Domain-agnostic implementation
+   - Configurable sub-trajectory length
+
+9. **DIRECT_FLOW_OBJECTIVE Training Method** ✅
+   - Neural network directly estimates F(s) instead of recursive computation
+   - Added flow estimator network support with include_flow_estimator parameter
+   - Trades accuracy for computational efficiency
+   - Ideal for large state spaces where recursive flow is expensive
+
 ## Development Guidance
 
 - Remember that example folders are associated with different domains and for the examples related to the core development, you should put them into the core features sub folder

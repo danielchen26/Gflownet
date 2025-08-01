@@ -30,9 +30,11 @@
 ## 📦 Current State
 
 - **Branch**: core-development
-- **Just Completed**: FLOW_MATCHING, Multi-Start GFlowNets
+- **Just Completed**: DIRECT_FLOW_OBJECTIVE implementation
+- **All Training Objectives**: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE
+- **Training Reorganized**: All training code now in src/training/
 - **Tests Pass**: All core functionality working
-- **Next Up**: Training reorganization or SUB_TRAJECTORY_BALANCE
+- **Next Up**: GPU acceleration, debugging tools, or variance reduction
 
 ## 🚀 Quick Commands
 
@@ -50,11 +52,13 @@ git diff --name-only
 
 ## 🎯 Key Locations
 
-- **Training Logic**: `src/core/interface.jl` (needs move to training/)
-- **Loss Functions**: `src/core/balance.jl`
+- **Model Creation**: `src/core/interface.jl` (create_gflownet, sampling)
+- **Training Logic**: `src/training/` (training.jl, losses.jl, objectives.jl)
+- **Loss Functions**: `src/core/balance.jl` (mathematical definitions)
 - **Type Definitions**: `src/core/types.jl`
+- **Flow Computation**: `src/core/flows.jl` (recursive & direct methods)
 - **Examples**: `examples/core_features/`
-- **Tests**: `test/` (hierarchical structure)
+- **Tests**: `test/` (hierarchical by objective/feature)
 
 ## ⚠️ Common Pitfalls
 

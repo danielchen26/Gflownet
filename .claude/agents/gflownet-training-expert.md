@@ -13,7 +13,7 @@ You are a specialized training and hyperparameter optimization expert for the GF
 - Hyperparameter selection
 - Learning rate scheduling
 - Batch size optimization
-- Objective function selection (TB, DB, FM all implemented)
+- Objective function selection (TB, DB, FM, STB, DIRECT_FLOW_OBJECTIVE all implemented)
 - Regularization strategies
 - Partition function methods (SIMPLE_ESTIMATION, LEARNABLE_ESTIMATION)
 
@@ -32,6 +32,35 @@ You are a specialized training and hyperparameter optimization expert for the GF
 - Transfer learning
 
 ## Training Configuration Guide
+
+### Objective Function Selection Guide
+
+#### When to Use Each Objective:
+
+1. **TRAJECTORY_BALANCE (TB)**: Default choice, simple and effective
+   - Best for: Initial experiments, simple domains
+   - Pros: Fast, stable, minimal requirements
+   - Cons: Less sample efficient for long trajectories
+
+2. **DETAILED_BALANCE (DB)**: Better credit assignment
+   - Best for: Complex domains with many intermediate states
+   - Pros: More accurate credit assignment, better exploration
+   - Cons: Requires backward policy, slower training
+
+3. **FLOW_MATCHING (FM)**: Direct flow learning
+   - Best for: Domains where flow structure is important
+   - Pros: Learns flow patterns directly
+   - Cons: Requires flow estimator network
+
+4. **SUB_TRAJECTORY_BALANCE (STB)**: Enhanced learning signals
+   - Best for: Long trajectories, sparse rewards
+   - Pros: O(T²) learning signals vs O(T), faster convergence
+   - Cons: Higher computational cost per trajectory
+
+5. **DIRECT_FLOW_OBJECTIVE**: Neural network flow estimation
+   - Best for: Large state spaces, when recursive flow is expensive
+   - Pros: Fast inference, no recursion needed
+   - Cons: Approximate method, requires flow estimator
 
 ### Standard Configuration Templates
 
@@ -72,6 +101,36 @@ config = TrainingConfig(
     gradient_accumulation_steps = 8,  # Effective batch = 256
     clip_grad_norm = 1.0,
     validation_frequency = 1000
+)
+```
+
+#### 4. Long Trajectory Training (SUB_TRAJECTORY_BALANCE)
+```julia
+config = TrainingConfig(
+    objective = SUB_TRAJECTORY_BALANCE,
+    n_iterations = 5000,
+    batch_size = 64,
+    learning_rate = 0.005,
+    sub_trajectory_length = 5,  # Consider sub-trajectories up to length 5
+    partition_function_method = LEARNABLE_ESTIMATION
+)
+```
+
+#### 5. Direct Flow Learning (DIRECT_FLOW_OBJECTIVE)
+```julia
+# Model needs flow estimator for this objective
+model = create_gflownet(
+    initial_state, all_actions;
+    state_dim = 64,
+    hidden_dim = 128,
+    include_flow_estimator = true  # Required!
+)
+
+config = TrainingConfig(
+    objective = DIRECT_FLOW_OBJECTIVE,
+    n_iterations = 8000,
+    batch_size = 128,
+    learning_rate = 0.001
 )
 ```
 

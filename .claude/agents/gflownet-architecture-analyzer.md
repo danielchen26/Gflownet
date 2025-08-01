@@ -39,10 +39,12 @@ Your primary responsibilities:
 
 5. **Current Architecture State** (January 2025): Understand:
    - Training reorganization complete: all training in `training/` folder
-   - All three objectives implemented: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING
+   - All five objectives implemented: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE
    - Multi-start GFlowNets with per-initial-state Z values
    - Backward policy validation functions available
+   - Flow estimator network for direct flow estimation (optional component)
    - Clean module structure with proper separation of concerns
+   - Domain-agnostic implementations throughout
 
 When analyzing architecture:
 - Start with a high-level overview before diving into specifics
