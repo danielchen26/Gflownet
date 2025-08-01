@@ -154,6 +154,7 @@ export TrajectoryBalanceVariant, STANDARD_TB, GEOMETRIC_MEAN_TB
 # Loss computation
 export trajectory_balance_loss
 export detailed_balance_loss  # Now implemented!
+export flow_matching_loss, flow_matching_loss_batch  # Now implemented!
 # export flow_matching_loss  # Not fully implemented
 export compute_balance_loss, validate_balance_conditions
 

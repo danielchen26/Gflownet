@@ -383,10 +383,50 @@ function flow_matching_loss(model::GFlowNetModel, state)::Float64
         return 0.0
     end
 
-    # Flow matching is not currently implemented due to missing DAG-based flow computation
-    # This would require implementing recursive flow computation without explicit DAG
-    # TODO: Implement flow matching with on-demand state exploration
-    throw(ArgumentError("Flow matching loss is not currently implemented - requires DAG-based flow computation. Use TRAJECTORY_BALANCE instead."))
+    # Get the flow estimate from the neural network Z(s)
+    features = state_to_features(state)
+    estimated_flow = flow_estimate(
+        model.flow_estimator, state,
+        model.parameters.flow, model.states.flow
+    )
+    
+    # Compute the true flow using recursive computation
+    # F(s) = Σ_{s'} P_F(s'|s) * F(s')
+    applicable_actions = get_applicable_actions(state, model.all_actions)
+    
+    if isempty(applicable_actions)
+        # No outgoing transitions, flow should be 0
+        return (estimated_flow - 0.0)^2
+    end
+    
+    # Compute expected flow by summing over all possible next states
+    expected_flow = 0.0
+    
+    # Get forward policy probabilities for all actions
+    action_probs = forward_action_probabilities(
+        model.forward_policy, state, model.all_actions,
+        model.parameters.forward, model.states.forward
+    )
+    
+    # Sum over all applicable actions
+    for (action_idx, action) in enumerate(model.all_actions)
+        if action in applicable_actions
+            # Get next state
+            next_state = apply_action(action, state)
+            
+            # Get transition probability P_F(s'|s)
+            transition_prob = action_probs[action_idx]
+            
+            # Get flow of next state F(s')
+            next_flow = flow(model, next_state)
+            
+            # Add contribution to expected flow
+            expected_flow += transition_prob * next_flow
+        end
+    end
+    
+    # Flow matching loss: (Z(s) - F(s))²
+    return (estimated_flow - expected_flow)^2
 end
 
 """

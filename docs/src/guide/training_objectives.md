@@ -24,47 +24,68 @@ The training objectives differ in how they enforce these constraints and in thei
 
 ## Flow Matching (FM)
 
-Flow Matching is one of the most direct training objectives for GFlowNets. It explicitly enforces flow conservation at each state.
+Flow Matching is one of the most direct training objectives for GFlowNets. It explicitly enforces flow conservation at each state by training a neural network to estimate flows.
 
 ### Mathematical Formulation
 
-The Flow Matching objective minimizes the squared difference between incoming and outgoing flows at each non-terminal state:
+The Flow Matching objective minimizes the squared difference between the neural network flow estimate and the true flow computed recursively:
 
-$$\mathcal{L}_{FM}(F) = \sum_{s \in \mathcal{S} \setminus \{s_0, \mathcal{S}_T\}} \left( \sum_{s' \in \text{Parent}(s)} F(s' \rightarrow s) - \sum_{s' \in \text{Child}(s)} F(s \rightarrow s') \right)^2$$
+$$\mathcal{L}_{FM}(s) = (Z(s) - F(s))^2$$
 
 where:
-- $\mathcal{S}$ is the set of all states
-- $s_0$ is the initial state
-- $\mathcal{S}_T$ is the set of terminal states
-- $F(s' \rightarrow s)$ is the flow along the edge from $s'$ to $s$
-
-Additionally, for terminal states $s_T \in \mathcal{S}_T$, we enforce:
-
-$$F(s_T \rightarrow s_f) = R(s_T)$$
-
-where $s_f$ is a virtual sink state and $R(s_T)$ is the reward of terminal state $s_T$.
+- $Z(s)$ is the neural network's flow estimate for state $s$
+- $F(s)$ is the true flow computed as:
+  - $F(s) = R(s)$ for terminal states
+  - $F(s) = \sum_{s'} P_F(s'|s) \cdot F(s')$ for non-terminal states
 
 ### Practical Implementation
 
-In practice, the Flow Matching objective can be implemented by:
+The current implementation in GFlowNet.jl:
 
-1. Sampling states from trajectories
-2. Computing the incoming and outgoing flows for each sampled state
-3. Minimizing the squared difference
+```julia
+# Neural network estimates flow
+estimated_flow = flow_estimate(model.flow_estimator, state, params, states)
 
-A key challenge is that we need to compute flows for all parents and children of each sampled state, which can be computationally expensive if the branching factor is large.
+# Compute expected flow recursively
+expected_flow = 0.0
+for action in applicable_actions
+    next_state = apply_action(action, state)
+    transition_prob = P_F(next_state|state)
+    next_flow = flow(model, next_state)  # Recursive computation
+    expected_flow += transition_prob * next_flow
+end
+
+# Loss is squared difference
+loss = (estimated_flow - expected_flow)^2
+```
+
+Key features:
+1. Uses a dedicated neural network (`flow_estimator`) to predict F(s)
+2. Computes true flows recursively with memoization for efficiency
+3. Only requires forward policy (no backward policy needed)
+4. Flows are treated as fixed during gradient computation
 
 ### Advantages and Limitations
 
 **Advantages:**
 - Direct enforcement of flow conservation
-- Conceptually simple and aligned with the theoretical foundation
-- Can be used with off-policy learning
+- Provides explicit flow estimates for analysis
+- No backward policy required
+- Can be combined with other objectives
+- Efficient with memoization
 
 **Limitations:**
-- May suffer from credit assignment issues for long trajectories
-- Requires computing flows for all parents and children of sampled states
-- Can be sensitive to parametrization choices
+- Requires recursive flow computation (can be expensive)
+- May converge slower than trajectory-based methods
+- Flow estimates may be less accurate early in training
+
+### When to Use Flow Matching
+
+Flow Matching is particularly useful when:
+- You need explicit flow estimates for analysis
+- Backward policy is not available or hard to define
+- You want to visualize flow distribution
+- Combined with other objectives for better convergence
 
 ## Detailed Balance (DB)
 

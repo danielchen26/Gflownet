@@ -1,12 +1,14 @@
 # GFlowNet.jl Architecture Overview
 
-## Executive Summary (Updated: August 2025)
+## Executive Summary (Updated: January 2025)
 
 GFlowNet.jl implements Generative Flow Networks using a modern Julia architecture with:
 - **ComponentArrays + Lux.jl** for neural networks
 - **Zygote.jl** for automatic differentiation
 - **On-demand computation** without explicit DAG construction
-- **Optional backward policy** for improved credit assignment
+- **Full backward policy support** with joint state representation
+- **Complete flow computation** with memoization and caching
+- **Multiple training objectives** including TRAJECTORY_BALANCE and DETAILED_BALANCE
 
 ## Current Architecture
 
@@ -20,8 +22,9 @@ GFlowNet.jl implements Generative Flow Networks using a modern Julia architectur
 
 2. **Neural Network Policies**
    - `ForwardPolicy`: P_F(a|s) - action selection
-   - `BackwardPolicy`: P_B(s|s') - optional, for credit assignment
-   - `FlowEstimator`: Z(s) - currently returns 1.0 (fixed initial state assumption)
+   - `BackwardPolicy`: P_B(s|s') - fully implemented with joint state representation
+   - `FlowEstimator`: Z(s) - neural network for flow estimation
+   - `Learnable Z`: Optional learnable partition function parameter
 
 3. **Training System**
    - Uses `train_gflownet(model, config)`
@@ -36,30 +39,40 @@ struct GFlowNetModel
     initial_state::AbstractState
     all_actions::Vector{<:AbstractAction}
     forward_policy::ForwardPolicy
-    flow_estimator::FlowEstimator
     backward_policy::Union{BackwardPolicy, Nothing}  # Optional
+    flow_estimator::FlowEstimator
+    log_partition_function::Union{Float64, Nothing}  # For LEARNABLE_ESTIMATION
     parameters::ComponentArray
-    states::NamedTuple
     optimizer::Any
+    states::NamedTuple
 end
 ```
 
 ## Training Objectives Implementation Status
 
-### Currently Working
-- **TRAJECTORY_BALANCE**: ✅ Fully implemented
-- **Flow Computation**: ✅ Implemented (recursive flow, memoization, edge flows)
-  - Simple version: Forward policy only (assumes P_B uniform)
-  - Full version: With backward policy for better credit assignment
-  - Loss: (log P_F(τ) + log P_B(τ) - log R(s_T))²
+### Fully Implemented
+- **TRAJECTORY_BALANCE**: ✅ Complete with optional backward policy
+  - Loss: (log Z + log P_F(τ) - log R(s_T))²
+  - Supports learnable partition function Z
+  
+- **DETAILED_BALANCE**: ✅ Fully implemented (January 2025)
+  - Requires backward policy
+  - Loss: (log P_F(s→s') + log F(s) - log P_B(s'→s) - log F(s'))²
+  - Uses joint state representation for P_B(s|s')
+  
+- **Flow Computation**: ✅ Complete implementation
+  - Recursive flow: F(s) = Σ P_F(s'|s) F(s')
+  - Memoization with Zygote-compatible caching
+  - Edge flows: F(s→s') = P_F(s'|s) F(s)
+  - Partition function: Z = F(s₀)
 
-### Defined but Not Implemented
-- **DETAILED_BALANCE**: ❌ Placeholder only
-- **FLOW_MATCHING**: ❌ Placeholder only  
-- **SUB_TRAJECTORY_BALANCE**: ❌ Placeholder only
-- **COMBINED_OBJECTIVES**: ❌ Placeholder only
+### Ready to Implement
+- **FLOW_MATCHING**: All prerequisites now available
+- **SUB_TRAJECTORY_BALANCE**: Can be implemented with current infrastructure
 
-**Important**: The training loop currently ignores `config.objective` and always uses trajectory balance.
+### Not Yet Implemented
+- **COMBINED_OBJECTIVES**: Requires design decisions
+- **Multi-start support**: Requires per-initial-state Z values
 
 ## Key Design Decisions
 
@@ -69,10 +82,10 @@ end
 - Actions filtered by `is_applicable(action, state)`
 - Transitions computed via `apply_action(action, state)`
 
-### 2. Partition Function Z = 1
-- Valid assumption for fixed initial state (current case)
-- All examples start from single s₀
-- Would need modification for multiple initial states
+### 2. Partition Function Handling
+- **SIMPLE_ESTIMATION**: Z = 1 (default, valid for fixed initial state)
+- **LEARNABLE_ESTIMATION**: Z as trainable parameter (implemented)
+- **SAMPLING_ESTIMATION**: Monte Carlo estimation (planned)
 - See [Partition Function Analysis](../theory/partition_function.md)
 
 ### 3. Pure Functional State Transitions
@@ -88,9 +101,10 @@ end
 
 ### 4. Backward Policy Implementation
 - Optional component (can be `nothing`)
-- When included, enables full trajectory balance
-- Uses joint forward-backward training
+- Required for DETAILED_BALANCE objective
+- Uses joint state representation: P_B(s|s') = σ(NN([features(s), features(s')]))
 - Created with `include_backward=true` flag
+- Enables better credit assignment
 
 ## API Design
 
@@ -106,9 +120,10 @@ model = create_grid_world_gflownet(
 
 # Configure training
 config = TrainingConfig(
-    objective = TRAJECTORY_BALANCE,  # Only this works currently
+    objective = TRAJECTORY_BALANCE,  # or DETAILED_BALANCE
     n_iterations = 1000,
-    batch_size = 32
+    batch_size = 32,
+    partition_function_method = LEARNABLE_ESTIMATION  # Optional
 )
 
 # Train
@@ -162,10 +177,10 @@ Flow computation is now fully implemented using on-demand computation without re
 
 ## Current Limitations
 
-1. **Training Objectives**: Only trajectory balance works; detailed balance and flow matching require backward policy
+1. **Training Objectives**: SUB_TRAJECTORY_BALANCE not yet implemented (FLOW_MATCHING now complete)
 2. **Multiple Initial States**: Not yet supported (requires per-state Z computation)
-3. **Flow Estimator Network**: Not implemented (DIRECT_FLOW method unavailable)
-4. **GPU Acceleration**: Limited to neural network operations
+3. **GPU Acceleration**: Limited to neural network operations, trajectory sampling is CPU-only
+4. **Continuous State Spaces**: Experimental support only
 
 ## Performance Characteristics
 
@@ -176,18 +191,20 @@ Flow computation is now fully implemented using on-demand computation without re
 
 ## Future Improvements
 
-1. Implement missing training objectives
-2. Add proper flow computation for Z ≠ 1 cases
-3. Support multiple initial states
-4. GPU-accelerated trajectory sampling
+1. Implement SUB_TRAJECTORY_BALANCE objective
+2. Support multiple initial states with per-state Z values
+3. GPU-accelerated trajectory sampling
+4. Continuous state space support
 5. Distributed training support
 
 ## Conclusion
 
 GFlowNet.jl provides a clean, modern implementation of GFlowNets with:
-- Working trajectory balance training
-- Optional backward policy support
+- Multiple training objectives (TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING)
+- Complete flow computation infrastructure
+- Full backward policy support with joint representation
+- Learnable partition function option
 - Extensible domain interface
 - Production-ready for single initial state problems
 
-The architecture prioritizes simplicity and correctness over supporting every theoretical GFlowNet variant.
+The architecture balances theoretical completeness with practical usability, providing both simple defaults and advanced features when needed.

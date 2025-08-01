@@ -632,6 +632,81 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         
         return mean(finite_losses)
         
+    elseif config.objective == FLOW_MATCHING
+        # For flow matching, we need non-terminal states from trajectories
+        # Extract all non-terminal states
+        states = Zygote.@ignore begin
+            all_states = AbstractState[]
+            
+            for traj in trajectories
+                if !is_valid_trajectory(traj)
+                    continue
+                end
+                
+                # Add all non-terminal states
+                for state in traj.states[1:end-1]  # Exclude last state (terminal)
+                    if !is_terminal_state(state)
+                        push!(all_states, state)
+                    end
+                end
+            end
+            
+            # Remove duplicates to avoid biasing training
+            unique(all_states)
+        end
+        
+        if isempty(states)
+            return 0.0
+        end
+        
+        # Compute flow matching loss for each state
+        losses = [
+            begin
+                # Compute expected flow (wrap flow computation in Zygote.@ignore)
+                expected_flow = Zygote.@ignore begin
+                    applicable_actions = get_applicable_actions(state, model.all_actions)
+                    if isempty(applicable_actions)
+                        0.0
+                    else
+                        action_probs = forward_action_probabilities(
+                            model.forward_policy, state, model.all_actions,
+                            params.forward, model.states.forward
+                        )
+                        
+                        flow_sum = 0.0
+                        for (action_idx, action) in enumerate(model.all_actions)
+                            if action in applicable_actions
+                                next_state = apply_action(action, state)
+                                transition_prob = action_probs[action_idx]
+                                next_flow = flow(model, next_state)
+                                flow_sum += transition_prob * next_flow
+                            end
+                        end
+                        flow_sum
+                    end
+                end
+                
+                # Get flow estimate from neural network (this is differentiable)
+                estimated_flow = flow_estimate(
+                    model.flow_estimator, state,
+                    params.flow, model.states.flow
+                )
+                
+                # Flow matching loss
+                (estimated_flow - expected_flow)^2
+            end
+            for state in states
+        ]
+        
+        # Filter out infinite losses
+        finite_losses = filter(!isinf, losses)
+        
+        if isempty(finite_losses)
+            return Inf
+        end
+        
+        return mean(finite_losses)
+        
     else
         throw(ArgumentError("Unsupported training objective: $(config.objective)"))
     end

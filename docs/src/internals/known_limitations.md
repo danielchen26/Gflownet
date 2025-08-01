@@ -6,58 +6,65 @@ This document lists current limitations in GFlowNet.jl and planned improvements.
 
 ### 1. Flow Computation Functions
 
-**Status**: ✅ Implemented (August 2025)
+**Status**: ✅ Fully Implemented (January 2025)
 
 **Implemented Functions**:
 - `flow(model, state)` - Unified interface for flow computation
 - `compute_recursive_flow(model, state)` - Recursive flow using F(s) = Σ P_F(s'|s) * F(s')
+- `compute_recursive_flow_memoized(model, state)` - With Zygote-compatible caching
 - `partition_function(model)` - Computes Z = F(s₀)
 - `edge_flow(model, source, target)` - Edge flow F(s→s') = P_F(s'|s) * F(s)
+- `flow_analysis(model, state)` - Comprehensive flow debugging
 
 **Implementation Details**:
 - Uses on-demand computation (no explicit DAG needed)
-- Includes memoization for efficiency
-- Maintains Zygote compatibility
+- Includes memoization with proper Zygote handling
+- Cache operations wrapped in `Zygote.@ignore`
 - Properly handles terminal states: F(s) = R(s)
 
 **Current Limitations**:
-- Performance may degrade for very deep state spaces without caching
-- DIRECT_FLOW method requires flow estimator network (not yet implemented)
+- DIRECT_FLOW method requires flow estimator network training (not yet implemented)
+- Performance may degrade for very deep state spaces
 
 ### 2. Advanced Training Objectives
 
 **Status**: Partially implemented
 
-**Affected Objectives**:
-- `DETAILED_BALANCE` - Requires backward policy and flow functions
-- `FLOW_MATCHING` - Requires flow network
-- `GENERAL_TRAJECTORY_BALANCE` - Not implemented
+**Implemented**:
+- `TRAJECTORY_BALANCE` ✅ - Complete with optional backward policy and learnable Z
+- `DETAILED_BALANCE` ✅ - Fully implemented with joint backward policy representation
 
-**Why**: Dependencies on flow computation and state enumeration.
+**Not Yet Implemented**:
+- `FLOW_MATCHING` - All prerequisites now available, ready to implement
+- `SUB_TRAJECTORY_BALANCE` - Can be implemented with current infrastructure
+- `COMBINED_OBJECTIVES` - Requires design decisions
 
-**Workaround**: Use `TRAJECTORY_BALANCE` with optional backward policy.
+**Workaround**: Use TRAJECTORY_BALANCE or DETAILED_BALANCE for now.
 
-**Future Plan**: Implement once flow networks are available.
+**Next Steps**: FLOW_MATCHING is the logical next implementation.
 
 ### 3. Multiple Initial States
 
-**Status**: Partial support via LEARNABLE_ESTIMATION
+**Status**: Foundation ready, implementation pending
 
 **Current State**: 
-- Single initial state with learnable Z implemented
-- LEARNABLE_ESTIMATION learns partition function as trainable parameter
-- Improves exploration and theoretical correctness
+- Single initial state with learnable Z implemented ✅
+- LEARNABLE_ESTIMATION learns partition function as trainable parameter ✅
+- Flow computation infrastructure ready ✅
 
 **Still Limited**: 
 - Cannot handle multiple different starting points
 - Cannot learn separate Z(s₀) for each initial state
+- No initial state distribution learning P(s₀)
 
-**Future**: Multi-start GFlowNets with per-initial-state Z values
-- Transfer learning is limited
+**Why Ready Now**: 
+- Flow functions implemented: F(s₀) = Z(s₀)
+- Can compute per-state partition functions
+- See [flow_functions_multistart.md](flow_functions_multistart.md) for details
 
 **Workaround**: Train separate models for each initial state.
 
-**Future Plan**: Add multi-start support with state-dependent Z.
+**Future Plan**: Implement multi-start with learned P(s₀) ∝ Z(s₀).
 
 ## Performance Limitations
 
@@ -291,11 +298,14 @@ This document lists current limitations in GFlowNet.jl and planned improvements.
 
 | Feature | Status | Priority | Workaround Available |
 |---------|---------|----------|---------------------|
-| Flow Functions | ❌ Not Implemented | High | ✅ Yes (Z=1) |
-| Multiple Initial States | ❌ Not Implemented | Medium | ✅ Yes (separate models) |
+| Flow Functions | ✅ Implemented | - | - |
+| TRAJECTORY_BALANCE | ✅ Implemented | - | - |
+| DETAILED_BALANCE | ✅ Implemented | - | - |
+| FLOW_MATCHING | ❌ Not Implemented | High | ✅ Yes (use TB/DB) |
+| Multiple Initial States | ⚠️ Ready to implement | High | ✅ Yes (separate models) |
 | GPU Sampling | ⚠️ Partial | High | ❌ No |
 | Continuous Spaces | ⚠️ Experimental | Medium | ✅ Yes (discretize) |
-| Advanced Objectives | ⚠️ Partial | Medium | ✅ Yes (trajectory balance) |
+| SUB_TRAJECTORY_BALANCE | ❌ Not Implemented | Medium | ✅ Yes (use TB/DB) |
 | Distributed Training | ❌ Not Implemented | Low | ❌ No |
 | Debugging Tools | ⚠️ Basic | Medium | ✅ Yes (manual) |
 
