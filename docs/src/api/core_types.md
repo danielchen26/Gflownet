@@ -19,13 +19,13 @@ The `Trajectory` type represents a path through the state space, defined by:
 * A sequence of actions that transition between those states
 * Associated rewards and other metadata
 
-## Directed Acyclic Graph
+## GFlowNet Model Architecture
 
-The `DirectedAcyclicGraph` structure represents the state space as a graph, with:
+GFlowNet.jl uses an on-demand computation architecture rather than explicit graph construction:
 
-* Nodes representing states
-* Edges representing possible transitions between states
-* Metadata for both nodes and edges
+* States are generated dynamically during sampling
+* Transitions are computed through action application
+* No explicit state space enumeration required
 
 ## Domain-Specific Data Types
 
@@ -40,29 +40,28 @@ GFlowNet.jl uses a composition pattern for domain-specific data:
 Policy types define how actions are selected:
 
 * `AbstractPolicy`: Base type for all policies
-* `ForwardPolicy`: Determines forward transitions in the state space
-* `BackwardPolicy`: Determines backward transitions for training
+* `ForwardPolicy`: Neural network that determines action probabilities during sampling
 
 ## Flow Estimator
 
-The `FlowEstimator` type models flow values through the state space, typically using neural networks.
+The `FlowEstimator` type is experimental and not currently used in the working implementation. Flow computation is handled implicitly through the Trajectory Balance objective.
 
 ## Training Objectives
 
 GFlowNet.jl implements several training objectives:
 
-* `FlowMatchingObjective`: Matches predicted flows with target flows
-* `DetailedBalanceObjective`: Ensures detailed balance in state transitions
-* `TrajectoryBalanceObjective`: Balances flows along trajectories
+* `TrajectoryBalanceObjective`: Primary objective, balances flows along trajectories
+* `FlowMatchingObjective`: Experimental, requires flow computation (not currently working)
+* `DetailedBalanceObjective`: Experimental, requires backward policy (not currently working)
 
 ## GFlowNet Model
 
 The `GFlowNetModel` integrates all components:
 
-* Forward and backward policies
-* Flow estimators
-* Training objectives
-* State and action spaces
+* Forward policy (neural network)
+* Training objectives (primarily Trajectory Balance)
+* Domain-specific state and action interfaces
+* On-demand state space computation
 
 ## Code Example
 

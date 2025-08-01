@@ -2,24 +2,24 @@
 
 This page introduces the core concepts behind GFlowNets and how they are implemented in this framework.
 
-## Directed Acyclic Graphs (DAGs)
+## On-Demand State Space Computation
 
-At the heart of GFlowNets is a directed acyclic graph (DAG) that represents the construction process:
+GFlowNet.jl uses an on-demand computation approach rather than explicit DAG construction:
 
-- **States**: Nodes in the graph, representing partial or complete objects
-- **Actions**: Edges in the graph, representing transitions between states
-- **Terminal states**: Special states that represent fully constructed objects
+- **States**: Generated dynamically during sampling and training
+- **Actions**: Applied to states to create transitions on-the-fly
+- **Terminal states**: Identified by the `is_terminal_state()` function
 
-In this implementation, DAGs are created using the composition pattern:
+The current implementation avoids explicit graph construction:
 
 ```julia
-# Create a DAG for your domain
-dag = create_dag(initial_state, terminal_states, terminal_sink, actions)
+# States are created through action application
+initial_state = create_initial_state()
+applicable_actions = get_applicable_actions(initial_state, all_actions)
+next_state = apply_action(applicable_actions[1], initial_state)
 
-# The DAG contains all necessary information
-@assert dag.initial_state isa YourStateType
-@assert all(s -> s isa YourStateType, dag.terminal_states)
-@assert all(a -> a isa YourActionType, dag.actions)
+# No explicit DAG structure required
+@assert is_terminal_state(next_state) isa Bool
 ```
 
 ## Flow Networks
@@ -33,17 +33,17 @@ GFlowNets are based on the concept of flow networks:
 
 ### Implementation Details
 
-In this framework, flows are computed using:
+In this framework, flows are handled implicitly through the Trajectory Balance objective:
 
 ```julia
-# Flow through a state
-flow_value = flow(model, state)
+# Forward transition probability (this works)
+prob = forward_policy(model, state, action)
 
-# Flow along an edge
-edge_flow_value = edge_flow(model, source_state, target_state)
+# Terminal state rewards drive the flow
+terminal_reward = reward(terminal_state)
 
-# Forward transition probability
-prob = forward_transition_prob(model, source_state, target_state)
+# Flow computations are implicit in the loss function
+# No explicit flow(model, state) calls needed
 ```
 
 ## Policies
@@ -59,12 +59,12 @@ forward_policy, parameters, state = create_forward_policy(
     input_dim, hidden_dim, output_dim, rng
 )
 
-# Use in a GFlowNet model
-model = GFlowNetModel(dag, forward_policy, ...)
+# Use in a GFlowNet model (via high-level interface)
+model = create_grid_world_gflownet(grid_size=5)
 ```
 
-### Backward Policy (Optional)
-The backward policy defines the probability of taking a reverse action from a state during training. **In this implementation, backward policies are optional** because we use the simplified Trajectory Balance objective.
+### Backward Policy (Not Currently Used)
+Backward policies are not implemented in the current working version. The Trajectory Balance objective only requires forward policies and terminal rewards.
 
 ## Partition Function (Z) Management
 
@@ -80,9 +80,10 @@ if iter % 10 == 0
     model.partition_function = estimate_partition_function(model)
 end
 
-# Simple estimation: sum of all terminal rewards
-function estimate_partition_function(model::GFlowNetModel)
-    return sum(reward(state) for state in model.dag.terminal_states)
+# In practice, Z is often set to 1.0 for simplicity
+# The current implementation typically uses Z = 1.0
+function simple_partition_function()
+    return 1.0
 end
 ```
 
@@ -200,32 +201,27 @@ The sampling process follows these steps:
 
 ## Integration with Lux.jl
 
-This framework is built on **Lux.jl** for neural networks:
+This framework is built on **Lux.jl** for neural networks. Use the high-level interface:
 
 ```julia
-using Lux, Random, Optimisers
+using GFlowNet
 
-# Create neural network components
-rng = Random.default_rng()
-
-# Forward policy network
-nn_model = Chain(
-    Dense(input_dim => 128, relu),
-    Dense(128 => 128, relu), 
-    Dense(128 => output_dim)
+# Create a complete model with built-in neural networks
+model = create_grid_world_gflownet(
+    grid_size=5,
+    hidden_dim=64,
+    learning_rate=0.001
 )
 
-ps, st = Lux.setup(rng, nn_model)
-forward_policy = ForwardPolicy(nn_model)
-
-# Complete model
-model = GFlowNetModel(
-    dag, forward_policy, nothing, nothing, nothing,
-    [TrajectoryBalanceObjective(1.0)],
-    Optimisers.Adam(0.001), 
-    (forward=ps, backward=nothing, flow=nothing),
-    (forward=st, backward=nothing, flow=nothing)
+# Configure training
+config = TrainingConfig(
+    objective=TRAJECTORY_BALANCE,
+    n_iterations=1000,
+    batch_size=32
 )
+
+# Train the model
+history = train_gflownet(model, config; verbose=true)
 ```
 
 ## Key Design Principles

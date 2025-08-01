@@ -27,14 +27,10 @@ objective = TRAJECTORY_BALANCE
 
 ### Mathematical Formulation
 Without backward policy: 
-```
-L = (log P_F(τ) - log R(s_T))²
-```
+$$L = (\log P_F(\tau) - \log R(s_T))^2$$
 
 With backward policy:
-```
-L = (log P_F(τ) - log R(s_T) - log P_B(τ))²
-```
+$$L = (\log P_F(\tau) - \log R(s_T) - \log P_B(\tau))^2$$
 
 ### Example
 ```julia
@@ -46,7 +42,7 @@ config = TrainingConfig(
 ```
 
 ### Notes
-- Assumes Z = 1 (valid for fixed initial state)
+- Assumes $Z = 1$ (valid for fixed initial state)
 - Now supports optional backward policy with `include_backward=true`
 - Most efficient for simple domains
 
@@ -191,14 +187,10 @@ flow_mode = EDGE_LEVEL  # or STATE_LEVEL or MIXED_LEVEL
 Unifies two classical approaches:
 
 Edge-Level (Detailed Balance):
-```
-F(s) * P_F(s → s') = F(s') * P_B(s' → s)
-```
+$$F(s) \cdot P_F(s \to s') = F(s') \cdot P_B(s' \to s)$$
 
 State-Level (Flow Matching):
-```
-∑incoming_flow = ∑outgoing_flow
-```
+$$\sum \text{incoming flow} = \sum \text{outgoing flow}$$
 
 ### Modes
 - `EDGE_LEVEL`: Focus on individual transitions

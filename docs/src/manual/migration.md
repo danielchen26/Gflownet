@@ -9,7 +9,7 @@ This guide helps you migrate from legacy GFlowNet implementations to the modern 
 2. **On-demand computation** replaces explicit DAG construction
 3. **ComponentArrays + Lux.jl** replaces older neural network libraries
 4. **Unified interface** with `create_*_gflownet()` functions
-5. **Optional backward policy** for full trajectory balance
+5. **Focus on Trajectory Balance** objective (other objectives not currently working)
 
 ### What's Removed
 - Explicit DAG construction
@@ -96,7 +96,7 @@ model = create_grid_world_gflownet(
     grid_size = 5,
     hidden_dim = 64,
     learning_rate = 0.01,
-    include_backward = false  # Optional backward policy
+    # No backward policy needed - uses Trajectory Balance only
 )
 ```
 
@@ -311,7 +311,7 @@ new_state = MyState(new_position, false)
 | Parameters | Manual handling | ComponentArrays |
 | Gradients | Manual computation | Automatic (Zygote) |
 | Partition Function | Manual updates | Assumes Z=1 |
-| Backward Policy | Not supported | Optional |
+| Backward Policy | Not supported | Not implemented |
 
 ## Performance Improvements
 

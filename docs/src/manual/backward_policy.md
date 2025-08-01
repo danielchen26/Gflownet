@@ -1,8 +1,10 @@
 # Backward Policy Implementation
 
-## Overview
+## Current Status
 
-GFlowNet.jl now supports full trajectory balance with learned backward policies, enabling more accurate credit assignment without requiring explicit DAG construction.
+**Note**: Backward policies are not currently implemented in the working version of GFlowNet.jl. The current implementation uses only forward policies with the Trajectory Balance objective.
+
+This documentation describes future planned functionality.
 
 ## Creating Models with Backward Policy
 
@@ -99,9 +101,7 @@ end
 ### Mathematical Formulation
 
 The full trajectory balance formula:
-```
-log Z(s₀) + Σ log P_F(s_{i+1}|s_i) - log R(s_T) - Σ log P_B(s_i|s_{i+1}) = 0
-```
+$$\log Z(s_0) + \sum \log P_F(s_{i+1}|s_i) - \log R(s_T) - \sum \log P_B(s_i|s_{i+1}) = 0$$
 
 ### Loss Computation
 

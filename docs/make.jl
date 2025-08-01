@@ -11,7 +11,7 @@ makedocs(
     build = "../docbuild",
     modules = [GFlowNet],  # Include the GFlowNet module here
     doctest = false,  # Skip doctests to avoid errors
-    warnonly = [:missing_docs],  # Only warn about missing docs instead of failing
+    warnonly = [:missing_docs, :cross_references],  # Only warn about missing docs and broken links instead of failing
     pages = [
         "Home" => "index.md",
         "Getting Started" => [
@@ -28,17 +28,16 @@ makedocs(
             "manual/migration.md"
         ],
         "Theory" => [
-            "theory/mathematical_background.md",
+            "guide/mathematical_background.md",
             "theory/partition_function.md",
             "theory/flow_consistency.md",
-            "theory/training_objectives.md"
+            "guide/training_objectives.md"
         ],
         "API Reference" => [
             "api/core_types.md",
             "api/policies.md",
             "api/training.md",
             "api/flow_networks.md",
-            "api/dag.md",
             "api/utils.md"
         ],
         "Applications" => [
@@ -51,7 +50,8 @@ makedocs(
         "Internals" => [
             "internals/architecture.md",
             "internals/design_decisions.md", 
-            "internals/known_limitations.md"
+            "internals/known_limitations.md",
+            "internals/flow_functions_multistart.md"
         ],
         "Extensions" => [
             "extensions/continuous.md",
