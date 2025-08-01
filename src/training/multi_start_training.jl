@@ -318,7 +318,7 @@ end
 # Helper Functions
 # =============================================================================
 
-# Use logsumexp from interface.jl instead of redefining
+# Use logsumexp from losses.jl
 using ..GFlowNet: logsumexp
 
 # Batch loss functions for multi-start models

@@ -51,19 +51,28 @@ include("core/balance.jl")
 include("core/sampling.jl")
 
 # =============================================================================
-# Training Infrastructure
+# Training Configuration - Must come first
 # =============================================================================
 
 include("training/configuration.jl")
 
-# Training objectives and loss functions (loaded after training config)
-include("core/objectives.jl")
+# =============================================================================
+# High-level Interface
+# =============================================================================
 
-# High-level interface functions
+# High-level interface functions (model creation, sampling)
 include("core/interface.jl")
 
-# Multi-start GFlowNets
+# Multi-start GFlowNets core types
 include("core/multi_start.jl")
+
+# =============================================================================
+# Training Infrastructure
+# =============================================================================
+include("training/objectives.jl")
+include("training/utils.jl")
+include("training/losses.jl")
+include("training/training.jl")
 include("training/multi_start_training.jl")
 
 # =============================================================================
