@@ -6,19 +6,23 @@ This document lists current limitations in GFlowNet.jl and planned improvements.
 
 ### 1. Flow Computation Functions
 
-**Status**: Not implemented
+**Status**: ✅ Implemented (August 2025)
 
-**Affected Functions**:
-- `flow(model, state)`
-- `compute_recursive_flow(model, state)`
-- `partition_function(model)`
-- `edge_flow(model, source, target)`
+**Implemented Functions**:
+- `flow(model, state)` - Unified interface for flow computation
+- `compute_recursive_flow(model, state)` - Recursive flow using F(s) = Σ P_F(s'|s) * F(s')
+- `partition_function(model)` - Computes Z = F(s₀)
+- `edge_flow(model, source, target)` - Edge flow F(s→s') = P_F(s'|s) * F(s)
 
-**Why**: These require explicit state enumeration or DAG construction.
+**Implementation Details**:
+- Uses on-demand computation (no explicit DAG needed)
+- Includes memoization for efficiency
+- Maintains Zygote compatibility
+- Properly handles terminal states: F(s) = R(s)
 
-**Workaround**: Use trajectory balance with Z=1 assumption.
-
-**Future Plan**: Implement flow networks for implicit flow computation.
+**Current Limitations**:
+- Performance may degrade for very deep state spaces without caching
+- DIRECT_FLOW method requires flow estimator network (not yet implemented)
 
 ### 2. Advanced Training Objectives
 

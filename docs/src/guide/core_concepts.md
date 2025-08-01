@@ -33,18 +33,23 @@ GFlowNets are based on the concept of flow networks:
 
 ### Implementation Details
 
-In this framework, flows are handled implicitly through the Trajectory Balance objective:
+Flow computation is now fully implemented with explicit functions:
 
 ```julia
-# Forward transition probability (this works)
-prob = forward_policy(model, state, action)
+# Compute flow through a state
+flow_value = flow(model, state)
 
-# Terminal state rewards drive the flow
-terminal_reward = reward(terminal_state)
+# Compute partition function
+Z = partition_function(model)
 
-# Flow computations are implicit in the loss function
-# No explicit flow(model, state) calls needed
+# Compute edge flows
+edge_flow_val = edge_flow(model, source_state, target_state)
+
+# Analyze flow conservation
+analysis = flow_analysis(model, state)
 ```
+
+For detailed API documentation, see [Flow Computation API](../api/flow_computation.md).
 
 ## Policies
 
@@ -130,21 +135,26 @@ The environment defines the problem structure through a clean interface:
 # State-action applicability
 function is_applicable(action::YourAction, state::YourState)
     # Return true if action can be applied to state
+    return true  # Example implementation
 end
 
 # State transitions
 function apply_action(action::YourAction, state::YourState)
     # Return new state after applying action
+    # Use both action and state to create new state
+    return YourState(state.field + action.delta)  # Example implementation
 end
 
 # Feature extraction for neural networks
 function state_to_features(state::YourState)
     # Return feature vector for the state
+    return Float32[state.x, state.y]  # Example using state fields
 end
 
 # Reward calculation
 function reward(state::YourState)
     # Return reward for terminal states
+    return state.is_terminal ? 1.0 : 0.0  # Example using state
 end
 ```
 

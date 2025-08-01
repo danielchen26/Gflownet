@@ -32,6 +32,9 @@ using StatsBase
 # Abstract types and interface contracts
 include("core/types.jl")
 
+# Load utilities module early as it's needed by other modules
+include("utils/utils.jl")
+
 # Graph theory and DAG operations
 include("core/graphs.jl")
 
@@ -63,11 +66,11 @@ include("core/interface.jl")
 # Utilities and Validation
 # =============================================================================
 
+# utils.jl already included earlier
 include("utils/validation.jl")
 include("utils/logging.jl")
 include("utils/visualization.jl")
 include("utils/report.jl")
-include("utils/utils.jl")
 
 # =============================================================================
 # Applications and Extensions
@@ -130,15 +133,15 @@ export safe_model_call, validate_policy_consistency
 # =============================================================================
 
 # Flow computation methods
-# export flow, compute_recursive_flow, compute_flow_estimate  # Broken - requires DAG
+export flow, compute_recursive_flow, compute_flow_estimate
 export FlowComputationMethod, RECURSIVE_FLOW, DIRECT_FLOW, MIXED_FLOW
 
 # Flow analysis and validation
-# export validate_flow_conservation, validate_flow_consistency  # Broken - requires DAG
-# export flow_analysis, partition_function, edge_flow  # Broken - requires DAG
+export validate_flow_conservation, validate_flow_consistency
+export flow_analysis, partition_function, edge_flow
 
 # Flow caching
-# export clear_flow_cache!, flow_computation_benchmark  # Broken - requires DAG
+export clear_flow_cache!, flow_computation_benchmark
 
 # =============================================================================
 # Balance Conditions - Training Mathematics

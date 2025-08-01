@@ -48,6 +48,7 @@ end
 
 ### Currently Working
 - **TRAJECTORY_BALANCE**: ✅ Fully implemented
+- **Flow Computation**: ✅ Implemented (recursive flow, memoization, edge flows)
   - Simple version: Forward policy only (assumes P_B uniform)
   - Full version: With backward policy for better credit assignment
   - Loss: (log P_F(τ) + log P_B(τ) - log R(s_T))²
@@ -125,11 +126,45 @@ Every domain must implement:
 4. `is_applicable(action, state)::Bool`
 5. `apply_action(action, state)::State` (pure function)
 
+## Flow Computation Implementation
+
+### Overview
+Flow computation is now fully implemented using on-demand computation without requiring explicit DAG construction.
+
+### Key Components
+
+1. **Recursive Flow Computation**
+   ```julia
+   F(s) = Σ_{s'} P_F(s'|s) * F(s')  # Non-terminal states
+   F(s) = R(s)                       # Terminal states
+   ```
+
+2. **Memoization System**
+   - Global cache for computed flow values
+   - Cache invalidation on parameter changes
+   - Significant performance improvement for deep state spaces
+
+3. **Partition Function**
+   - `Z = F(s₀)` - Total flow from initial state
+   - No longer hardcoded to 1.0
+   - Properly computed using recursive flow
+
+4. **Edge Flow**
+   - `F(s→s') = P_F(s'|s) * F(s)`
+   - Useful for analyzing flow distribution
+
+### Implementation Details
+- **Location**: `src/core/flows.jl`
+- **API Documentation**: [Flow Computation API](../api/flow_computation.md)
+- **Zygote Compatible**: No mutations, pure functional
+- **On-Demand**: Computes flows as needed, no pre-computation
+- **Efficient**: Memoization prevents redundant calculations
+
 ## Current Limitations
 
-1. **Training Objectives**: Only trajectory balance works; others are placeholders
-2. **Flow Functions**: Not implemented (would require state enumeration)
-3. **Multiple Initial States**: Not supported (Z=1 assumption)
+1. **Training Objectives**: Only trajectory balance works; detailed balance and flow matching require backward policy
+2. **Multiple Initial States**: Not yet supported (requires per-state Z computation)
+3. **Flow Estimator Network**: Not implemented (DIRECT_FLOW method unavailable)
 4. **GPU Acceleration**: Limited to neural network operations
 
 ## Performance Characteristics

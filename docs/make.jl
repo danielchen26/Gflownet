@@ -37,6 +37,7 @@ makedocs(
             "api/core_types.md",
             "api/policies.md",
             "api/training.md",
+            "api/flow_computation.md",
             "api/flow_networks.md",
             "api/utils.md"
         ],
