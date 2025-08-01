@@ -190,6 +190,16 @@ Tests are organized hierarchically:
 - **Positive rewards**: Mathematical requirement for GFlowNets
 - **Clean interfaces**: Use high-level `create_*_gflownet()` functions
 
+## Current Development Session
+
+**IMPORTANT**: If continuing development work, check `.claude/development_session.md` for:
+- Current development status and recently completed features
+- Active TODO list with priorities
+- Known issues and their solutions
+- Session recovery instructions
+
+Quick reference available at `.claude/quick_reference.md`.
+
 ## For Comprehensive Development Guidelines
 
 See `COMPREHENSIVE_GFLOWNET_RULES_UPDATED.md` for:
