@@ -14,24 +14,49 @@ makedocs(
     warnonly = [:missing_docs],  # Only warn about missing docs instead of failing
     pages = [
         "Home" => "index.md",
-        "Guide" => [
+        "Getting Started" => [
             "guide/getting_started.md",
-            "guide/core_concepts.md",
-            "guide/mathematical_background.md",
-            "guide/training_objectives.md"
+            "guide/core_concepts.md", 
+            "guide/examples.md"
+        ],
+        "Manual" => [
+            "manual/overview.md",
+            "manual/training_system.md",
+            "manual/objectives.md",
+            "manual/backward_policy.md",
+            "manual/developer_guide.md",
+            "manual/migration.md"
+        ],
+        "Theory" => [
+            "theory/mathematical_background.md",
+            "theory/partition_function.md",
+            "theory/flow_consistency.md",
+            "theory/training_objectives.md"
         ],
         "API Reference" => [
             "api/core_types.md",
-            "api/flow_networks.md",
-            "api/directed_acyclic_graph.md",
             "api/policies.md",
-            "api/training.md"
+            "api/training.md",
+            "api/flow_networks.md",
+            "api/dag.md",
+            "api/utils.md"
         ],
         "Applications" => [
             "applications/grid_world.md",
+            "applications/supply_chain.md",
             "applications/molecular_design.md",
             "applications/causal_discovery.md",
             "applications/active_learning.md"
+        ],
+        "Internals" => [
+            "internals/architecture.md",
+            "internals/design_decisions.md", 
+            "internals/known_limitations.md"
+        ],
+        "Extensions" => [
+            "extensions/continuous.md",
+            "extensions/information.md",
+            "extensions/non_acyclic.md"
         ]
     ]
 )
