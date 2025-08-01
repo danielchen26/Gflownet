@@ -62,6 +62,10 @@ include("core/objectives.jl")
 # High-level interface functions
 include("core/interface.jl")
 
+# Multi-start GFlowNets
+include("core/multi_start.jl")
+include("training/multi_start_training.jl")
+
 # =============================================================================
 # Utilities and Validation
 # =============================================================================
@@ -307,6 +311,10 @@ export NonAcyclicGFlowNet, cycle_breaking_sampling
 # High-level model creation (following the rules for clean interface)
 export create_forward_policy, create_backward_policy, create_flow_estimator
 export create_gflownet, to_component_array
+
+# Multi-start GFlowNets
+export MultiStartGFlowNetModel, create_multi_start_gflownet
+export sample_initial_state, get_initial_state_distribution
 
 # =============================================================================
 # Legacy Compatibility and Aliases
