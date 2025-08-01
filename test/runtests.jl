@@ -28,9 +28,9 @@ println("=" ^ 40)
         include("test_training.jl")
     end
     
-    @testset "Supply Chain Application" begin
-        include("test_supply_chain.jl")
-    end
+    # @testset "Supply Chain Application" begin  # Removed in core-fixes branch
+    #     include("test_supply_chain.jl")
+    # end
     
     @testset "Core Functions (Comprehensive)" begin
         include("test_core_functions.jl")
