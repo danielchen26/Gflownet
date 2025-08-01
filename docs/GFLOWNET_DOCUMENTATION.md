@@ -29,8 +29,11 @@ julia --project -e 'using Pkg; Pkg.instantiate()'
 ```julia
 using GFlowNet
 
-# Create your domain model (see examples for details)
-model = create_grid_world_model()
+# Create your domain model with optional backward policy
+model = create_grid_world_gflownet(
+    grid_size=5,
+    include_backward=false  # Set to true for full trajectory balance
+)
 
 # Modern training configuration
 config = TrainingConfig(
@@ -96,16 +99,20 @@ config = create_modern_training_config(:molecular_design) # Multi-scale
 objective = TRAJECTORY_BALANCE
 ```
 **Use for**: Simple deterministic paths where each state has unique parent
-**Formulation**: `Z * P_F(τ) = R(s_τ)`
+**Formulation**: 
+- Without backward policy: `Z * P_F(τ) = R(s_τ)` (assumes P_B = 1)
+- With backward policy: `Z * P_F(τ) = R(s_τ) * P_B(τ)`
 **Best for**: Grid worlds, simple sequential construction
+**Note**: Now supports optional backward policy with `include_backward=true`
 
 ### **2. General Trajectory Balance (Complete)**
 ```julia
-objective = GENERAL_TRAJECTORY_BALANCE
+objective = GENERAL_TRAJECTORY_BALANCE  # Currently not implemented
 ```
 **Use for**: Non-deterministic paths with multiple ways to reach states
 **Formulation**: `Z * P_F(τ) = R(s_τ) * P_B(τ)`
 **Best for**: Graph generation, causal discovery
+**Note**: Use TRAJECTORY_BALANCE with `include_backward=true` for similar functionality
 
 ### **3. Sub-Trajectory Balance (Credit Assignment)**
 ```julia
@@ -157,9 +164,10 @@ flow_mode = EDGE_LEVEL  # or STATE_LEVEL or MIXED_LEVEL
 ```julia
 partition_function_method = SIMPLE_ESTIMATION
 ```
-**Approach**: Sum of all terminal rewards
-**Best for**: Enumerable terminal states
-**When to use**: Small, well-defined state spaces
+**Approach**: Currently assumes Z = 1 for simplicity
+**Best for**: Fixed initial state problems
+**When to use**: Most practical applications
+**Note**: Actual Z computation requires fixing flow functions
 
 ### **2. Learnable Parameter**
 ```julia
@@ -184,6 +192,65 @@ partition_function_method = ADAPTIVE_ESTIMATION
 **Approach**: Automatic method switching during training
 **Best for**: Unknown space characteristics
 **When to use**: When unsure about optimal Z estimation method
+
+---
+
+## 🔄 **Backward Policy Implementation**
+
+### **Overview**
+GFlowNet.jl now supports full trajectory balance with learned backward policies, enabling more accurate credit assignment without requiring explicit DAG construction.
+
+### **Creating Models with Backward Policy**
+```julia
+# Enable backward policy during model creation
+model = create_gflownet(
+    initial_state,
+    all_actions;
+    state_dim = state_dim,
+    hidden_dim = 64,
+    include_backward = true  # Enable backward policy
+)
+```
+
+### **How It Works**
+The backward policy uses a **joint state representation** approach:
+- Takes both source and target state features as input
+- Outputs P_B(source|target) directly
+- No need to enumerate all possible parent states
+
+### **Implementation Details**
+```julia
+# The backward policy network architecture
+function create_backward_policy(state_dim::Int, hidden_dim::Int, rng)
+    input_dim = 2 * state_dim  # Concatenated source + target features
+    
+    backward_net = Chain(
+        Dense(input_dim => hidden_dim, tanh),
+        Dense(hidden_dim => hidden_dim, tanh),
+        Dense(hidden_dim => 1)  # Single probability logit
+    )
+    
+    ps, st = Lux.setup(rng, backward_net)
+    return BackwardPolicy(backward_net), ps, st
+end
+```
+
+### **Trajectory Balance with Backward Policy**
+The full trajectory balance formula:
+```
+log Z(s₀) + Σ log P_F(s_{i+1}|s_i) - log R(s_T) - Σ log P_B(s_i|s_{i+1}) = 0
+```
+
+**Key Features:**
+- **Automatic**: Backward probabilities computed automatically during training
+- **Optional**: Works with or without backward policy
+- **Efficient**: No DAG enumeration required
+- **Compatible**: Works with all domains
+
+### **When to Use Backward Policy**
+- **Recommended for**: Non-deterministic environments, complex credit assignment
+- **Optional for**: Simple deterministic paths (like basic grid worlds)
+- **Performance**: Slightly slower training, but often better convergence
 
 ---
 
@@ -467,23 +534,23 @@ TrainingConfig(; objective, partition_function_method, ...)
 create_modern_training_config(problem_type::Symbol)
 
 # Model creation utilities
-create_grid_world_model()
-create_dag(initial_state, terminal_states, terminal_sink, actions)
+create_gflownet(initial_state, all_actions; state_dim, hidden_dim, learning_rate, include_backward=false)
+create_grid_world_gflownet(; grid_size=5, hidden_dim=64, include_backward=false)
+create_backward_policy(state_dim::Int, hidden_dim::Int, rng)
 ```
 
 ### **Training Objectives**
 ```julia
 # Available objectives
-TRAJECTORY_BALANCE
-GENERAL_TRAJECTORY_BALANCE  
-SUB_TRAJECTORY_BALANCE
-HIERARCHICAL_SUB_TB
-ADAPTIVE_SUB_TB
-FLOW_CONSISTENCY
+TRAJECTORY_BALANCE          # Works with or without backward policy
+GENERAL_TRAJECTORY_BALANCE  # Currently not implemented
+SUB_TRAJECTORY_BALANCE      # Advanced credit assignment
+HIERARCHICAL_SUB_TB        # Multi-scale structures
+ADAPTIVE_SUB_TB            # Intelligent sampling
+FLOW_CONSISTENCY           # Local balance constraints
 
 # Objective-specific functions
-trajectory_balance_loss(model, trajectories)
-general_trajectory_balance_loss(model, trajectories)
+trajectory_balance_loss(model, trajectories)  # Now supports backward policy
 sub_trajectory_balance_loss(model, trajectories, config)
 flow_consistency_loss(model, trajectories, mode)
 ```
@@ -491,22 +558,41 @@ flow_consistency_loss(model, trajectories, mode)
 ### **Partition Function Methods**
 ```julia
 # Available methods
-SIMPLE_ESTIMATION
-LEARNABLE_PARAMETER
-SAMPLING_BASED
-ADAPTIVE_ESTIMATION
+SIMPLE_ESTIMATION      # Currently assumes Z=1 for simplicity
+LEARNABLE_PARAMETER    # Gradient-based optimization
+SAMPLING_BASED        # Policy sampling approach
+ADAPTIVE_ESTIMATION   # Automatic method switching
 
-# Z estimation functions
-estimate_partition_function_simple(model)
+# Z estimation functions (not currently used in trajectory balance)
+estimate_partition_function_simple(model)  # Returns 1.0
 update_learnable_partition_function!(model, gradients)
 estimate_partition_function_sampling(model, n_samples)
 ```
 
-### **Legacy Functions (Deprecated)**
+### **Policy Functions**
 ```julia
-# Still available but use modern interface instead
-compute_loss_and_grad(model, trajectories)  # Use train_gflownet()
-apply_optimizer!(model, gradients)          # Use train_gflownet()
+# Forward policy
+forward_transition_probability(model, source_state, target_state)
+sample_action(model, state)  # Sample from P_F(a|s)
+
+# Backward policy (when include_backward=true)
+backward_transition_probability(model, target_state, source_state)
+compute_backward_probability(policy, target_state, source_state, params, states, actions)
+
+# Trajectory operations
+sample_trajectory(model; max_steps=1000)
+compute_trajectory_log_prob(model, trajectory)  # Forward probability
+```
+
+### **Disabled Functions (DAG-Related)**
+```julia
+# These functions are currently disabled due to missing DAG implementation:
+# - flow(model, state)
+# - partition_function(model)
+# - detailed_balance_loss(model, trajectories)
+# - flow_matching_objective(model, trajectories)
+# - validate_flow_conservation(model)
+# Use TRAJECTORY_BALANCE objective instead
 ```
 
 ---

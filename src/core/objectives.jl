@@ -384,7 +384,7 @@ function policy_entropy_loss(model::GFlowNetModel, trajectories::Vector{Trajecto
             try
                 # Get action probabilities
                 probs = forward_action_probabilities(
-                    model.forward_policy, state, model.dag.actions,
+                    model.forward_policy, state, model.all_actions,
                     model.parameters.forward, model.states.forward
                 )
 
@@ -500,9 +500,14 @@ function compute_gradients(objective_fn, model::GFlowNetModel)
     gradients = Zygote.gradient(model.parameters) do params
         # Create temporary model with new parameters for gradient computation
         temp_model = GFlowNetModel(
-            model.dag, model.forward_policy, params, model.states;
-            backward_policy=model.backward_policy,
-            flow_estimator=model.flow_estimator
+            initial_state = model.initial_state,
+            all_actions = model.all_actions,
+            forward_policy = model.forward_policy,
+            backward_policy = model.backward_policy,
+            flow_estimator = model.flow_estimator,
+            parameters = params,
+            optimizer = model.optimizer,
+            states = model.states
         )
         objective_fn(temp_model)
     end
