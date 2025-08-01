@@ -25,6 +25,7 @@ the fundamental flow conservation equation F(s) = Σ_{s'} P_F(s'|s) * F(s'):
     DETAILED_BALANCE
     FLOW_MATCHING
     SUB_TRAJECTORY_BALANCE
+    DIRECT_FLOW_OBJECTIVE
     COMBINED_OBJECTIVES
 end
 

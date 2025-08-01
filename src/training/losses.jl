@@ -5,14 +5,14 @@ using Zygote
 using Statistics
 
 using ..GFlowNet: GFlowNetModel, Trajectory, TrainingConfig, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE
 using ..GFlowNet: AbstractState, AbstractAction
 using ..GFlowNet: state_to_features, is_terminal_state, reward, is_applicable, apply_action
 using ..GFlowNet: get_applicable_actions, is_valid_trajectory
 using ..GFlowNet: forward_action_probabilities, compute_backward_probability
 using ..GFlowNet: forward_transition_probability, backward_transition_probability
-using ..GFlowNet: flow, flow_estimate
-using ..GFlowNet: sub_trajectory_balance_loss_batch
+using ..GFlowNet: flow, flow_estimate, compute_flow_estimate
+using ..GFlowNet: sub_trajectory_balance_loss_batch, direct_flow_loss_batch
 
 # =============================================================================
 # Loss Computation - Mathematically Correct Implementations
@@ -242,6 +242,17 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         
         # Compute sub-trajectory balance loss
         return sub_trajectory_balance_loss_batch(model, trajectories; sub_length=sub_length)
+        
+    elseif config.objective == DIRECT_FLOW_OBJECTIVE
+        # Filter valid trajectories
+        valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
+        
+        if isempty(valid_trajectories)
+            return 0.0
+        end
+        
+        # Compute direct flow loss
+        return direct_flow_loss_batch(model, valid_trajectories)
         
     else
         throw(ArgumentError("Unsupported training objective: $(config.objective)"))

@@ -759,6 +759,138 @@ function check_balance_condition_compatibility(model::GFlowNetModel, condition::
 end
 
 # =============================================================================
+# Direct Flow Loss - Mathematical Foundation
+# =============================================================================
+
+"""
+    compute_log_forward_probability(model::GFlowNetModel, trajectory::Trajectory)::Float64
+
+Compute log forward probability of a trajectory.
+
+# Mathematical Foundation
+Computes log P_F(τ) = Σ_{t=0}^{T-1} log P_F(s_{t+1}|s_t)
+
+# Arguments
+- `model::GFlowNetModel`: GFlowNet model
+- `trajectory::Trajectory`: Trajectory to compute probability for
+
+# Returns
+- `Float64`: Log forward probability
+"""
+function compute_log_forward_probability(model::GFlowNetModel, trajectory::Trajectory)::Float64
+    if length(trajectory.states) < 2
+        return 0.0
+    end
+    
+    log_prob_sum = 0.0
+    
+    for i in 1:(length(trajectory.states)-1)
+        source_state = trajectory.states[i]
+        target_state = trajectory.states[i+1]
+        
+        # Compute transition probability
+        trans_prob = forward_transition_probability(model, source_state, target_state)
+        
+        if trans_prob <= 0
+            @warn "Non-positive transition probability: $trans_prob"
+            return -Inf
+        end
+        
+        log_prob_sum += log(trans_prob)
+    end
+    
+    return log_prob_sum
+end
+
+"""
+    direct_flow_loss(model::GFlowNetModel, trajectory::Trajectory)::Float64
+
+Compute direct flow loss using neural network flow estimation.
+
+# Mathematical Foundation
+Instead of computing flows recursively, train a neural network Z(s) to directly
+estimate F(s). The loss ensures consistency with trajectory rewards:
+
+L_DF(τ) = (log ∏ P_F(s_t+1|s_t) + log Z(s_0) - log R(s_T))²
+
+This is similar to trajectory balance but uses Z(s) from the flow estimator
+network instead of a learned scalar Z.
+
+# Arguments
+- `model::GFlowNetModel`: Model with flow estimator
+- `trajectory::Trajectory`: Single trajectory τ = (s_0, s_1, ..., s_T)
+
+# Returns
+- `Float64`: Direct flow loss
+
+# Requirements
+- Model must have flow estimator: !isnothing(model.flow_estimator)
+"""
+function direct_flow_loss(model::GFlowNetModel, trajectory::Trajectory)::Float64
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError("Model must have flow estimator for DIRECT_FLOW_OBJECTIVE"))
+    end
+    
+    # Compute log forward probability of trajectory
+    log_pf = compute_log_forward_probability(model, trajectory)
+    
+    # Get initial state flow estimate from neural network
+    initial_state = trajectory.states[1]
+    initial_flow_estimate = Zygote.@ignore compute_flow_estimate(model, initial_state)
+    log_z = log(max(initial_flow_estimate, 1e-8))
+    
+    # Get terminal reward
+    terminal_state = trajectory.states[end]
+    if !is_terminal_state(terminal_state)
+        @warn "Trajectory does not end in terminal state for direct flow loss"
+        return 0.0
+    end
+    
+    reward_value = reward(terminal_state)
+    if reward_value <= 0
+        @warn "Non-positive reward for terminal state: $reward_value"
+        reward_value = 1e-8
+    end
+    log_reward = log(reward_value)
+    
+    # Direct flow loss: (log P_F(τ) + log Z(s_0) - log R(s_T))²
+    return (log_pf + log_z - log_reward)^2
+end
+
+"""
+    direct_flow_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory})::Float64
+
+Compute average direct flow loss over a batch of trajectories.
+
+# Arguments
+- `model::GFlowNetModel`: Model with flow estimator
+- `trajectories::Vector{Trajectory}`: Batch of trajectories
+
+# Returns
+- `Float64`: Average direct flow loss
+"""
+function direct_flow_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory})::Float64
+    if isempty(trajectories)
+        return 0.0
+    end
+    
+    total_loss = 0.0
+    valid_trajectories = 0
+    
+    for trajectory in trajectories
+        try
+            loss = direct_flow_loss(model, trajectory)
+            total_loss += loss
+            valid_trajectories += 1
+        catch e
+            @debug "Failed to compute direct flow loss for trajectory: $e"
+        end
+    end
+    
+    return valid_trajectories > 0 ? total_loss / valid_trajectories : 0.0
+end
+
+# =============================================================================
 # Display Methods
 # =============================================================================
 

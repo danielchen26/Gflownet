@@ -217,7 +217,7 @@ export compute_gradients, clip_gradients!
 
 # Training configuration
 export TrainingConfig, TrainingState, TrainingMetrics, TrainingHistory
-export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, COMBINED_OBJECTIVES
+export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES
 export PartitionFunctionMethod, OptimizationMethod
 export SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, LEARNABLE_ESTIMATION, ADAPTIVE_ESTIMATION
 export ADAM, RMSPROP, SGD, ADAMW

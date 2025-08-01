@@ -30,7 +30,8 @@ Create a GFlowNet model using proper Lux+ComponentArray+Zygote patterns.
 - `state_dim`: Dimension of state features
 - `hidden_dim=64`: Hidden layer size for neural networks
 - `learning_rate=0.01`: Learning rate for optimizer
-- `include_backward=false`: Whether to include backward policy for full trajectory balance
+- `include_backward=false`: Whether to include backward policy for DETAILED_BALANCE
+- `include_flow_estimator=false`: Whether to include flow estimator for DIRECT_FLOW/FLOW_MATCHING
 - `partition_function_method=SIMPLE_ESTIMATION`: How to handle partition function Z:
   - `SIMPLE_ESTIMATION`: Z = 1 (default, fixed)
   - `LEARNABLE_ESTIMATION`: Learn Z as trainable parameter (recommended for complex environments)
@@ -66,6 +67,7 @@ function create_gflownet(
     hidden_dim::Int = 64,
     learning_rate::Float64 = 0.01,
     include_backward::Bool = false,
+    include_flow_estimator::Bool = false,
     partition_function_method::PartitionFunctionMethod = SIMPLE_ESTIMATION,
     rng = Random.default_rng()
 )
@@ -73,7 +75,15 @@ function create_gflownet(
 
     # Create neural networks using official Lux patterns
     forward_policy, forward_ps, forward_st = create_forward_policy(state_dim, hidden_dim, n_actions, rng)
-    flow_estimator, flow_ps, flow_st = create_flow_estimator(state_dim, hidden_dim, rng)
+    
+    # Optionally create flow estimator
+    if include_flow_estimator
+        flow_estimator, flow_ps, flow_st = create_flow_estimator(state_dim, hidden_dim, rng)
+    else
+        flow_estimator = nothing
+        flow_ps = nothing
+        flow_st = nothing
+    end
     
     # Initialize partition function parameter based on method
     log_partition_function = if partition_function_method == LEARNABLE_ESTIMATION
@@ -82,17 +92,17 @@ function create_gflownet(
         nothing  # For SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, etc.
     end
 
-    # Optionally create backward policy
-    if include_backward
+    # Build parameters and states based on which components are included
+    if include_backward && include_flow_estimator
+        # Both backward policy and flow estimator
         backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
         
-        # Organize parameters with backward policy and optional Z parameter
         parameters = if partition_function_method == LEARNABLE_ESTIMATION
             ComponentArray(
                 forward = forward_ps,
                 backward = backward_ps,
                 flow = flow_ps,
-                log_Z = log_partition_function  # Add Z as learnable parameter
+                log_Z = log_partition_function
             )
         else
             ComponentArray(
@@ -102,17 +112,36 @@ function create_gflownet(
             )
         end
         
-        # Network states
         states = (forward = forward_st, backward = backward_st, flow = flow_st)
-    else
+        
+    elseif include_backward && !include_flow_estimator
+        # Only backward policy
+        backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
+        
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps,
+                log_Z = log_partition_function
+            )
+        else
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps
+            )
+        end
+        
+        states = (forward = forward_st, backward = backward_st)
+        
+    elseif !include_backward && include_flow_estimator
+        # Only flow estimator
         backward_policy = nothing
         
-        # Organize parameters without backward policy and optional Z parameter  
         parameters = if partition_function_method == LEARNABLE_ESTIMATION
             ComponentArray(
                 forward = forward_ps,
                 flow = flow_ps,
-                log_Z = log_partition_function  # Add Z as learnable parameter
+                log_Z = log_partition_function
             )
         else
             ComponentArray(
@@ -121,8 +150,24 @@ function create_gflownet(
             )
         end
         
-        # Network states
         states = (forward = forward_st, flow = flow_st)
+        
+    else
+        # Neither backward policy nor flow estimator
+        backward_policy = nothing
+        
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                log_Z = log_partition_function
+            )
+        else
+            ComponentArray(
+                forward = forward_ps
+            )
+        end
+        
+        states = (forward = forward_st,)
     end
 
     # Setup optimizer (official Lux pattern)

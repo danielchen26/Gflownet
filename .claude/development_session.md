@@ -57,6 +57,16 @@ Last Updated: January 2025
    - Key insight: Provides O(T²) learning signals vs O(T) for regular TB
    - Benefits: Better credit assignment, lower variance, faster convergence
 
+9. **DIRECT_FLOW_OBJECTIVE Implementation** ✅
+   - Added flow estimator network support to `create_gflownet` with `include_flow_estimator` parameter
+   - Implemented `direct_flow_loss` in `src/core/balance.jl`
+   - Added `compute_log_forward_probability` helper function
+   - Integrated with training system in `src/training/losses.jl`
+   - Renamed from DIRECT_FLOW to DIRECT_FLOW_OBJECTIVE to avoid conflict with FlowComputationMethod enum
+   - Created tests in `test/objectives/direct_flow/`
+   - Created example in `examples/core_features/direct_flow/`
+   - Key insight: Uses neural network Z(s) to directly estimate flows instead of recursive computation
+
 ### Current Architecture Understanding
 
 #### Key Design Patterns
