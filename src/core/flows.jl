@@ -38,7 +38,9 @@ Caches computed flow values F(s) to avoid recomputation since:
 - Recursive computation can be expensive for deep DAGs
 - Many training objectives require repeated flow queries
 """
-const FLOW_CACHE = Dict{Tuple{Any,Any}, Float64}()
+# Use a more specific type for the cache to avoid type instability
+# Use a Ref to allow mutation of the cache container itself
+const FLOW_CACHE = Ref(Dict{Tuple{UInt64,Any}, Float64}())
 
 """
     clear_flow_cache!()
@@ -49,7 +51,7 @@ Clear the global flow cache.
 Should be called when model parameters change to ensure cache consistency.
 """
 function clear_flow_cache!()
-    empty!(FLOW_CACHE)
+    empty!(FLOW_CACHE[])
     return nothing
 end
 
@@ -203,17 +205,29 @@ flow values for states that have already been processed.
 - Maintains mathematical correctness while improving efficiency
 """
 function compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
-    # Check cache first
-    cache_key = get_cache_key(model, state)
-    if haskey(FLOW_CACHE, cache_key)
-        return FLOW_CACHE[cache_key]
+    # All cache operations are wrapped in Zygote.@ignore to avoid mutation issues
+    cache_key = Zygote.@ignore get_cache_key(model, state)
+    
+    # Check cache (non-differentiable)
+    cached_value = Zygote.@ignore begin
+        if haskey(FLOW_CACHE[], cache_key)
+            FLOW_CACHE[][cache_key]
+        else
+            nothing
+        end
+    end
+    
+    if !isnothing(cached_value)
+        return cached_value
     end
 
-    # Compute flow value
+    # Compute flow value (this is differentiable)
     flow_value = compute_recursive_flow(model, state)
 
-    # Cache result
-    FLOW_CACHE[cache_key] = flow_value
+    # Cache result (non-differentiable)
+    Zygote.@ignore begin
+        FLOW_CACHE[][cache_key] = flow_value
+    end
 
     return flow_value
 end

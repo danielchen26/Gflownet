@@ -454,7 +454,11 @@ Perform single training step using official Lux+Zygote pattern.
 function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, config::TrainingConfig)
 
     # Define loss function following official Lux pattern
-    loss_function = ps -> compute_trajectory_loss(model, trajectories, ps, config)
+    loss_function = ps -> begin
+        # Clear flow cache before gradient computation to avoid mutation issues
+        Zygote.@ignore clear_flow_cache!()
+        compute_trajectory_loss(model, trajectories, ps, config)
+    end
 
     # Compute gradients using official Zygote pattern
     loss_val, grads = Zygote.withgradient(loss_function, model.parameters)
@@ -489,31 +493,148 @@ end
 """
     compute_trajectory_loss(model, trajectories, params, config)
 
-Compute trajectory balance loss using Zygote-safe operations.
+Compute loss based on the specified training objective.
 
-FIXED: Now implements correct trajectory balance: P_F(τ) ∝ R(s_T)
+Supports:
+- TRAJECTORY_BALANCE: P_F(τ) ∝ R(s_T)
+- DETAILED_BALANCE: P_F(s→s') F(s) = P_B(s'→s) F(s')
 """
 function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Trajectory},
                                 params, config::TrainingConfig)
 
-    # Filter valid trajectories (discrete validation - non-differentiable)
-    valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
+    if config.objective == TRAJECTORY_BALANCE
+        # Filter valid trajectories (discrete validation - non-differentiable)
+        valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
 
-    if isempty(valid_trajectories)
-        return 0.0
+        if isempty(valid_trajectories)
+            return 0.0
+        end
+
+        # Compute losses using Zygote-safe operations
+        losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
+
+        # Filter out infinite losses
+        finite_losses = filter(!isinf, losses)
+
+        if isempty(finite_losses)
+            return Inf
+        end
+
+        return mean(finite_losses)
+        
+    elseif config.objective == DETAILED_BALANCE
+        # For detailed balance, we need pairs of states
+        # Extract state pairs from trajectories (done outside gradient computation)
+        state_pairs = Zygote.@ignore begin
+            pairs = Tuple{AbstractState, AbstractState}[]
+            
+            for traj in trajectories
+                if !is_valid_trajectory(traj)
+                    continue
+                end
+                
+                # Extract consecutive state pairs from trajectory
+                for i in 1:(length(traj.states)-1)
+                    push!(pairs, (traj.states[i], traj.states[i+1]))
+                end
+            end
+            
+            pairs
+        end
+        
+        if isempty(state_pairs)
+            return 0.0
+        end
+        
+        # Compute detailed balance loss for each pair using array comprehension (Zygote-safe)
+        # Filter out invalid transitions using try-catch outside gradient computation
+        valid_pairs = Zygote.@ignore begin
+            valid = Tuple{AbstractState, AbstractState}[]
+            for (source, target) in state_pairs
+                # Check if transition is valid
+                applicable_actions = get_applicable_actions(source, model.all_actions)
+                can_transition = false
+                for action in applicable_actions
+                    if apply_action(action, source) == target
+                        can_transition = true
+                        break
+                    end
+                end
+                if can_transition && !is_terminal_state(source)
+                    push!(valid, (source, target))
+                end
+            end
+            valid
+        end
+        
+        if isempty(valid_pairs)
+            return 0.0
+        end
+        
+        # Now compute losses only for valid pairs using array comprehension
+        # We need to compute the detailed balance loss with the current parameters
+        losses = [
+            begin
+                source, target = pair
+                
+                # Compute probabilities with current parameters
+                # Forward probability
+                applicable_actions = get_applicable_actions(source, model.all_actions)
+                valid_actions = [action for action in applicable_actions 
+                               if apply_action(action, source) == target]
+                
+                if isempty(valid_actions)
+                    Inf  # Skip this pair
+                else
+                    # Get forward probabilities
+                    probs = forward_action_probabilities(
+                        model.forward_policy, source, model.all_actions,
+                        params.forward, model.states.forward
+                    )
+                    
+                    forward_prob = 0.0
+                    for (i, action) in enumerate(model.all_actions)
+                        if action in valid_actions
+                            forward_prob += probs[i]
+                        end
+                    end
+                    
+                    # Backward probability
+                    backward_prob = if isnothing(model.backward_policy)
+                        1.0
+                    else
+                        compute_backward_probability(
+                            model.backward_policy, target, source,
+                            params.backward, model.states.backward,
+                            model.all_actions
+                        )
+                    end
+                    
+                    # Compute flows in a non-differentiable way to avoid cache issues
+                    source_flow = Zygote.@ignore flow(model, source)
+                    target_flow = Zygote.@ignore flow(model, target)
+                    
+                    # Compute detailed balance loss
+                    left_side = log(max(forward_prob, 1e-8)) + log(max(source_flow, 1e-8))
+                    right_side = log(max(backward_prob, 1e-8)) + log(max(target_flow, 1e-8))
+                    (left_side - right_side)^2
+                end
+            end
+            for pair in valid_pairs
+        ]
+        
+        # Filter out infinite losses
+        finite_losses = filter(!isinf, losses)
+        
+        if isempty(finite_losses)
+            return Inf
+        end
+        
+        return mean(finite_losses)
+        
+    else
+        throw(ArgumentError("Unsupported training objective: $(config.objective)"))
     end
-
-    # Compute losses using Zygote-safe operations
-    losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
-
-    # Filter out infinite losses
-    finite_losses = filter(!isinf, losses)
-
-    if isempty(finite_losses)
-        return Inf
-    end
-
-    return mean(finite_losses)
 end
 
 """

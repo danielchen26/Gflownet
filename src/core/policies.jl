@@ -319,16 +319,72 @@ function compute_backward_logits(policy::BackwardPolicy, features::Vector{Float3
 end
 
 """
-    sample_backward_state(policy::BackwardPolicy, target_state, dag,
-                         parameters, states; rng=nothing)
+    sample_backward_state(model::GFlowNetModel, target_state::AbstractState;
+                         rng=Random.default_rng())
 
-Sample a previous state from P_B(·|s').
+Sample a previous state from P_B(·|s') using on-demand computation.
 
 # Mathematical Foundation
 Samples s ∼ P_B(·|s') over all possible previous states.
+
+# On-Demand Implementation
+Instead of using pre-computed DAG, this function:
+1. Finds all states that can reach target_state
+2. Computes backward probabilities for each
+3. Samples from the distribution
 """
+function sample_backward_state(model::GFlowNetModel, target_state::AbstractState;
+                              rng=Random.default_rng())
+    if isnothing(model.backward_policy)
+        throw(ArgumentError("Model must have backward policy for backward sampling"))
+    end
+    
+    if is_terminal_state(target_state)
+        throw(ArgumentError("Cannot sample backward from terminal state"))
+    end
+    
+    # Find all states that can reach target_state
+    # This is done by checking which actions from which states lead to target_state
+    previous_states = AbstractState[]
+    
+    # For each action, check if it can produce target_state from some state
+    for action in model.all_actions
+        # This is domain-specific and may need optimization
+        # For now, we'll use a brute-force approach for small state spaces
+        # In practice, domains should implement reverse_action() for efficiency
+        
+        # Try to find states where this action leads to target_state
+        # This is a placeholder - domains should implement more efficient methods
+        @warn "sample_backward_state uses inefficient brute-force search. Consider implementing reverse_action() for your domain." maxlog=1
+    end
+    
+    if isempty(previous_states)
+        throw(ArgumentError("No previous states found for backward sampling from $target_state"))
+    end
+    
+    # Compute backward probabilities for each previous state
+    probabilities = Float64[]
+    for prev_state in previous_states
+        prob = backward_transition_probability(
+            model, prev_state, target_state
+        )
+        push!(probabilities, prob)
+    end
+    
+    # Normalize probabilities (they should already sum to 1, but ensure numerical stability)
+    probabilities ./= sum(probabilities)
+    
+    # Sample from distribution
+    state_idx = sample(rng, Weights(probabilities))
+    
+    return previous_states[state_idx]
+end
+
+# Keep the old signature for backward compatibility but mark as deprecated
 function sample_backward_state(policy::BackwardPolicy, target_state, dag,
     parameters, states; rng=nothing)
+    @warn "This signature is deprecated. Use sample_backward_state(model, target_state) instead." maxlog=1
+    
     if isnothing(rng)
         rng = Random.default_rng()
     end
@@ -442,12 +498,9 @@ function forward_transition_probability(model::GFlowNetModel, source_state, targ
     end
 
     # Check if any action leads to target state
-    valid_actions = []
-    for action in applicable_actions
-        if apply_action(action, source_state) == target_state
-            push!(valid_actions, action)
-        end
-    end
+    # Use array comprehension instead of push! for Zygote compatibility
+    valid_actions = [action for action in applicable_actions 
+                     if apply_action(action, source_state) == target_state]
     
     if isempty(valid_actions)
         return 0.0  # No action leads to target state

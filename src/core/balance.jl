@@ -284,12 +284,19 @@ function detailed_balance_loss(model::GFlowNetModel, source_state, target_state)
         backward_prob = 1e-8
     end
 
-    # For now, detailed balance is not fully implemented due to missing flow computation
-    # This would require either:
-    # 1. Implementing recursive flow computation without DAG
-    # 2. Using a flow estimator network
-    # TODO: Implement proper flow computation for detailed balance
-    throw(ArgumentError("Detailed balance loss is not currently implemented - missing flow computation. Use TRAJECTORY_BALANCE instead."))
+    # Compute flows using our flow computation functions
+    source_flow = flow(model, source_state)
+    target_flow = flow(model, target_state)
+    
+    # Ensure flows are positive
+    if source_flow <= 0
+        @warn "Non-positive source flow: $source_flow"
+        source_flow = 1e-8
+    end
+    if target_flow <= 0
+        @warn "Non-positive target flow: $target_flow"
+        target_flow = 1e-8
+    end
 
     # Detailed balance equation in log space:
     # log(P_F(s'|s)) + log(F(s)) = log(P_B(s|s')) + log(F(s'))
