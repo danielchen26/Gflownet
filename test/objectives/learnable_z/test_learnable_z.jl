@@ -6,6 +6,7 @@ using Random
 using Statistics
 using ComponentArrays
 using GFlowNet
+using GFlowNet: compute_trajectory_loss, compute_single_trajectory_loss  # Import from training/losses.jl
 
 # Set random seed for reproducible tests
 Random.seed!(42)

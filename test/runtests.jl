@@ -1,17 +1,28 @@
 # test/runtests.jl
 # Main test runner for GFlowNet.jl
+# Updated after training reorganization (January 2025)
 
 using Test
+using Dates
 
 println("🧪 Running GFlowNet.jl Test Suite")
-println("=" ^ 40)
+println("Started at: $(now())")
+println("=" ^ 60)
 
 # Define test groups with their paths
+# Order matters: core functionality first, then higher-level features
 test_groups = [
-    ("Core Functions", [
-        "core/test_core_functions.jl",
-        "core/test_core_interface.jl",
+    ("Core Utilities", [
         "core/test_utilities.jl"
+    ]),
+    ("Neural Networks", [
+        "core/neural_networks/test_neural_networks.jl"
+    ]),
+    ("Core Interface", [
+        "core/test_core_interface.jl"
+    ]),
+    ("Core Functions", [
+        "core/test_core_functions.jl"
     ]),
     ("Flow Computation", [
         "core/flow_computation/test_flow_functions.jl"
@@ -19,44 +30,103 @@ test_groups = [
     ("Policies", [
         "core/policies/test_backward_policy.jl"
     ]),
-    ("Neural Networks", [
-        "core/neural_networks/test_neural_networks.jl"
+    ("Training Infrastructure", [
+        "integration/test_training.jl"
     ]),
-    ("Detailed Balance Core", [
+    ("Training Reorganization", [
+        "reorganization/test_training_reorganization.jl"
+    ]),
+    ("Detailed Balance", [
         "core/detailed_balance/test_detailed_balance.jl",
         "core/detailed_balance/test_detailed_balance_comprehensive.jl",
-        "core/detailed_balance/test_detailed_balance_summary.jl"
+        "core/detailed_balance/test_detailed_balance_summary.jl",
+        "objectives/detailed_balance/test_training.jl"
     ]),
-    ("Training Objectives", [
-        "objectives/detailed_balance/test_training.jl",
+    ("Flow Matching", [
+        "objectives/flow_matching/test_flow_matching.jl",
+        "objectives/flow_matching/test_flow_matching_comprehensive.jl"
+    ]),
+    ("Learnable Z", [
         "objectives/learnable_z/test_learnable_z.jl",
         "objectives/learnable_z/test_perfect_z_learning.jl"
     ]),
-    ("Applications", [
-        "applications/grid_world/test_grid_world.jl",
-        "applications/supply_chain/test_supply_chain.jl"
+    ("Multi-Start GFlowNets", [
+        "core/multi_start/test_multi_start.jl"
     ]),
-    ("Integration", [
-        "integration/test_training.jl"
+    ("Grid World Application", [
+        "applications/grid_world/test_grid_world.jl",
+        "applications/grid_world/test_grid_world_versions.jl"
+    ]),
+    ("Supply Chain Application", [
+        "applications/supply_chain/test_supply_chain.jl"
     ])
 ]
 
+# Optional debugging tests (not run by default)
+debugging_tests = [
+    ("Feature Status", "debugging/diagnostics/test_feature_status.jl"),
+    ("Detailed Balance Debug", "debugging/diagnostics/test_detailed_balance_debug.jl"),
+    ("Zygote Compatibility", "debugging/zygote_issues/test_zygote_compatibility.jl"),
+    ("Mutation Trace", "debugging/zygote_issues/test_mutation_trace.jl")
+]
+
+# Track results
+failed_groups = String[]
+total_time = Ref(0.0)
+
 @testset "GFlowNet.jl Test Suite" begin
     for (group_name, test_files) in test_groups
+        group_start = time()
+        println("\n" * "-"^60)
+        println("📦 Testing: $group_name")
+        println("-"^60)
+        
         @testset "$group_name" begin
             for test_file in test_files
                 test_path = joinpath(@__DIR__, test_file)
                 if isfile(test_path)
-                    println("\n  Running $test_file...")
-                    include(test_path)
+                    println("  📄 $test_file")
+                    try
+                        include(test_path)
+                    catch e
+                        push!(failed_groups, "$group_name - $test_file")
+                        @error "Test failed" file=test_file exception=e
+                        rethrow(e)
+                    end
                 else
                     @warn "Test file not found: $test_file"
                 end
             end
         end
+        
+        group_time = time() - group_start
+        total_time[] += group_time
+        println("  ✅ Completed in $(round(group_time, digits=2))s")
     end
 end
 
-println("\n🎉 All tests completed!")
-println("\n📝 Note: Debugging tests are in test/debugging/ and are not run by default.")
-println("   Run them individually when debugging specific issues.")
+# Summary
+println("\n" * "="^60)
+println("TEST SUMMARY")
+println("="^60)
+println("Total time: $(round(total_time[], digits=2))s")
+
+if isempty(failed_groups)
+    println("\n🎉 All tests passed!")
+else
+    println("\n❌ Failed test groups:")
+    for group in failed_groups
+        println("  - $group")
+    end
+    println("\n💡 Common issues after reorganization:")
+    println("  - Missing imports (functions moved to different modules)")
+    println("  - Changed function signatures")
+    println("  - Module loading order dependencies")
+end
+
+println("\n📝 Note: Debugging tests are available but not run by default:")
+for (name, path) in debugging_tests
+    println("  - $name: test/$path")
+end
+println("\nRun them individually when debugging specific issues.")
+println("\nCompleted at: $(now())")

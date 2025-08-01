@@ -1,4 +1,5 @@
 using GFlowNet
+using GFlowNet: compute_trajectory_loss
 
 # Create model
 model = create_grid_world_gflownet(

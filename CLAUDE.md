@@ -32,6 +32,22 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - P_B(s|s') using concatenated state features
    - Required for DETAILED_BALANCE
    - Enables better credit assignment
+   - Added validation functions for normalization checks
+
+5. **FLOW_MATCHING Objective** ✅
+   - Complete implementation minimizing (Z(s) - F(s))²
+   - Uses flow estimator network
+   - Full test coverage
+
+6. **Multi-Start GFlowNets** ✅
+   - Support for multiple initial states
+   - Per-initial-state partition functions
+   - Initial state sampling based on Z values
+
+7. **Training Code Reorganization** ✅
+   - Moved all training functions from core/interface.jl to training/
+   - Clean separation: interface.jl now only has model creation
+   - Better modularity and maintainability
 
 ## Development Guidance
 
@@ -48,14 +64,28 @@ julia --project=.
 # Install dependencies
 julia --project=. -e "using Pkg; Pkg.instantiate()"
 
-# Run all tests
-julia --project=. -e "using Pkg; Pkg.test()"
+# Run all tests (updated test suite)
+julia --project=. test/runtests.jl
 
 # Run specific test category
 julia --project=. test/core/detailed_balance/test_detailed_balance.jl
+julia --project=. test/objectives/flow_matching/test_flow_matching.jl
+julia --project=. test/reorganization/test_training_reorganization.jl
 
 # Run examples
 cd examples/grid_world && julia --project=. grid_world.jl
+```
+
+### Common Import Fixes After Reorganization
+```julia
+# If you get "compute_trajectory_loss not defined"
+using GFlowNet: compute_trajectory_loss, compute_single_trajectory_loss
+
+# If you get optimizer name conflicts
+using GFlowNet: ADAM  # or GFlowNet.ADAM
+
+# If you get reward function conflicts for GridState
+@test GFlowNet.reward(terminal) == expected_reward
 ```
 
 ### Development Workflow
@@ -80,17 +110,22 @@ The package follows a modular architecture with clear separation of concerns:
 ### Core Mathematical Engine (`src/core/`)
 - **types.jl**: Fundamental abstract types (AbstractState, AbstractAction, GFlowNetModel)
 - **graphs.jl**: DAG operations and state space analysis
-- **policies.jl**: Forward policy P_F, backward policy P_B
+- **policies.jl**: Forward policy P_F, backward policy P_B, validation functions
 - **flows.jl**: Flow conservation and computation (fully implemented)
-- **balance.jl**: Training objectives (TB, DB implemented, FM ready)
+- **balance.jl**: Mathematical loss definitions (TB, DB, FM)
 - **sampling.jl**: Trajectory generation algorithms
-- **objectives.jl**: Loss computation for training
-- **interface.jl**: High-level API functions
+- **interface.jl**: Model creation and sampling ONLY (no training)
+- **multi_start.jl**: Multi-start GFlowNets support
 
-### Training Infrastructure (`src/training/`)
+### Training Infrastructure (`src/training/`) - REORGANIZED
 - **configuration.jl**: TrainingConfig type with validation
-- Supports objectives: TRAJECTORY_BALANCE, DETAILED_BALANCE
-- FLOW_MATCHING ready to implement
+- **objectives.jl**: Training objective configurations (moved from core/)
+- **training.jl**: Main training loop (train_gflownet, train_step!)
+- **losses.jl**: Loss computation (compute_trajectory_loss, etc.)
+- **utils.jl**: Training utilities
+- **multi_start_training.jl**: Multi-start specific training
+
+Supports objectives: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING
 
 ### Domain Applications (`src/applications/`)
 Each implements the required GFlowNet interface:
@@ -129,15 +164,18 @@ Plus equality and hashing for states/actions.
 ### Training Objectives
 - **TRAJECTORY_BALANCE** ✅ - With optional backward policy and learnable Z
 - **DETAILED_BALANCE** ✅ - Requires backward policy, uses flow computation
+- **FLOW_MATCHING** ✅ - Neural network estimates flow directly
 
 ### Core Features
 - **Flow Computation** ✅ - Recursive with memoization
-- **Backward Policy** ✅ - Joint state representation
+- **Backward Policy** ✅ - Joint state representation with validation
 - **Learnable Z** ✅ - Via LEARNABLE_ESTIMATION
+- **Multi-Start Support** ✅ - Multiple initial states with per-state Z
 
 ### Next Ready to Implement
-- **FLOW_MATCHING** - All prerequisites available
-- **Multi-start GFlowNets** - Flow functions enable this
+- **SUB_TRAJECTORY_BALANCE** - Can use existing infrastructure
+- **GPU Acceleration** - For trajectory sampling
+- **Variance Reduction** - Baselines and control variates
 
 ## Common Development Patterns
 

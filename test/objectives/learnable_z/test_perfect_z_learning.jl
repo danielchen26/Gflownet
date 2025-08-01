@@ -90,7 +90,7 @@ Random.seed!(42)
         # Terminal state has reward
         terminal = apply_action(Terminate(), state_22_via_right)
         @test is_terminal_state(terminal)
-        @test reward(terminal) == 10.0
+        @test GFlowNet.reward(terminal) == 10.0
     end
     
     @testset "Hyperparameter Validation" begin

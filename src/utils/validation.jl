@@ -436,8 +436,9 @@ function compute_trajectory_log_probability(model::GFlowNetModel, trajectory::Tr
         # Get state features
         features = state_to_features(state)
         
-        # Get forward policy logits
-        logits = model.forward_policy(features)
+        # Get forward policy logits using proper Lux interface
+        logits_vec, _ = model.forward_policy.model(features, model.parameters.forward, model.states.forward)
+        logits = logits_vec  # For compatibility
         
         # Get applicable actions and their indices
         applicable_actions = get_applicable_actions(state, model.all_actions)

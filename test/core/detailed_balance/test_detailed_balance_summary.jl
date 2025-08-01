@@ -1,4 +1,5 @@
 using GFlowNet
+using GFlowNet: compute_trajectory_loss
 using Statistics
 
 println("=== DETAILED_BALANCE Implementation Verification ===\n")

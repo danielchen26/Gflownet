@@ -3,6 +3,7 @@
 
 using Test
 using GFlowNet
+using GFlowNet: compute_trajectory_loss
 using Random
 using Statistics
 using ComponentArrays

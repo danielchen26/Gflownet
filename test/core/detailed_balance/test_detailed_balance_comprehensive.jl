@@ -1,9 +1,10 @@
 using GFlowNet
 using Test
 using Statistics
+using GFlowNet: compute_trajectory_loss
 
 # Import necessary types
-import GFlowNet: GridWorldState, is_valid_backward_transition, compute_backward_probability, forward_transition_probability, backward_transition_probability, flow
+import GFlowNet: GridState, is_valid_backward_transition, compute_backward_probability, forward_transition_probability, backward_transition_probability, flow
 
 println("=== Final Verification of DETAILED_BALANCE Implementation ===\n")
 
@@ -123,12 +124,12 @@ end
 # Test 4: Verify backward policy normalization
 println("\n4. Testing backward policy normalization...")
 
-test_state = GridWorldState(2, 2, false)  # Middle state
+test_state = GridState(2, 2, false)  # Middle state
 all_probs = Float64[]
 
 # For each possible previous state, compute backward probability
 for x in 1:3, y in 1:3
-    prev_state = GridWorldState(x, y, false)
+    prev_state = GridState(x, y, false)
     if is_valid_backward_transition(prev_state, test_state, model_db.all_actions)
         prob = compute_backward_probability(
             model_db.backward_policy, test_state, prev_state,
