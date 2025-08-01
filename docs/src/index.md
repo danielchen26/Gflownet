@@ -24,18 +24,31 @@ Pkg.add(url="https://github.com/yourusername/GFlowNet.jl")
 ```julia
 using GFlowNet
 
-# Create a simple environment
-env = create_grid_world_environment(5, 5)
+# Create a simple grid world GFlowNet
+model = create_grid_world_gflownet(
+    grid_size = 5,
+    hidden_dim = 64,
+    learning_rate = 0.01
+)
 
-# Initialize policies
-forward_policy = create_forward_policy(env)
-flow_estimator = create_flow_estimator(env)
+# Configure training
+config = TrainingConfig(
+    objective = TRAJECTORY_BALANCE,
+    n_iterations = 1000,
+    batch_size = 32
+)
 
-# Train the GFlowNet
-train!(forward_policy, flow_estimator, env, epochs=1000)
+# Train the model
+history = train_gflownet(model, config; verbose=true)
 
 # Sample from the trained model
-samples = sample(forward_policy, env, num_samples=10)
+trajectories = [sample_trajectory(model) for _ in 1:10]
+
+# Analyze results
+for (i, traj) in enumerate(trajectories[1:3])
+    terminal_state = traj.states[end]
+    println("Trajectory $i: reward = $(reward(terminal_state))")
+end
 ```
 
 ## Contents
