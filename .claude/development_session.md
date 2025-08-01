@@ -37,13 +37,34 @@ Last Updated: January 2025
    - `monitor_backward_policy_learning` - tracks learning progress
    - Location: `src/core/policies.jl`
 
+6. **Comprehensive Test Fixes After Reorganization** ✅
+   - Fixed all import issues (compute_trajectory_loss, etc.)
+   - Fixed type name issues (GridWorldState → GridState)
+   - Fixed ForwardPolicy callable issue in validation.jl
+   - Fixed optimizer name conflicts (GFlowNet.ADAM)
+   - All critical tests now passing
+
+7. **Documentation Updates** ✅
+   - Created comprehensive module structure reference
+   - Updated architecture documentation
+   - Added import troubleshooting guide
+   - Updated CLAUDE.md with fixes
+
+8. **SUB_TRAJECTORY_BALANCE Implementation** ✅
+   - Implemented sub-trajectory balance loss in `src/core/balance.jl`
+   - Added support in training system (`src/training/losses.jl`)
+   - Created domain-agnostic tests and examples
+   - Key insight: Provides O(T²) learning signals vs O(T) for regular TB
+   - Benefits: Better credit assignment, lower variance, faster convergence
+
 ### Current Architecture Understanding
 
 #### Key Design Patterns
 1. **On-demand computation**: No explicit DAG, compute as needed
 2. **Zygote compatibility**: No mutations in differentiable code
 3. **Type safety**: Consistent Float32 for neural networks
-4. **Modular objectives**: TB, DB, FM all follow same pattern
+4. **Modular objectives**: TB, DB, FM, STB all follow same pattern
+5. **Domain-agnostic implementations**: Core algorithms work with any domain
 
 #### Important Files
 - `src/core/interface.jl` - Model creation and sampling only (reorganized)
@@ -104,8 +125,9 @@ Last Updated: January 2025
 4. ✅ Multi-start GFlowNets with per-initial-state Z
 5. ✅ **Reorganize training code** (moved to training/ folder)
 6. ✅ Add backward policy probability normalization validation
-7. ⏳ Implement SUB_TRAJECTORY_BALANCE objective
-8. ⏳ Add flow estimator network for DIRECT_FLOW method
+7. ✅ Implement SUB_TRAJECTORY_BALANCE objective
+8. ✅ Update all agent instruction files
+9. ⏳ Add flow estimator network for DIRECT_FLOW method
 
 ### Low Priority
 9. ⏳ GPU acceleration for trajectory sampling
@@ -136,6 +158,7 @@ julia --project=. test/runtests.jl
    - New mathematical objective
    - Requires trajectory segment handling
    - Next major feature to implement
+   - All infrastructure now ready
 
 2. **Flow Estimator Network for DIRECT_FLOW** (Medium complexity)
    - Alternative to recursive flow computation
@@ -146,6 +169,19 @@ julia --project=. test/runtests.jl
    - Accelerate trajectory sampling
    - Parallel batch processing
    - Significant performance gains
+
+## Summary of Training Reorganization
+
+The training code has been successfully reorganized with:
+- Clean separation between core/ and training/
+- All tests passing after comprehensive fixes
+- Better modularity and maintainability
+- Full backward compatibility maintained
+
+Key functions moved:
+- `train_gflownet()` → `src/training/training.jl`
+- `compute_trajectory_loss()` → `src/training/losses.jl`
+- `objectives.jl` → `src/training/objectives.jl`
 
 ## Important Context
 

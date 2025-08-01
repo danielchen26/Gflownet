@@ -5,13 +5,14 @@ using Zygote
 using Statistics
 
 using ..GFlowNet: GFlowNetModel, Trajectory, TrainingConfig, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE
 using ..GFlowNet: AbstractState, AbstractAction
 using ..GFlowNet: state_to_features, is_terminal_state, reward, is_applicable, apply_action
 using ..GFlowNet: get_applicable_actions, is_valid_trajectory
 using ..GFlowNet: forward_action_probabilities, compute_backward_probability
 using ..GFlowNet: forward_transition_probability, backward_transition_probability
 using ..GFlowNet: flow, flow_estimate
+using ..GFlowNet: sub_trajectory_balance_loss_batch
 
 # =============================================================================
 # Loss Computation - Mathematically Correct Implementations
@@ -234,6 +235,13 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         end
         
         return mean(finite_losses)
+        
+    elseif config.objective == SUB_TRAJECTORY_BALANCE
+        # Get sub-trajectory length from config
+        sub_length = config.sub_trajectory_length
+        
+        # Compute sub-trajectory balance loss
+        return sub_trajectory_balance_loss_batch(model, trajectories; sub_length=sub_length)
         
     else
         throw(ArgumentError("Unsupported training objective: $(config.objective)"))

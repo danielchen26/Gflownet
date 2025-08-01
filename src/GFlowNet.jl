@@ -165,7 +165,7 @@ export BalanceCondition, TRAJECTORY_BALANCE_CONDITION, DETAILED_BALANCE_CONDITIO
 export TrajectoryBalanceVariant, STANDARD_TB, GEOMETRIC_MEAN_TB
 
 # Loss computation
-export trajectory_balance_loss
+export trajectory_balance_loss, sub_trajectory_balance_loss, sub_trajectory_balance_loss_batch
 export detailed_balance_loss  # Now implemented!
 export flow_matching_loss, flow_matching_loss_batch  # Now implemented!
 # export flow_matching_loss  # Not fully implemented

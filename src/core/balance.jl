@@ -2,6 +2,7 @@
 # Implementation of Trajectory Balance, Detailed Balance, and Flow Matching
 
 using Zygote
+using Statistics: mean
 
 # =============================================================================
 # Balance Condition Types and Enumerations
@@ -39,6 +40,137 @@ Different ways to formulate the trajectory balance equation:
     STANDARD_TB
     GEOMETRIC_MEAN_TB
     ARITHMETIC_MEAN_TB
+end
+
+# =============================================================================
+# Sub-Trajectory Balance - Mathematical Foundation
+# =============================================================================
+
+"""
+    sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory;
+                               sub_length::Int=5)::Float64
+
+Compute sub-trajectory balance loss for a trajectory by considering all sub-trajectories.
+
+# Mathematical Foundation
+Sub-Trajectory Balance enforces flow conservation on partial trajectories:
+
+For a sub-trajectory from state s_i to s_j:
+∏_{k=i}^{j-1} P_F(s_{k+1}|s_k) * F(s_i) = F(s_j)
+
+This provides more frequent learning signals compared to full trajectory balance.
+
+# Arguments
+- `model::GFlowNetModel`: Complete GFlowNet model (domain-agnostic)
+- `trajectory::Trajectory`: Full trajectory to extract sub-trajectories from
+- `sub_length::Int`: Maximum length of sub-trajectories to consider
+
+# Returns
+- `Float64`: Average sub-trajectory balance loss
+
+# Mathematical Properties
+- Provides local credit assignment
+- More stable gradients than full trajectory balance
+- Reduces variance in long trajectories
+- Domain-agnostic: works with any state/action types implementing the GFlowNet interface
+"""
+function sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory;
+                                   sub_length::Int=5)::Float64
+    
+    if length(trajectory.states) < 2
+        return 0.0
+    end
+    
+    losses = Float64[]
+    
+    # Consider all possible sub-trajectories up to sub_length
+    for start_idx in 1:length(trajectory.states)-1
+        for end_idx in start_idx+1:min(start_idx+sub_length, length(trajectory.states))
+            # Extract sub-trajectory
+            sub_states = trajectory.states[start_idx:end_idx]
+            
+            if length(sub_states) < 2
+                continue
+            end
+            
+            # Compute sub-trajectory loss
+            loss = _compute_sub_trajectory_loss(model, sub_states, trajectory, start_idx)
+            if !isnan(loss) && !isinf(loss)
+                push!(losses, loss)
+            end
+        end
+    end
+    
+    # Return average loss
+    return isempty(losses) ? 0.0 : mean(losses)
+end
+
+"""
+    _compute_sub_trajectory_loss(model::GFlowNetModel, sub_states::Vector{<:AbstractState},
+                                full_trajectory::Trajectory, start_idx::Int)::Float64
+
+Compute loss for a single sub-trajectory.
+"""
+function _compute_sub_trajectory_loss(model::GFlowNetModel, sub_states::Vector{<:AbstractState},
+                                    full_trajectory::Trajectory, start_idx::Int)::Float64
+    
+    # Compute log forward probability along sub-trajectory
+    log_forward_prob = 0.0
+    
+    for i in 1:length(sub_states)-1
+        source_state = sub_states[i]
+        target_state = sub_states[i+1]
+        
+        # Get the action that was taken (from full trajectory)
+        action_idx = start_idx + i - 1
+        if action_idx <= length(full_trajectory.actions)
+            action = full_trajectory.actions[action_idx]
+            
+            # Compute forward transition probability
+            prob = forward_transition_probability(model, source_state, target_state)
+            if prob <= 0
+                return Inf  # Invalid transition
+            end
+            
+            log_forward_prob += log(prob)
+        end
+    end
+    
+    # Get flows at start and end of sub-trajectory
+    start_flow = Zygote.@ignore flow(model, sub_states[1])
+    end_flow = Zygote.@ignore flow(model, sub_states[end])
+    
+    # Avoid numerical issues
+    if start_flow <= 0 || end_flow <= 0
+        return 0.0
+    end
+    
+    # Sub-trajectory balance: log(P_F) + log(F_start) = log(F_end)
+    log_start_flow = log(start_flow)
+    log_end_flow = log(end_flow)
+    
+    # Squared error loss
+    error = log_forward_prob + log_start_flow - log_end_flow
+    return error^2
+end
+
+"""
+    sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory};
+                                     sub_length::Int=5)::Float64
+
+Compute average sub-trajectory balance loss over a batch of trajectories.
+"""
+function sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory};
+                                         sub_length::Int=5)::Float64
+    
+    if isempty(trajectories)
+        return 0.0
+    end
+    
+    losses = [sub_trajectory_balance_loss(model, traj; sub_length=sub_length) for traj in trajectories]
+    valid_losses = filter(!isnan, losses)
+    
+    return isempty(valid_losses) ? 0.0 : mean(valid_losses)
 end
 
 # =============================================================================

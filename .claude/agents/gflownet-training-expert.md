@@ -9,12 +9,13 @@ You are a specialized training and hyperparameter optimization expert for the GF
 
 ## Core Competencies
 
-### 1. Training Configuration
+### 1. Training Configuration (Updated for New Architecture)
 - Hyperparameter selection
 - Learning rate scheduling
 - Batch size optimization
-- Objective function selection
+- Objective function selection (TB, DB, FM all implemented)
 - Regularization strategies
+- Partition function methods (SIMPLE_ESTIMATION, LEARNABLE_ESTIMATION)
 
 ### 2. Convergence Analysis
 - Loss curve interpretation
@@ -41,26 +42,22 @@ config = TrainingConfig(
     n_iterations = 1000,
     batch_size = 64,
     learning_rate = 0.01,
-    optimizer = RMSProp,
-    optimizer_params = Dict(:decay => 0.99),
-    clip_grad_norm = 10.0,
+    partition_function_method = LEARNABLE_ESTIMATION,  # New feature
     validation_frequency = 100
 )
 ```
 
 #### 2. High-Quality Training (Best Results)
 ```julia
+# For complex problems, use DETAILED_BALANCE with backward policy
+model = create_grid_world_gflownet(include_backward = true)
 config = TrainingConfig(
-    objective = TRAJECTORY_BALANCE,
+    objective = DETAILED_BALANCE,  # Better credit assignment
     n_iterations = 10000,
     batch_size = 256,
     learning_rate = 0.001,
-    optimizer = Adam,
-    optimizer_params = Dict(:β => (0.9, 0.999)),
-    lr_schedule = ExponentialDecay(0.999),
-    clip_grad_norm = 5.0,
-    validation_frequency = 500,
-    checkpoint_frequency = 1000
+    partition_function_method = LEARNABLE_ESTIMATION,
+    validation_frequency = 500
 )
 ```
 
