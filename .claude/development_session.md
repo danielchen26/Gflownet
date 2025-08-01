@@ -24,6 +24,19 @@ Last Updated: January 2025
    - Full training integration
    - Location: `src/core/multi_start.jl`, `src/training/multi_start_training.jl`
 
+4. **Training Code Reorganization** ✅
+   - Moved all training functions from `core/interface.jl` to `training/` folder
+   - Created modular structure: training.jl, losses.jl, utils.jl
+   - Moved objectives.jl from core/ to training/
+   - Clean separation between core API and training implementation
+   - All tests passing after reorganization
+
+5. **Backward Policy Validation** ✅
+   - `validate_backward_policy_normalization` - checks Σ P_B(s|s') = 1
+   - `validate_backward_policy_consistency` - validates across trajectories
+   - `monitor_backward_policy_learning` - tracks learning progress
+   - Location: `src/core/policies.jl`
+
 ### Current Architecture Understanding
 
 #### Key Design Patterns
@@ -33,8 +46,11 @@ Last Updated: January 2025
 4. **Modular objectives**: TB, DB, FM all follow same pattern
 
 #### Important Files
-- `src/core/interface.jl` - Main training loop (needs reorganization)
-- `src/core/balance.jl` - Loss functions for all objectives
+- `src/core/interface.jl` - Model creation and sampling only (reorganized)
+- `src/core/balance.jl` - Mathematical loss definitions
+- `src/training/training.jl` - Main training loop
+- `src/training/losses.jl` - Loss computation functions
+- `src/training/objectives.jl` - Objective configurations
 - `src/training/configuration.jl` - Training config types
 - `src/core/flows.jl` - Flow computation with memoization
 
@@ -86,8 +102,8 @@ Last Updated: January 2025
 
 ### Medium Priority
 4. ✅ Multi-start GFlowNets with per-initial-state Z
-5. ⏳ **Reorganize training code** (move from core/interface.jl to training/)
-6. ⏳ Add backward policy probability normalization validation
+5. ✅ **Reorganize training code** (moved to training/ folder)
+6. ✅ Add backward policy probability normalization validation
 7. ⏳ Implement SUB_TRAJECTORY_BALANCE objective
 8. ⏳ Add flow estimator network for DIRECT_FLOW method
 
@@ -100,7 +116,7 @@ Last Updated: January 2025
 
 ### Creating New Objectives
 1. Add loss function to `src/core/balance.jl`
-2. Add case to `compute_trajectory_loss` in `src/core/interface.jl`
+2. Add case to `compute_trajectory_loss` in `src/training/losses.jl`
 3. Add enum value to `TrainingObjective` in `src/training/configuration.jl`
 4. Create tests in `test/objectives/[name]/`
 5. Create example in `examples/core_features/[name]/`
@@ -116,20 +132,20 @@ julia --project=. test/runtests.jl
 
 ## Next Session Recommendations
 
-1. **Training Code Reorganization** (Medium complexity)
-   - Move train_gflownet, compute_trajectory_loss to training/
-   - Clean separation of concerns
-   - Update all imports
-
-2. **SUB_TRAJECTORY_BALANCE** (High complexity)
+1. **SUB_TRAJECTORY_BALANCE** (High complexity)
    - New mathematical objective
    - Requires trajectory segment handling
-   - Good next challenge after reorganization
+   - Next major feature to implement
 
-3. **Backward Policy Validation** (Low complexity)
-   - Add normalization checks
-   - Ensure Σ P_B(s|s') = 1
-   - Quick win for robustness
+2. **Flow Estimator Network for DIRECT_FLOW** (Medium complexity)
+   - Alternative to recursive flow computation
+   - Neural network directly estimates F(s)
+   - Good performance optimization
+
+3. **GPU Acceleration** (High complexity)
+   - Accelerate trajectory sampling
+   - Parallel batch processing
+   - Significant performance gains
 
 ## Important Context
 

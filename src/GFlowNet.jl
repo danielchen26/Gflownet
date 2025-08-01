@@ -264,6 +264,10 @@ export generate_training_report, save_training_artifacts
 export validate_z_learning, validate_z_gradients, monitor_z_learning
 export validate_z_mathematical_properties, compute_trajectory_log_probability
 
+# Backward policy validation
+export validate_backward_policy_normalization, validate_backward_policy_consistency
+export monitor_backward_policy_learning
+
 # =============================================================================
 # Applications - Domain Implementations
 # =============================================================================

@@ -6,6 +6,9 @@ using GFlowNet
 using Random
 using Optimisers
 
+# Disambiguate optimizers that are exported by both modules
+using GFlowNet: ADAM, ADAMW, RMSPROP, SGD
+
 @testset "Training Infrastructure" begin
     @testset "Training Configuration" begin
         # Test default configuration creation
@@ -20,7 +23,7 @@ using Optimisers
         custom_config = TrainingConfig(
             objective=DETAILED_BALANCE,
             partition_function_method=SIMPLE_ESTIMATION,
-            optimization_method=ADAM,
+            optimization_method=GFlowNet.ADAM,
             n_iterations=100,
             batch_size=16,
             learning_rate=0.01,
@@ -57,10 +60,10 @@ using Optimisers
         @test ADAMW isa OptimizationMethod
         
         # Test optimizer creation
-        optimizer = GFlowNet.create_optimizer(ADAM, 0.01)
+        optimizer = GFlowNet.create_optimizer(GFlowNet.ADAM, 0.01)
         @test optimizer isa Optimisers.Adam
         
-        optimizer = GFlowNet.create_optimizer(SGD, 0.1)
+        optimizer = GFlowNet.create_optimizer(GFlowNet.SGD, 0.1)
         @test optimizer isa Optimisers.Descent
     end
     
@@ -109,7 +112,7 @@ using Optimisers
         config = TrainingConfig(
             objective=TRAJECTORY_BALANCE,
             partition_function_method=SIMPLE_ESTIMATION,
-            optimization_method=ADAM,
+            optimization_method=GFlowNet.ADAM,
             n_iterations=5,  # Just a few iterations
             batch_size=2,    # Small batch
             learning_rate=0.1,

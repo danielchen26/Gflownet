@@ -26,8 +26,9 @@ GFlowNet.jl implements Generative Flow Networks using a modern Julia architectur
    - `FlowEstimator`: Z(s) - neural network for flow estimation
    - `Learnable Z`: Optional learnable partition function parameter
 
-3. **Training System**
+3. **Training System** (Reorganized January 2025)
    - Uses `train_gflownet(model, config)`
+   - Modular organization in `src/training/` directory
    - Supports trajectory sampling and batch training
    - Gradient computation via Zygote.jl
    - Parameter updates via Optimisers.jl
@@ -66,13 +67,20 @@ end
   - Edge flows: F(s→s') = P_F(s'|s) F(s)
   - Partition function: Z = F(s₀)
 
+- **FLOW_MATCHING**: ✅ Fully implemented (January 2025)
+  - Loss: (Z(s) - F(s))² where Z(s) is neural network estimate
+  - Uses flow estimator network for Z(s)
+  - Compatible with memoized flow computation
+
 ### Ready to Implement
-- **FLOW_MATCHING**: All prerequisites now available
 - **SUB_TRAJECTORY_BALANCE**: Can be implemented with current infrastructure
 
-### Not Yet Implemented
+### Advanced Features
+- **Multi-start support**: ✅ Implemented with per-initial-state Z values
+  - `MultiStartGFlowNetModel` type
+  - Per-initial-state partition functions
+  - Initial state sampling based on learned Z values
 - **COMBINED_OBJECTIVES**: Requires design decisions
-- **Multi-start support**: Requires per-initial-state Z values
 
 ## Key Design Decisions
 
@@ -175,10 +183,22 @@ Flow computation is now fully implemented using on-demand computation without re
 - **On-Demand**: Computes flows as needed, no pre-computation
 - **Efficient**: Memoization prevents redundant calculations
 
+## Training Module Organization
+
+The training infrastructure has been reorganized for better maintainability:
+- `training/configuration.jl` - Training types and configuration
+- `training/objectives.jl` - Training objective definitions  
+- `training/training.jl` - Main training loop
+- `training/losses.jl` - Loss computation functions
+- `training/utils.jl` - Training utilities
+- `training/multi_start_training.jl` - Multi-start specific training
+
+The `core/interface.jl` now contains only model creation and sampling functions.
+
 ## Current Limitations
 
 1. **Training Objectives**: SUB_TRAJECTORY_BALANCE not yet implemented (FLOW_MATCHING now complete)
-2. **Multiple Initial States**: Not yet supported (requires per-state Z computation)
+2. **Multiple Initial States**: ✅ NOW SUPPORTED with multi-start GFlowNets
 3. **GPU Acceleration**: Limited to neural network operations, trajectory sampling is CPU-only
 4. **Continuous State Spaces**: Experimental support only
 
