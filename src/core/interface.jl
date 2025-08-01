@@ -13,9 +13,18 @@ using Statistics
 # =============================================================================
 
 """
-    create_gflownet(initial_state, all_actions; state_dim, hidden_dim=64, learning_rate=0.01, rng=Random.default_rng())
+    create_gflownet(initial_state, all_actions; state_dim, hidden_dim=64, learning_rate=0.01, include_backward=false, rng=Random.default_rng())
 
 Create a GFlowNet model using proper Lux+ComponentArray+Zygote patterns.
+
+# Arguments
+- `initial_state`: Starting state s₀
+- `all_actions`: Complete action space
+- `state_dim`: Dimension of state features
+- `hidden_dim`: Hidden layer size for neural networks
+- `learning_rate`: Learning rate for optimizer
+- `include_backward`: Whether to include backward policy for full trajectory balance
+- `rng`: Random number generator
 
 Follows official Lux documentation patterns for gradient computation compatibility.
 """
@@ -25,6 +34,7 @@ function create_gflownet(
     state_dim::Int,
     hidden_dim::Int = 64,
     learning_rate::Float64 = 0.01,
+    include_backward::Bool = false,
     rng = Random.default_rng()
 )
     n_actions = length(all_actions)
@@ -32,12 +42,32 @@ function create_gflownet(
     # Create neural networks using official Lux patterns
     forward_policy, forward_ps, forward_st = create_forward_policy(state_dim, hidden_dim, n_actions, rng)
     flow_estimator, flow_ps, flow_st = create_flow_estimator(state_dim, hidden_dim, rng)
-
-    # Organize parameters in ComponentArray (official Lux pattern)
-    parameters = ComponentArray(
-        forward = forward_ps,
-        flow = flow_ps
-    )
+    
+    # Optionally create backward policy
+    if include_backward
+        backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
+        
+        # Organize parameters with backward policy
+        parameters = ComponentArray(
+            forward = forward_ps,
+            backward = backward_ps,
+            flow = flow_ps
+        )
+        
+        # Network states
+        states = (forward = forward_st, backward = backward_st, flow = flow_st)
+    else
+        backward_policy = nothing
+        
+        # Organize parameters without backward policy
+        parameters = ComponentArray(
+            forward = forward_ps,
+            flow = flow_ps
+        )
+        
+        # Network states
+        states = (forward = forward_st, flow = flow_st)
+    end
 
     # Setup optimizer (official Lux pattern)
     opt = Optimisers.Adam(learning_rate)
@@ -48,10 +78,11 @@ function create_gflownet(
         initial_state,
         all_actions,
         forward_policy,
+        backward_policy,
         flow_estimator,
         parameters,
         optimizer,
-        (forward = forward_st, flow = flow_st)
+        states
     )
 end
 
@@ -87,6 +118,29 @@ function create_flow_estimator(state_dim::Int, hidden_dim::Int, rng)
 
     ps, st = Lux.setup(rng, flow_net)
     return FlowEstimator(flow_net), ps, st
+end
+
+"""
+    create_backward_policy(state_dim::Int, hidden_dim::Int, rng)
+
+Create backward policy neural network for computing P_B(s|s').
+
+Uses joint state representation: takes concatenated features of (source, target) states
+and outputs a single probability value.
+"""
+function create_backward_policy(state_dim::Int, hidden_dim::Int, rng)
+    # Input dimension is 2 * state_dim for joint representation
+    input_dim = 2 * state_dim
+    
+    # Standard Lux Chain
+    backward_net = Lux.Chain(
+        Lux.Dense(input_dim => hidden_dim, tanh),
+        Lux.Dense(hidden_dim => hidden_dim, tanh),
+        Lux.Dense(hidden_dim => 1)  # Single probability logit
+    )
+
+    ps, st = Lux.setup(rng, backward_net)
+    return BackwardPolicy(backward_net), ps, st
 end
 
 # =============================================================================
@@ -569,6 +623,6 @@ function apply_action end
 # Exports
 # =============================================================================
 
-export create_gflownet, create_forward_policy, create_flow_estimator
+export create_gflownet, create_forward_policy, create_backward_policy, create_flow_estimator
 export sample_trajectory, sample_trajectory_batch, train_gflownet
 export compute_trajectory_loss, compute_single_trajectory_loss

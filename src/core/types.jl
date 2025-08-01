@@ -151,6 +151,7 @@ mutable struct GFlowNetModel
     initial_state::AbstractState
     all_actions::Vector{<:AbstractAction}
     forward_policy::ForwardPolicy
+    backward_policy::Union{Nothing,BackwardPolicy}
     flow_estimator::Union{Nothing,FlowEstimator}
     parameters::ComponentArray
     optimizer
@@ -160,6 +161,7 @@ mutable struct GFlowNetModel
         initial_state::AbstractState,
         all_actions::Vector{<:AbstractAction},
         forward_policy::ForwardPolicy,
+        backward_policy::Union{Nothing,BackwardPolicy},
         flow_estimator::Union{Nothing,FlowEstimator},
         parameters::ComponentArray,
         optimizer,
@@ -168,7 +170,7 @@ mutable struct GFlowNetModel
         if isempty(all_actions)
             throw(ArgumentError("all_actions cannot be empty"))
         end
-        new(initial_state, all_actions, forward_policy, flow_estimator,
+        new(initial_state, all_actions, forward_policy, backward_policy, flow_estimator,
             parameters, optimizer, states)
     end
 end

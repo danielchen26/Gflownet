@@ -226,6 +226,7 @@ function create_grid_world_gflownet(;
     allow_all_moves::Bool=false,
     hidden_dim::Int=64,
     learning_rate::Float64=0.01,
+    include_backward::Bool=false,
     rng::AbstractRNG=Random.default_rng()
 )
 
@@ -254,6 +255,7 @@ function create_grid_world_gflownet(;
         state_dim = 3,  # x_norm, y_norm, is_terminal
         hidden_dim = hidden_dim,
         learning_rate = learning_rate,
+        include_backward = include_backward,
         rng = rng
     )
 end

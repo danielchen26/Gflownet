@@ -105,9 +105,6 @@ export explore_state_space, count_reachable_states, analyze_state_space
 # Legacy compatibility
 export get_possible_actions
 
-# Legacy aliases
-const get_possible_actions = get_applicable_actions
-
 # =============================================================================
 # Policy Functions - Core GFlowNet Mathematics
 # =============================================================================
@@ -117,8 +114,9 @@ export forward_probability, forward_action_probabilities, sample_forward_action
 export compute_forward_logits
 
 # Backward policy P_B(s|s')
-export backward_probability, sample_backward_state
-export compute_backward_logits
+export compute_backward_probability, is_valid_backward_transition
+# export backward_probability, sample_backward_state  # Old DAG-based functions
+# export compute_backward_logits  # Old DAG-based function
 
 # Flow estimator Z(s)
 export flow_estimate, compute_flow_logits
@@ -132,15 +130,15 @@ export safe_model_call, validate_policy_consistency
 # =============================================================================
 
 # Flow computation methods
-export flow, compute_recursive_flow, compute_flow_estimate
+# export flow, compute_recursive_flow, compute_flow_estimate  # Broken - requires DAG
 export FlowComputationMethod, RECURSIVE_FLOW, DIRECT_FLOW, MIXED_FLOW
 
 # Flow analysis and validation
-export validate_flow_conservation, validate_flow_consistency
-export flow_analysis, partition_function, edge_flow
+# export validate_flow_conservation, validate_flow_consistency  # Broken - requires DAG
+# export flow_analysis, partition_function, edge_flow  # Broken - requires DAG
 
 # Flow caching
-export clear_flow_cache!, flow_computation_benchmark
+# export clear_flow_cache!, flow_computation_benchmark  # Broken - requires DAG
 
 # =============================================================================
 # Balance Conditions - Training Mathematics
@@ -151,7 +149,8 @@ export BalanceCondition, TRAJECTORY_BALANCE_CONDITION, DETAILED_BALANCE_CONDITIO
 export TrajectoryBalanceVariant, STANDARD_TB, GEOMETRIC_MEAN_TB
 
 # Loss computation
-export trajectory_balance_loss, detailed_balance_loss, flow_matching_loss
+export trajectory_balance_loss
+# export detailed_balance_loss, flow_matching_loss  # Not fully implemented
 export compute_balance_loss, validate_balance_conditions
 
 # Balance utilities
@@ -183,7 +182,8 @@ export benchmark_sampling, get_trajectory_summary
 export ObjectiveConfig
 
 # Objective computation
-export trajectory_balance_objective, detailed_balance_objective, flow_matching_objective
+export trajectory_balance_objective
+# export detailed_balance_objective, flow_matching_objective  # Not fully implemented
 export combined_objective, compute_training_objective
 
 # Regularization and analysis
