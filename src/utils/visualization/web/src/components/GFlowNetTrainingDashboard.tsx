@@ -137,21 +137,21 @@ export function GFlowNetTrainingDashboard() {
       <div className="grid grid-cols-3 gap-2">
         <MetricCard
           title="Current Loss"
-          value={trainingState?.current_loss || metrics.mean_loss}
-          subtitle="Trajectory Balance"
+          value={trainingState?.current_loss || history.losses[history.losses.length - 1]}
+          subtitle="Latest Episode"
           icon={Activity}
           color="text-neon-purple"
           trend={trainingState?.current_loss < metrics.mean_loss ? "down" : "up"}
-          percentage={Math.abs(((trainingState?.current_loss || metrics.mean_loss) - metrics.mean_loss) / metrics.mean_loss * 100)}
+          percentage={Math.abs(((trainingState?.current_loss || history.losses[history.losses.length - 1]) - metrics.mean_loss) / metrics.mean_loss * 100)}
         />
         <MetricCard
           title="Current Reward"
-          value={trainingState?.current_reward || metrics.mean_reward}
+          value={trainingState?.current_reward || history.rewards[history.rewards.length - 1]}
           subtitle={`Episode ${trainingState?.current_episode || metrics.total_episodes}`}
           icon={Target}
           color="text-neon-green"
           trend={trainingState?.current_reward > metrics.mean_reward ? "up" : "down"}
-          percentage={Math.abs(((trainingState?.current_reward || metrics.mean_reward) - metrics.mean_reward) / metrics.mean_reward * 100)}
+          percentage={Math.abs(((trainingState?.current_reward || history.rewards[history.rewards.length - 1]) - metrics.mean_reward) / metrics.mean_reward * 100)}
         />
         <MetricCard
           title="Convergence"
@@ -357,34 +357,34 @@ export function GFlowNetTrainingDashboard() {
           className="glass-dark rounded-xl p-3"
         >
           <h3 className="text-xs font-medium text-muted-foreground mb-2">
-            Performance Metrics
+            Training Statistics
           </h3>
           <div className="grid grid-cols-2 gap-2 h-[calc(100%-32px)]">
             <div className="space-y-2">
               <div className="glass-dark rounded-lg px-2 py-1">
-                <div className="text-[10px] text-muted-foreground">TB Loss</div>
+                <div className="text-[10px] text-muted-foreground">Mean Loss (20ep)</div>
                 <div className="text-sm font-medium text-neon-blue">
-                  {metrics.mean_tb_loss.toFixed(4)}
+                  {metrics.mean_loss.toFixed(4)}
                 </div>
               </div>
               <div className="glass-dark rounded-lg px-2 py-1">
-                <div className="text-[10px] text-muted-foreground">Flow Loss</div>
+                <div className="text-[10px] text-muted-foreground">Mean Reward (20ep)</div>
                 <div className="text-sm font-medium text-neon-pink">
-                  {metrics.mean_flow_loss.toFixed(4)}
+                  {metrics.mean_reward.toFixed(3)}
                 </div>
               </div>
             </div>
             <div className="space-y-2">
               <div className="glass-dark rounded-lg px-2 py-1">
-                <div className="text-[10px] text-muted-foreground">Exploration</div>
+                <div className="text-[10px] text-muted-foreground">Exploration Rate</div>
                 <div className="text-sm font-medium text-neon-orange">
-                  {(metrics.current_exploration * 100).toFixed(1)}%
+                  {(trainingState?.current_exploration || metrics.current_exploration * 100).toFixed(1)}%
                 </div>
               </div>
               <div className="glass-dark rounded-lg px-2 py-1">
-                <div className="text-[10px] text-muted-foreground">Episodes</div>
+                <div className="text-[10px] text-muted-foreground">Total Episodes</div>
                 <div className="text-sm font-medium">
-                  {metrics.total_episodes}
+                  {trainingState?.current_episode || metrics.total_episodes}
                 </div>
               </div>
             </div>
