@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 250 250 251;
+    --foreground: 10 10 11;
+    
+    --card: 255 255 255;
+    --card-foreground: 10 10 11;
+    
+    --primary: 139 92 246;
+    --primary-foreground: 255 255 255;
+    
+    --secondary: 255 107 53;
+    --secondary-foreground: 255 255 255;
+    
+    --accent: 0 217 255;
+    --accent-foreground: 10 10 11;
+    
+    --muted: 245 245 247;
+    --muted-foreground: 107 114 128;
+    
+    --border: 229 231 235;
+    --ring: 139 92 246;
+  }
+  
+  .dark {
+    --background: 10 10 11;
+    --foreground: 255 255 255;
+    
+    --card: 26 26 29;
+    --card-foreground: 255 255 255;
+    
+    --primary: 189 0 255;
+    --primary-foreground: 255 255 255;
+    
+    --secondary: 255 107 53;
+    --secondary-foreground: 255 255 255;
+    
+    --accent: 0 217 255;
+    --accent-foreground: 10 10 11;
+    
+    --muted: 42 42 45;
+    --muted-foreground: 161 161 170;
+    
+    --border: 42 42 45;
+    --ring: 189 0 255;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  * {
+    @apply border-border;
+  }
+}
+
+/* Custom scrollbar */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.muted.DEFAULT') transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded-full;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+}
+
+/* Glassmorphism effect */
+@layer utilities {
+  .glass {
+    @apply backdrop-blur-lg bg-card/80 border border-border/50;
+  }
+  
+  .glass-dark {
+    @apply backdrop-blur-lg bg-dark-panel/80 border border-dark-border/50;
+  }
+}
+
+/* Neon glow effects */
+@layer utilities {
+  .neon-glow-purple {
+    filter: drop-shadow(0 0 10px rgba(189, 0, 255, 0.5)) 
+            drop-shadow(0 0 20px rgba(189, 0, 255, 0.3)) 
+            drop-shadow(0 0 30px rgba(189, 0, 255, 0.2));
+  }
+  
+  .neon-glow-blue {
+    filter: drop-shadow(0 0 10px rgba(0, 217, 255, 0.5)) 
+            drop-shadow(0 0 20px rgba(0, 217, 255, 0.3)) 
+            drop-shadow(0 0 30px rgba(0, 217, 255, 0.2));
+  }
+  
+  .neon-glow-pink {
+    filter: drop-shadow(0 0 10px rgba(255, 0, 110, 0.5)) 
+            drop-shadow(0 0 20px rgba(255, 0, 110, 0.3)) 
+            drop-shadow(0 0 30px rgba(255, 0, 110, 0.2));
+  }
+  
+  .neon-glow-green {
+    filter: drop-shadow(0 0 10px rgba(0, 255, 136, 0.5)) 
+            drop-shadow(0 0 20px rgba(0, 255, 136, 0.3)) 
+            drop-shadow(0 0 30px rgba(0, 255, 136, 0.2));
+  }
+}
+
+/* Gradient text */
+@layer utilities {
+  .gradient-text {
+    @apply bg-gradient-to-r from-gradient-purple-from via-gradient-purple-via to-gradient-purple-to bg-clip-text text-transparent;
+  }
+  
+  .gradient-text-orange {
+    @apply bg-gradient-to-r from-gradient-orange-from via-gradient-orange-via to-gradient-orange-to bg-clip-text text-transparent;
+  }
+}

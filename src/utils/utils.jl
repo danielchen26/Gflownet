@@ -17,7 +17,7 @@ export visualize_molecular_state, visualize_causal_graph, visualize_experiment_s
 include("logging.jl")
 
 # Include visualization utilities
-include("visualization.jl")
+include("visualization/visualization.jl")
 
 # Include HTML report system
 include("report.jl")

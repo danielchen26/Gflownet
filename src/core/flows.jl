@@ -2,7 +2,6 @@
 # Mathematical foundations of flow F(s) and flow conservation in GFlowNets
 
 using Zygote
-using ..GFlowNetUtils: softmax
 
 # =============================================================================
 # Flow Conservation - Mathematical Foundation

@@ -42,6 +42,7 @@ The documentation is well-structured and comprehensive, covering:
 - **API**: Complete function reference
 - **Architecture**: Internal system design
 - **Applications**: Domain-specific implementations
+- **Visualization**: Interactive web-based training visualization
 
 ### File Organization
 ```
@@ -81,7 +82,8 @@ docs/
 │   │   ├── architecture.md         # System architecture
 │   │   ├── design_decisions.md     # Why choices were made
 │   │   ├── known_limitations.md    # Current limitations
-│   │   └── flow_functions_multistart.md
+│   │   ├── flow_functions_multistart.md
+│   │   └── web_visualization_architecture.md
 │   ├── extensions/                 # Extensions
 │   │   ├── continuous.md
 │   │   ├── information.md
@@ -367,6 +369,7 @@ Keep documentation synchronized with:
 - Working examples in `examples/` folder
 - Current API in source code
 - Test files that demonstrate functionality
+- Visualization system in `src/utils/visualization/`
 
 ### 5. Mathematical Notation
 Use consistent LaTeX notation:
@@ -378,5 +381,47 @@ Use consistent LaTeX notation:
 - Flow: $F(s)$, edge flow: $F(s \to s')$
 - Partition function: $Z$
 - Reward: $R(s_T)$
+
+### 6. Visualization Documentation
+When documenting the visualization system:
+- **Architecture**: Document React/TypeScript frontend + Julia backend structure
+- **Features**: Training monitor, 3D distribution views, policy flow visualization
+- **Setup**: Installation and running instructions
+- **API**: REST endpoints and data formats
+- **Customization**: How to adapt for different domains
+- **Technical Stack**: Three.js, React Three Fiber, Recharts, Oxygen.jl
+
+### Example Visualization Documentation
+```markdown
+# GFlowNet Interactive Visualization
+
+## Overview
+The GFlowNet.jl visualization system provides real-time insights into training dynamics through an interactive web dashboard.
+
+## Key Features
+- **Training Monitor**: Live metrics with dynamic updates every 250ms
+- **3D Distribution View**: Trajectory density heatmaps and posterior visualization
+- **Policy Flow Field**: Arrow-based visualization of learned policies
+- **Interactive Setup**: Configure reward landscapes and training parameters
+
+## Architecture
+```
+visualization/
+├── api/                    # Julia REST API servers
+│   ├── simple_server.jl   # Mock data for demos
+│   └── gflownet_server.jl # Real GFlowNet integration
+└── web/                   # React frontend
+    ├── src/
+    │   ├── components/    # UI components
+    │   └── visualizations/ # 3D visualizations
+    └── package.json
+```
+
+## Quick Start
+```bash
+cd examples/core_features/visualization
+julia show_visualization.jl
+```
+```
 
 Remember: Good documentation is as important as good code. It's the bridge between your implementation and your users' success.

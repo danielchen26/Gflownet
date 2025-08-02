@@ -61,10 +61,78 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - Trades accuracy for computational efficiency
    - Ideal for large state spaces where recursive flow is expensive
 
+10. **Interactive Web Visualization System** ✅ (August 2025)
+   - Beautiful real-time visualization for GFlowNet training and analysis
+   - Three main views: Training Monitor, 3D Distribution, Policy Flow
+   - React + Three.js frontend with smooth animations
+   - Julia backend with dynamic training simulation
+   - Located in `examples/core_features/visualization/`
+
 ## Development Guidance
 
 - Remember that example folders are associated with different domains and for the examples related to the core development, you should put them into the core features sub folder
 - Remember you should put the test in the relevent folder not just scatter it in the test folder, we already have a Hierarchical folders
 - You should remember that every time we update the documentation and changes in the architecture we should automatically update the agents and all files in the @.claude 
 
-(Rest of the file remains unchanged...)
+### Visualization System Notes
+
+#### Architecture
+- **Frontend**: React 18 + TypeScript + Three.js/React Three Fiber for 3D visualization
+- **Backend**: Julia with Oxygen.jl providing REST API endpoints
+- **Real-time Updates**: Polling-based system (250ms for metrics, 500ms for charts)
+- **3D Rendering**: High-resolution (256x256) textures with Gaussian smoothing
+
+#### Key Components
+1. **Training Monitor**: Real-time metrics with smooth transitions and multi-chart display
+2. **3D Distribution View**: Trajectory density heatmaps on z=0 plane with reward landscape
+3. **Policy Flow Field**: Arrow-based visualization showing learned action policies
+4. **Problem Setup**: Interactive configuration for reward peaks and training parameters
+
+#### File Structure
+```
+src/utils/visualization/
+├── api/
+│   ├── simple_server.jl    # Mock API with simulated training
+│   └── gflownet_server.jl  # Real GFlowNet integration (template)
+└── web/
+    ├── src/
+    │   ├── components/     # React UI components
+    │   └── visualizations/ # 3D visualization components
+    └── package.json
+
+examples/core_features/visualization/
+├── show_visualization.jl   # Main entry point
+├── README.md              # Comprehensive usage guide
+└── Project.toml
+```
+
+#### Important Implementation Details
+- Dynamic training simulation starts automatically on server launch
+- Training progress based on elapsed time (2 episodes/second)
+- All 3D elements render on same z=0 plane for proper alignment
+- Policy flow arrows use simplified geometry for WebGL compatibility
+- CORS enabled for local development
+
+## Testing Strategy
+
+- Unit tests for core functionality in `test/`
+- Integration tests for domain implementations
+- Property-based testing for mathematical properties
+- Performance benchmarks for critical paths
+- Visualization tests using mock data
+
+## Documentation
+
+- API documentation using Julia docstrings
+- Conceptual guides in `docs/src/guide/`
+- Mathematical theory in `docs/src/theory/`
+- Architecture docs in `docs/src/internals/`
+- Interactive examples with visualization
+
+## Code Style
+
+- Follow Julia style guide
+- Use meaningful variable names
+- Document all public functions
+- Keep functions focused and small
+- Prefer composition over inheritance
