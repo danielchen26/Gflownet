@@ -1,6 +1,6 @@
 import { useRef, useMemo, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Text, Html } from '@react-three/drei'
+import { OrbitControls, Text, Html, Line } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useQuery } from '@tanstack/react-query'
@@ -85,13 +85,12 @@ function RewardHeatmap({ flowData }: { flowData: FlowFieldData }) {
   }, [flowData])
   
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+    <mesh rotation={[0, 0, 0]} position={[5, 5, -0.01]}>
       <planeGeometry args={[10, 10]} />
       <meshBasicMaterial 
         map={texture} 
         transparent 
-        opacity={0.7}
-        blending={THREE.AdditiveBlending}
+        opacity={0.6}
       />
     </mesh>
   )
@@ -131,7 +130,7 @@ function FlowVectors({ flowData }: { flowData: FlowFieldData }) {
         const angle = Math.atan2(dir.y, dir.x)
         
         return (
-          <group key={i} position={[point.position[0], point.position[1], 0.1]}>
+          <group key={i} position={[point.position[0], point.position[1], 0.05]}>
             {/* Arrow visualization */}
             <group rotation={[0, 0, angle]}>
               {/* Shaft */}
@@ -173,47 +172,100 @@ function FlowVectors({ flowData }: { flowData: FlowFieldData }) {
 }
 
 // Enhanced state visitation with value estimates
+// Trajectory paths visualization
+function TrajectoryPaths() {
+  const { data: trajectories } = useQuery({
+    queryKey: ['recent-trajectories'],
+    queryFn: async () => {
+      const response = await axios.get('/api/trajectories')
+      return response.data.trajectories
+    },
+  })
+  
+  if (!trajectories) return null
+  
+  return (
+    <group>
+      {trajectories.slice(0, 20).map((traj: any, i: number) => {
+        const points = traj.states.map((state: [number, number]) => 
+          new THREE.Vector3(state[0], state[1], 0.02)
+        )
+        
+        // Color based on recency - newer trajectories are brighter
+        const recency = 1 - (i / 20)
+        const color = new THREE.Color().lerpColors(
+          new THREE.Color(0x666666), // Old - gray
+          new THREE.Color(0x00ffff), // New - cyan
+          recency
+        )
+        
+        return (
+          <Line
+            key={traj.id}
+            points={points}
+            color={color}
+            lineWidth={2}
+            opacity={0.3 + recency * 0.4}
+            transparent
+          />
+        )
+      })}
+    </group>
+  )
+}
+
+// State visitation heatmap
 function StateVisitation({ stats }: { stats: StateStats }) {
-  const boxes = useMemo(() => {
-    const result: JSX.Element[] = []
+  const texture = useMemo(() => {
+    const size = 256
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')!
+    const imageData = ctx.createImageData(size, size)
+    const data = imageData.data
     
+    // Create visitation heatmap
     Object.entries(stats.visitation_counts).forEach(([key, count]) => {
       const [x, y] = key.split(',').map(Number)
+      const tx = Math.floor((x / 10) * size)
+      const ty = Math.floor((1 - y / 10) * size)
       const normalized = count / stats.max_visits
-      const valueEst = stats.value_estimates[key] || 0
-      const valueNorm = Math.max(0, Math.min(1, valueEst / 10))
       
-      result.push(
-        <group key={key} position={[x, y, 0]}>
-          {/* Visitation bar */}
-          <mesh position={[0, 0, normalized * 2]}>
-            <boxGeometry args={[0.6, 0.6, normalized * 4]} />
-            <meshBasicMaterial 
-              color={COLORS.primary.blue}
-              transparent
-              opacity={0.4 + normalized * 0.4}
-            />
-          </mesh>
-          
-          {/* Value estimate ring */}
-          {valueEst > 0.1 && (
-            <mesh position={[0, 0, 0.1]} rotation={[-Math.PI / 2, 0, 0]}>
-              <ringGeometry args={[0.4, 0.5, 16]} />
-              <meshBasicMaterial 
-                color={interpolateRewardColor(valueNorm)}
-                transparent
-                opacity={0.7}
-              />
-            </mesh>
-          )}
-        </group>
-      )
+      // Apply gaussian smoothing
+      const radius = 10
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          const px = tx + dx
+          const py = ty + dy
+          if (px >= 0 && px < size && py >= 0 && py < size) {
+            const dist2 = dx * dx + dy * dy
+            const weight = Math.exp(-dist2 / (2 * 4 * 4)) * normalized
+            const idx = (py * size + px) * 4
+            
+            // Blue channel for visitation
+            data[idx + 2] = Math.min(255, data[idx + 2] + weight * 255)
+            data[idx + 3] = Math.min(255, data[idx + 3] + weight * 128)
+          }
+        }
+      }
     })
     
-    return result
+    ctx.putImageData(imageData, 0, 0)
+    return new THREE.CanvasTexture(canvas)
   }, [stats])
   
-  return <group>{boxes}</group>
+  return (
+    <mesh position={[5, 5, 0.01]} rotation={[0, 0, 0]}>
+      <planeGeometry args={[10, 10]} />
+      <meshBasicMaterial 
+        map={texture}
+        transparent
+        opacity={0.5}
+        blending={THREE.AdditiveBlending}
+      />
+    </mesh>
+  )
 }
 
 // Create arrow from components
@@ -263,16 +315,19 @@ function Scene({ viewMode }: { viewMode: 'flow' | 'visits' | 'combined' }) {
   if (!flowField || !stateStats) return null
   
   return (
-    <group position={[-5, -5, 0]}>
-      {/* Grid floor */}
-      <gridHelper args={[10, 10, '#2A2A2D', '#1A1A1D']} position={[5, 0, 5]} />
+    <group position={[0, 0, 0]}>
+      {/* Grid on XY plane */}
+      <gridHelper args={[10, 10, '#2A2A2D', '#1A1A1D']} position={[5, 5, 0]} rotation={[0, 0, 0]} />
       
       {/* Always show reward heatmap */}
       <RewardHeatmap flowData={flowField} />
       
       {/* Conditional rendering based on view mode */}
       {(viewMode === 'flow' || viewMode === 'combined') && (
-        <FlowVectors flowData={flowField} />
+        <>
+          <FlowVectors flowData={flowField} />
+          <TrajectoryPaths />
+        </>
       )}
       
       {(viewMode === 'visits' || viewMode === 'combined') && (
@@ -281,27 +336,27 @@ function Scene({ viewMode }: { viewMode: 'flow' | 'visits' | 'combined' }) {
       
       {/* Reward peak indicators */}
       {flowField.reward_peaks.map((peak, i) => (
-        <group key={i} position={[peak.position[0] - 1, peak.position[1] - 1, 0]}>
-          {/* Glowing sphere at peak */}
-          <mesh position={[0, 0, 0.5]}>
-            <sphereGeometry args={[0.3, 16, 16]} />
+        <group key={i} position={[peak.position[0], peak.position[1], 0]}>
+          {/* Glowing cylinder at peak */}
+          <mesh position={[0, 0, 0.3]}>
+            <cylinderGeometry args={[0.3, 0.3, 0.6, 16]} />
             <meshStandardMaterial 
               color={COLORS.reward.high}
               transparent 
-              opacity={0.8}
+              opacity={0.7}
               emissive={COLORS.reward.high}
-              emissiveIntensity={0.5}
+              emissiveIntensity={0.3}
             />
           </mesh>
           {/* Light effect */}
           <pointLight 
-            position={[0, 0, 1]}
+            position={[0, 0, 0.5]}
             color={COLORS.reward.high}
-            intensity={peak.intensity / 10}
-            distance={3}
+            intensity={peak.intensity / 20}
+            distance={2}
           />
           {/* Label */}
-          <Html position={[0, 0, 1.5]} distanceFactor={10}>
+          <Html position={[0, 0, 0.8]} distanceFactor={10}>
             <div className="text-xs bg-dark-panel/90 px-2 py-1 rounded-md pointer-events-none">
               <div className="text-white font-medium">{peak.name}</div>
               <div className="text-[10px] text-neon-green">R={peak.intensity}</div>
@@ -480,9 +535,9 @@ export function GFlowNetFlowField() {
       
       {/* 3D Canvas */}
       <div className="flex-1">
-        <Canvas camera={{ position: [0, 20, 20], fov: 45 }}>
+        <Canvas camera={{ position: [5, -8, 15], fov: 45 }}>
           <color attach="background" args={['#0A0A0B']} />
-          <fog attach="fog" args={['#0A0A0B', 10, 60]} />
+          <fog attach="fog" args={['#0A0A0B', 15, 50]} />
           
           <ambientLight intensity={0.6} />
           <pointLight position={[10, 10, 10]} intensity={1.5} color={COLORS.primary.purple} />
@@ -495,10 +550,10 @@ export function GFlowNetFlowField() {
             enablePan={true}
             enableZoom={true}
             enableRotate={true}
-            target={[0, 0, 2]}
+            target={[5, 5, 0]}
             minDistance={10}
             maxDistance={40}
-            minPolarAngle={0.3}
+            minPolarAngle={0.2}
             maxPolarAngle={Math.PI / 2.5}
             autoRotate={false}
           />

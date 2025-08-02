@@ -26,93 +26,78 @@ interface TrajectoryBundle {
 // Smooth density heatmap visualization
 function TrajectoryDensity({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
   const densityTexture = useMemo(() => {
-    const size = 256 // High resolution for smooth appearance
+    const size = 128 // Reduced for better performance
     const canvas = document.createElement('canvas')
     canvas.width = size
     canvas.height = size
     const ctx = canvas.getContext('2d')!
     
-    // Create image data for direct pixel manipulation
-    const imageData = ctx.createImageData(size, size)
-    const data = imageData.data
+    // Clear canvas
+    ctx.fillStyle = 'rgba(0,0,0,0)'
+    ctx.fillRect(0, 0, size, size)
     
-    // Build density map with gaussian smoothing
-    const densityGrid = new Float32Array(size * size)
-    let maxDensity = 0
+    // Count visits per grid cell
+    const gridSize = 20 // 20x20 grid
+    const visitCounts = new Map<string, number>()
     
     trajectories.forEach(traj => {
-      traj.states.forEach((state, idx) => {
-        // Map state to texture coordinates
-        const tx = Math.floor((state[0] / 10) * size)
-        const ty = Math.floor((1 - state[1] / 10) * size) // Flip Y
-        
-        // Apply gaussian kernel for smooth density
-        const sigma = 8 // Spread of gaussian
-        const kernelSize = 25
-        
-        for (let dx = -kernelSize; dx <= kernelSize; dx++) {
-          for (let dy = -kernelSize; dy <= kernelSize; dy++) {
-            const px = tx + dx
-            const py = ty + dy
-            
-            if (px >= 0 && px < size && py >= 0 && py < size) {
-              const dist2 = dx * dx + dy * dy
-              const weight = Math.exp(-dist2 / (2 * sigma * sigma))
-              const index = py * size + px
-              densityGrid[index] += weight
-              maxDensity = Math.max(maxDensity, densityGrid[index])
-            }
-          }
+      traj.states.forEach(state => {
+        // Ensure state is within bounds [1, 10]
+        if (state[0] >= 1 && state[0] <= 10 && state[1] >= 1 && state[1] <= 10) {
+          const gridX = Math.floor((state[0] - 1) / 9 * (gridSize - 1))
+          const gridY = Math.floor((state[1] - 1) / 9 * (gridSize - 1))
+          const key = `${gridX},${gridY}`
+          visitCounts.set(key, (visitCounts.get(key) || 0) + 1)
         }
       })
     })
     
-    // Convert density to color
-    for (let i = 0; i < size * size; i++) {
-      const normalized = densityGrid[i] / maxDensity
-      const intensity = Math.pow(normalized, 0.7) // Gamma correction
+    // Find max visits for normalization
+    const maxVisits = Math.max(...visitCounts.values(), 1)
+    
+    // Draw density spots
+    visitCounts.forEach((count, key) => {
+      const [gridX, gridY] = key.split(',').map(Number)
+      const x = (gridX / (gridSize - 1)) * size
+      const y = size - (gridY / (gridSize - 1)) * size // Flip Y
       
-      // Color gradient: transparent -> blue -> purple -> yellow -> white
-      let r, g, b, a
+      const intensity = count / maxVisits
+      const radius = Math.max(8, Math.min(20, intensity * 30))
       
-      if (intensity < 0.01) {
-        r = 0; g = 0; b = 0; a = 0
-      } else if (intensity < 0.25) {
-        const t = intensity * 4
-        r = 0; g = 0; b = t * 255
-        a = t * 255
-      } else if (intensity < 0.5) {
-        const t = (intensity - 0.25) * 4
-        r = t * 128; g = 0; b = 255
-        a = 255
-      } else if (intensity < 0.75) {
-        const t = (intensity - 0.5) * 4
-        r = 128 + t * 127; g = t * 128; b = 255 - t * 128
-        a = 255
+      // Draw radial gradient
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
+      
+      if (intensity > 0.7) {
+        // Hot spots - yellow/white
+        gradient.addColorStop(0, `rgba(255, 255, 200, ${intensity})`)
+        gradient.addColorStop(0.5, `rgba(255, 200, 0, ${intensity * 0.7})`)
+        gradient.addColorStop(1, 'rgba(255, 100, 0, 0)')
+      } else if (intensity > 0.3) {
+        // Medium - purple/blue
+        gradient.addColorStop(0, `rgba(200, 100, 255, ${intensity})`)
+        gradient.addColorStop(0.5, `rgba(100, 50, 255, ${intensity * 0.7})`)
+        gradient.addColorStop(1, 'rgba(50, 0, 200, 0)')
       } else {
-        const t = (intensity - 0.75) * 4
-        r = 255; g = 128 + t * 127; b = 128 + t * 127
-        a = 255
+        // Low - blue
+        gradient.addColorStop(0, `rgba(0, 150, 255, ${intensity})`)
+        gradient.addColorStop(0.5, `rgba(0, 100, 200, ${intensity * 0.5})`)
+        gradient.addColorStop(1, 'rgba(0, 50, 150, 0)')
       }
       
-      data[i * 4] = r
-      data[i * 4 + 1] = g
-      data[i * 4 + 2] = b
-      data[i * 4 + 3] = a
-    }
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, size, size)
+    })
     
-    ctx.putImageData(imageData, 0, 0)
     return new THREE.CanvasTexture(canvas)
   }, [trajectories])
   
   return (
-    <mesh position={[0, 0, 0.01]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[0, 0, 0.02]} rotation={[0, 0, 0]}>
       <planeGeometry args={[10, 10]} />
       <meshBasicMaterial 
         map={densityTexture} 
         transparent 
         opacity={0.9}
-        side={THREE.DoubleSide}
       />
     </mesh>
   )
@@ -121,21 +106,23 @@ function TrajectoryDensity({ trajectories }: { trajectories: TrajectoryBundle['t
 // Trajectory paths with reward-based coloring
 function TrajectoryPaths({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
   const sortedTrajectories = useMemo(() => {
-    return [...trajectories].sort((a, b) => b.total_reward - a.total_reward)
+    return [...trajectories].sort((a, b) => b.total_reward - a.total_reward).slice(0, 20) // Show top 20
   }, [trajectories])
   
   return (
     <group>
       {sortedTrajectories.map((traj, i) => {
-        const points = traj.states.map((state, j) => 
-          new THREE.Vector3(state[0], state[1], j * 0.1)
+        // Map coordinates from [1,10] to [-5,5] for centering
+        const points = traj.states.map((state) => 
+          new THREE.Vector3(state[0] - 5.5, state[1] - 5.5, 0.05)
         )
         
-        // Color based on reward rank
-        const color = new THREE.Color().setHSL(
-          0.3 - (i / trajectories.length) * 0.3, // Green (high) to Red (low)
-          1,
-          0.5
+        // Color gradient from high reward (green) to low reward (red)
+        const normalizedRank = i / Math.max(sortedTrajectories.length - 1, 1)
+        const color = new THREE.Color().lerpColors(
+          new THREE.Color(0x00ff88), // Green for high reward
+          new THREE.Color(0xff0066), // Red for low reward
+          normalizedRank
         )
         
         return (
@@ -144,7 +131,7 @@ function TrajectoryPaths({ trajectories }: { trajectories: TrajectoryBundle['tra
             points={points}
             color={color}
             lineWidth={2}
-            opacity={0.3 + (1 - i / trajectories.length) * 0.4}
+            opacity={0.7 - normalizedRank * 0.4}
             transparent
           />
         )
@@ -162,16 +149,21 @@ function RewardLandscape({ peaks }: { peaks: TrajectoryBundle['reward_peaks'] })
     canvas.height = size
     const ctx = canvas.getContext('2d')!
     
+    // Clear with dark background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)'
+    ctx.fillRect(0, 0, size, size)
+    
     // Create gradient for each peak
     peaks.forEach(peak => {
-      const x = (peak.position[0] / 10) * size
-      const y = (1 - peak.position[1] / 10) * size
-      const radius = peak.intensity * 15
+      // Map from [1,10] range to canvas coordinates
+      const x = ((peak.position[0] - 1) / 9) * size
+      const y = size - ((peak.position[1] - 1) / 9) * size // Flip Y
+      const radius = peak.intensity * 20
       
       const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
-      gradient.addColorStop(0, `rgba(0, 255, 136, ${peak.intensity / 10})`)
-      gradient.addColorStop(0.5, `rgba(0, 255, 136, ${peak.intensity / 20})`)
-      gradient.addColorStop(1, 'rgba(0, 255, 136, 0)')
+      gradient.addColorStop(0, `rgba(0, 255, 136, ${peak.intensity / 15})`)
+      gradient.addColorStop(0.5, `rgba(0, 200, 100, ${peak.intensity / 30})`)
+      gradient.addColorStop(1, 'rgba(0, 100, 50, 0)')
       
       ctx.fillStyle = gradient
       ctx.fillRect(0, 0, size, size)
@@ -183,37 +175,38 @@ function RewardLandscape({ peaks }: { peaks: TrajectoryBundle['reward_peaks'] })
   return (
     <group>
       {/* Reward heatmap on ground */}
-      <mesh position={[0, 0, -0.01]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, -0.01]} rotation={[0, 0, 0]}>
         <planeGeometry args={[10, 10]} />
         <meshBasicMaterial 
           map={rewardTexture}
           transparent
           opacity={0.6}
-          blending={THREE.AdditiveBlending}
         />
       </mesh>
       
-      {/* Peak markers */}
+      {/* Peak markers - adjust position to be within [1,10] range */}
       {peaks.map((peak, i) => (
-        <group key={i} position={[peak.position[0], peak.position[1], 0]}>
-          <mesh position={[0, 0, 0.1]}>
-            <sphereGeometry args={[0.2, 16, 16]} />
+        <group key={i} position={[peak.position[0] - 5.5, peak.position[1] - 5.5, 0]}>
+          <mesh position={[0, 0, 0.3]}>
+            <cylinderGeometry args={[0.2, 0.2, 0.6, 16]} />
             <meshStandardMaterial 
               color={COLORS.reward.high}
               emissive={COLORS.reward.high}
-              emissiveIntensity={0.5}
+              emissiveIntensity={0.2}
+              transparent
+              opacity={0.7}
             />
           </mesh>
           <pointLight 
-            position={[0, 0, 1]}
+            position={[0, 0, 0.5]}
             color={COLORS.reward.high}
-            intensity={peak.intensity / 10}
-            distance={5}
+            intensity={peak.intensity / 20}
+            distance={2}
           />
-          <Html position={[0, 0, 1]} distanceFactor={10}>
+          <Html position={[0, 0, 0.8]} distanceFactor={10}>
             <div className="text-xs bg-dark-panel/90 px-2 py-1 rounded-md whitespace-nowrap pointer-events-none">
               <div className="text-white font-medium">{peak.name}</div>
-              <div className="text-[10px] text-neon-green">Reward: {peak.intensity}</div>
+              <div className="text-[10px] text-neon-green">R={peak.intensity}</div>
             </div>
           </Html>
         </group>
@@ -226,32 +219,35 @@ function RewardLandscape({ peaks }: { peaks: TrajectoryBundle['reward_peaks'] })
 function PosteriorVisualization({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
   const contourLines = useMemo(() => {
     // Calculate endpoint density
-    const gridSize = 30
+    const gridSize = 20
     const density = new Float32Array(gridSize * gridSize)
     let maxDensity = 0
     
     trajectories.forEach(traj => {
       const endpoint = traj.states[traj.states.length - 1]
-      const gx = Math.floor((endpoint[0] / 10) * gridSize)
-      const gy = Math.floor((endpoint[1] / 10) * gridSize)
-      
-      // Gaussian smoothing
-      for (let dx = -3; dx <= 3; dx++) {
-        for (let dy = -3; dy <= 3; dy++) {
-          const x = gx + dx
-          const y = gy + dy
-          if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
-            const weight = Math.exp(-(dx*dx + dy*dy) / 4)
-            const idx = y * gridSize + x
-            density[idx] += weight * traj.total_reward
-            maxDensity = Math.max(maxDensity, density[idx])
+      // Map from [1,10] to grid coordinates
+      if (endpoint[0] >= 1 && endpoint[0] <= 10 && endpoint[1] >= 1 && endpoint[1] <= 10) {
+        const gx = Math.floor((endpoint[0] - 1) / 9 * (gridSize - 1))
+        const gy = Math.floor((endpoint[1] - 1) / 9 * (gridSize - 1))
+        
+        // Gaussian smoothing with smaller kernel
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = -2; dy <= 2; dy++) {
+            const x = gx + dx
+            const y = gy + dy
+            if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
+              const weight = Math.exp(-(dx*dx + dy*dy) / 2)
+              const idx = y * gridSize + x
+              density[idx] += weight * traj.total_reward
+              maxDensity = Math.max(maxDensity, density[idx])
+            }
           }
         }
       }
     })
     
     // Generate contour lines at different levels
-    const levels = [0.2, 0.4, 0.6, 0.8]
+    const levels = [0.3, 0.5, 0.7, 0.9]
     const lines: JSX.Element[] = []
     
     levels.forEach((level, levelIdx) => {
@@ -268,22 +264,19 @@ function PosteriorVisualization({ trajectories }: { trajectories: TrajectoryBund
           const v3 = density[idx + gridSize + 1]
           
           // Check if contour crosses this cell
-          const crosses = [
-            (v0 < threshold && v1 >= threshold) || (v0 >= threshold && v1 < threshold),
-            (v1 < threshold && v3 >= threshold) || (v1 >= threshold && v3 < threshold),
-            (v3 < threshold && v2 >= threshold) || (v3 >= threshold && v2 < threshold),
-            (v2 < threshold && v0 >= threshold) || (v2 >= threshold && v0 < threshold)
-          ]
-          
-          if (crosses.some(c => c)) {
-            const wx = (x + 0.5) / gridSize * 10
-            const wy = (y + 0.5) / gridSize * 10
-            points.push(new THREE.Vector3(wx, wy, 0.1 + levelIdx * 0.05))
+          if (v0 > 0 || v1 > 0 || v2 > 0 || v3 > 0) {
+            const avg = (v0 + v1 + v2 + v3) / 4
+            if (Math.abs(avg - threshold) < threshold * 0.2) {
+              // Map back to world coordinates centered at origin
+              const wx = (x / (gridSize - 1)) * 10 - 5
+              const wy = (y / (gridSize - 1)) * 10 - 5
+              points.push(new THREE.Vector3(wx, wy, 0.1 + levelIdx * 0.02))
+            }
           }
         }
       }
       
-      if (points.length > 2) {
+      if (points.length > 5) {
         const geometry = new THREE.BufferGeometry().setFromPoints(points)
         const color = new THREE.Color().setHSL(0.8 - level * 0.3, 1, 0.6)
         
@@ -293,7 +286,7 @@ function PosteriorVisualization({ trajectories }: { trajectories: TrajectoryBund
               color={color} 
               linewidth={2} 
               transparent 
-              opacity={0.8}
+              opacity={0.6}
             />
           </line>
         )
@@ -306,8 +299,8 @@ function PosteriorVisualization({ trajectories }: { trajectories: TrajectoryBund
   return (
     <group>
       {contourLines}
-      <Html position={[5, 8, 1]}>
-        <div className="text-xs bg-dark-panel/90 px-3 py-2 rounded-md">
+      <Html position={[3, 3, 1]}>
+        <div className="text-xs bg-dark-panel/90 px-3 py-2 rounded-md pointer-events-none">
           <div className="font-medium mb-1">Posterior P(x|R)</div>
           <div className="text-[10px] space-y-1">
             <div className="flex items-center gap-2">
@@ -340,8 +333,8 @@ function Scene({ viewMode }: { viewMode: 'density' | 'posterior' | 'combined' })
   
   return (
     <group position={[0, 0, 0]}>
-      {/* Grid helper on the ground plane */}
-      <gridHelper args={[10, 10, '#2A2A2D', '#1A1A1D']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0]} />
+      {/* Grid on XY plane - centered at origin */}
+      <gridHelper args={[10, 10, '#3A3A3D', '#2A2A2D']} position={[0, 0, 0]} rotation={[0, 0, 0]} />
       
       {/* Always show reward landscape as base layer */}
       <RewardLandscape peaks={data.reward_peaks} />
@@ -349,10 +342,10 @@ function Scene({ viewMode }: { viewMode: 'density' | 'posterior' | 'combined' })
       {/* Conditional rendering based on view mode */}
       {(viewMode === 'density' || viewMode === 'combined') && (
         <>
-          {/* Trajectory density heatmap on same plane */}
-          <TrajectoryDensity trajectories={data.trajectories} />
-          {/* Trajectory paths in 3D space above */}
+          {/* Trajectory paths on XY plane */}
           <TrajectoryPaths trajectories={data.trajectories} />
+          {/* Trajectory density heatmap overlaid */}
+          <TrajectoryDensity trajectories={data.trajectories} />
         </>
       )}
       
@@ -480,14 +473,14 @@ export function GFlowNetDistribution3D() {
         </div>
       </div>
       
-      {/* 3D Canvas - Optimized camera and lighting */}
+      {/* 3D Canvas - Better camera angle for XY plane viewing */}
       <div className="flex-1">
         <Canvas 
-          camera={{ position: [15, 15, 15], fov: 50 }}
+          camera={{ position: [0, -12, 10], fov: 50 }}
           gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         >
           <color attach="background" args={['#0A0A0B']} />
-          <fog attach="fog" args={['#0A0A0B', 20, 80]} />
+          <fog attach="fog" args={['#0A0A0B', 20, 50]} />
           
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 15]} intensity={1.5} color={COLORS.primary.purple} />
@@ -500,13 +493,12 @@ export function GFlowNetDistribution3D() {
             enablePan={true}
             enableZoom={true}
             enableRotate={true}
-            target={[0, 0, 3]}
-            minDistance={10}
-            maxDistance={50}
-            minPolarAngle={0.2}
-            maxPolarAngle={Math.PI / 2.2}
-            autoRotate={true}
-            autoRotateSpeed={0.5}
+            target={[0, 0, 0]}
+            minDistance={8}
+            maxDistance={25}
+            minPolarAngle={0.1}
+            maxPolarAngle={Math.PI / 2.5}
+            autoRotate={false}
           />
           
           <EffectComposer>
