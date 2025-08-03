@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Session Continuity
+
+When starting a conversation:
+1. Check `.claude/sessions/` for recent session logs
+2. Load the latest session context if user requests it
+3. Continue from previous TODOs and decisions
+4. See `.claude/CONVERSATION_PERSISTENCE.md` for details
+
 ## Development Principles
 
 - Remember forever, do not write Co-Authored-By: Claude <noreply@anthropic.com> or anything related to AI or Claude in the future and now
