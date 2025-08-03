@@ -4,6 +4,114 @@
 
 The GFlowNet.jl web visualization system provides real-time, interactive insights into GFlowNet training dynamics and learned policies. It consists of a React/TypeScript frontend with Three.js 3D graphics and a Julia backend REST API.
 
+## Recent Updates (January 2025)
+
+### Major Enhancements
+- **Monitor Tab**: Two-row layout without scrolling, restored trajectory sampling window
+- **Training Dashboard**: Full history display with synchronized zoom across charts
+- **3D Visualization**: Smooth density surfaces, discrete bars toggle, sphere-based posterior display
+- **Bug Fixes**: Navigation issues, 3D alignment, depth rendering improvements
+
+## Detailed Changelog (January 2025)
+
+### Monitor Tab Improvements
+1. **Layout Optimization**
+   - Restored trajectory sampling window with real-time updates
+   - Fixed two-row design eliminating scroll requirements:
+     - Row 1: Trajectory visualization (66%) + Real-time metrics (33%)
+     - Row 2: Training progress charts spanning full width
+   - Reduced padding and font sizes for better space utilization
+   - Improved responsive design for different screen sizes
+
+2. **Real-Time Data Updates**
+   - Metrics update every 250ms with smooth number transitions
+   - Training progress charts refresh every 500ms
+   - Synchronized updates across all components
+   - No visual jitter or layout shifts during updates
+
+### Training Dashboard Enhancements
+1. **Full History Display**
+   - Removed artificial slice limitation showing only recent data
+   - Now displays complete training history from episode 0
+   - Better understanding of long-term training dynamics
+   - Memory-efficient rendering for thousands of data points
+
+2. **Synchronized Zoom Feature**
+   - Added Recharts Brush component for interactive data exploration
+   - Synchronized zoom across all charts (loss, reward, components)
+   - Brush on any chart updates all others simultaneously
+   - Reset button to restore full view
+
+3. **Chart Improvements**
+   - Removed exploration_rate parameter (not used in GFlowNets)
+   - Replaced exploration chart with loss components comparison
+   - Shows individual loss components: trajectory balance, flow matching, etc.
+   - Improved chart layouts with reduced margins
+   - Better color scheme for distinguishing multiple lines
+
+### 3D Visualization Overhaul
+1. **Smooth Density Surface**
+   - Implemented Gaussian smoothing with reward-weighted kernel:
+     ```javascript
+     kernel_weight = exp(-distance²/(2σ²)) * (1 + reward/max_reward)
+     ```
+   - Natural hill-like landscape appearance
+   - Color gradient: blue → cyan → green → yellow → orange
+   - 256x256 resolution for smooth rendering
+   - GPU-accelerated texture mapping
+
+2. **Discrete Bars Visualization**
+   - Added toggle between smooth surface and discrete bars
+   - Bar height proportional to endpoint density
+   - Bar color indicates average reward
+   - Useful for understanding discrete state visitation
+
+3. **Posterior Probability Display**
+   - Replaced contour lines with 3D spheres
+   - Sphere size: proportional to endpoint probability P(s_T)
+   - Sphere color: gradient from purple (low reward) to pink (high reward)
+   - Interactive labels showing:
+     - P: Endpoint probability
+     - R̄: Average reward at that endpoint
+   - Only shows significant endpoints (P > 0.01)
+
+4. **Coordinate System Fix**
+   - Fixed to proper Y-up coordinate system
+   - Grid renders on horizontal XZ plane
+   - All 3D elements properly aligned
+   - Camera positioned for optimal 3D perspective
+   - Improved depth rendering and occlusion
+
+### Bug Fixes
+1. **Navigation Black Screen**
+   - Fixed "Start Training" button navigation issue
+   - Proper component lifecycle management
+   - Cleanup of Three.js resources on unmount
+
+2. **3D Rendering Issues**
+   - Fixed plane alignment with grid
+   - Corrected depth buffer configuration
+   - Resolved z-fighting between overlapping elements
+   - Fixed transparency sorting for spheres
+
+3. **Component References**
+   - Removed references to missing DistributionComparison component
+   - Updated all import statements
+   - Fixed TypeScript type errors
+
+### Performance Optimizations
+1. **Rendering Efficiency**
+   - Memoized expensive 3D calculations
+   - Implemented frustum culling for spheres
+   - Texture caching for density surface
+   - Reduced re-renders with React.memo
+
+2. **Data Management**
+   - Efficient trajectory storage with circular buffer
+   - Incremental density updates
+   - Lazy loading of 3D components
+   - WebGL context optimization
+
 ## System Architecture
 
 ```
@@ -69,18 +177,30 @@ src/
 - Training metrics poll every 250ms for smooth number transitions
 - Chart data refreshes every 500ms during active training
 - WebSocket-ready architecture (currently using polling)
+- Synchronized updates across all visualization components
+- Real-time trajectory sampling window with live updates
 
 #### 2. 3D Visualization
-- **Density Heatmaps**: High-resolution (256x256) with Gaussian smoothing
-- **Trajectory Paths**: Color-coded by reward value
-- **Reward Landscape**: Gradient visualization of reward structure
-- **Camera Controls**: OrbitControls with auto-rotation
+- **Density Surfaces**: High-resolution (256x256) with reward-weighted Gaussian smoothing
+- **Discrete Bars**: Toggle between smooth surface and discrete bar visualization
+- **Posterior Spheres**: 3D spheres showing endpoint probabilities with interactive labels
+- **Trajectory Paths**: Color-coded by reward value with proper depth sorting
+- **Reward Landscape**: Natural hill-like appearance with intuitive color gradients
+- **Camera Controls**: OrbitControls with auto-rotation and optimal viewing angle
 
-#### 3. Performance Optimizations
+#### 3. Interactive Analysis
+- **Synchronized Zoom**: Brush component for exploring training history across all charts
+- **Density Toggle**: Switch between smooth and discrete density representations
+- **Full History View**: Complete training history without artificial limitations
+- **Loss Components**: Detailed breakdown of individual loss contributions
+
+#### 4. Performance Optimizations
 - Memoized computations for expensive 3D calculations
 - Texture-based rendering for smooth heatmaps
-- LOD (Level of Detail) for trajectory rendering
+- Frustum culling for sphere rendering
+- Circular buffer for efficient trajectory storage
 - WebGL power preference set to "high-performance"
+- Incremental density updates for real-time responsiveness
 
 ## Backend Architecture
 
@@ -121,7 +241,11 @@ GET  /api/analysis/distribution # Distribution statistics
   "elapsed_time": 75.0,
   "current_loss": 0.543,
   "current_reward": 18.7,
-  "current_exploration": 0.15
+  "loss_components": {
+    "trajectory_balance": 0.421,
+    "flow_matching": 0.122,
+    "regularization": 0.0
+  }
 }
 ```
 

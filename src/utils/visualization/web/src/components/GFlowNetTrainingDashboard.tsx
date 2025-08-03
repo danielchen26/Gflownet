@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Brush } from 'recharts'
 import { motion } from 'framer-motion'
 import { TrendingUp, TrendingDown, Activity, Zap, Target, Gauge } from 'lucide-react'
 import axios from '../lib/axios'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 interface TrainingData {
   episodes: number[]
@@ -11,13 +11,11 @@ interface TrainingData {
   rewards: number[]
   tb_losses: number[]
   flow_losses: number[]
-  exploration_rates: number[]
   metrics: {
     mean_loss: number
     mean_reward: number
     mean_tb_loss: number
     mean_flow_loss: number
-    current_exploration: number
     total_episodes: number
     convergence_estimate: number
   }
@@ -61,7 +59,7 @@ function MetricCard({
   return (
     <motion.div
       whileHover={{ scale: 1.02 }}
-      className="glass-dark rounded-xl p-4 border border-dark-border/50"
+      className="glass-dark rounded-lg p-2 border border-dark-border/50"
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-muted-foreground">{title}</span>
@@ -69,11 +67,11 @@ function MetricCard({
       </div>
       <div className="flex items-end justify-between">
         <div>
-          <div className="text-2xl font-bold">
+          <div className="text-lg font-bold">
             {typeof value === 'number' ? value.toFixed(4) : value}
           </div>
           {subtitle && (
-            <div className="text-xs text-muted-foreground mt-1">{subtitle}</div>
+            <div className="text-[10px] text-muted-foreground">{subtitle}</div>
           )}
         </div>
         {percentage !== undefined && (
@@ -90,6 +88,9 @@ function MetricCard({
 }
 
 export function GFlowNetTrainingDashboard() {
+  const [brushStartIndex, setBrushStartIndex] = useState<number | null>(null)
+  const [brushEndIndex, setBrushEndIndex] = useState<number | null>(null)
+  
   // Poll for current training state
   const { data: trainingState } = useQuery({
     queryKey: ['training-state'],
@@ -112,18 +113,16 @@ export function GFlowNetTrainingDashboard() {
     refetchInterval: isTraining ? 500 : false, // Update during training
   })
   
-  // Prepare chart data - only show last 50 episodes for better visualization
+  // Prepare chart data - show ALL episodes for full history
   const chartData = useMemo(() => {
     if (!history) return []
     
-    const startIdx = Math.max(0, history.episodes.length - 50)
-    return history.episodes.slice(startIdx).map((episode, i) => ({
+    return history.episodes.map((episode, i) => ({
       episode: episode,
-      loss: history.losses[startIdx + i],
-      reward: history.rewards[startIdx + i],
-      tb_loss: history.tb_losses[startIdx + i],
-      flow_loss: history.flow_losses[startIdx + i],
-      exploration_rate: history.exploration_rates[startIdx + i],
+      loss: history.losses[i],
+      reward: history.rewards[i],
+      tb_loss: history.tb_losses[i],
+      flow_loss: history.flow_losses[i],
     }))
   }, [history])
   
@@ -132,9 +131,9 @@ export function GFlowNetTrainingDashboard() {
   const metrics = history.metrics
   
   return (
-    <div className="h-full flex flex-col space-y-2 p-4">
+    <div className="h-full flex flex-col space-y-1 p-2">
       {/* Metrics Grid with live updates */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-1">
         <MetricCard
           title="Current Loss"
           value={trainingState?.current_loss || history.losses[history.losses.length - 1]}
@@ -163,19 +162,19 @@ export function GFlowNetTrainingDashboard() {
       </div>
       
       {/* Charts Grid - 2x2 layout */}
-      <div className="flex-1 grid grid-cols-2 gap-3">
+      <div className="flex-1 grid grid-cols-2 gap-1">
         {/* Loss Curves - Top Left */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="glass-dark rounded-xl p-3"
+          className="glass-dark rounded-lg p-2"
         >
           <h3 className="text-xs font-medium text-muted-foreground mb-2">
             Training Losses
           </h3>
           <div style={{ width: '100%', height: 'calc(100% - 32px)' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2D" />
                 <XAxis 
                   dataKey="episode" 
@@ -222,6 +221,16 @@ export function GFlowNetTrainingDashboard() {
                   iconType="line"
                   wrapperStyle={{ fontSize: '10px' }}
                 />
+                <Brush
+                  dataKey="episode"
+                  height={30}
+                  stroke="#666"
+                  fill="#1a1a1d"
+                  onChange={(e: any) => {
+                    setBrushStartIndex(e.startIndex)
+                    setBrushEndIndex(e.endIndex)
+                  }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -232,32 +241,25 @@ export function GFlowNetTrainingDashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="glass-dark rounded-xl p-3"
+          className="glass-dark rounded-lg p-2"
         >
           <h3 className="text-xs font-medium text-muted-foreground mb-2">
-            Reward & Exploration
+            Mean Reward Progress
           </h3>
           <div style={{ width: '100%', height: 'calc(100% - 32px)' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 2, right: 30, left: 2, bottom: 2 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2D" />
                 <XAxis 
                   dataKey="episode" 
                   stroke="#666"
                   tick={{ fill: '#666', fontSize: 10 }}
+                  domain={brushStartIndex !== null && brushEndIndex !== null ? [chartData[brushStartIndex].episode, chartData[brushEndIndex].episode] : ['dataMin', 'dataMax']}
                 />
                 <YAxis 
-                  yAxisId="left"
                   stroke="#00FF88"
                   tick={{ fill: '#00FF88', fontSize: 10 }}
                   domain={['auto', 'auto']}
-                />
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  stroke="#FFA07A"
-                  tick={{ fill: '#FFA07A', fontSize: 10 }}
-                  domain={[0, 1]}
                 />
                 <Tooltip content={<CustomTooltip />} />
                 
@@ -269,7 +271,6 @@ export function GFlowNetTrainingDashboard() {
                 </defs>
                 
                 <Area
-                  yAxisId="left"
                   type="monotone"
                   dataKey="reward"
                   stroke="#00FF88"
@@ -279,17 +280,6 @@ export function GFlowNetTrainingDashboard() {
                   name="Mean Reward"
                 />
                 
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="exploration_rate"
-                  stroke="#FFA07A"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Exploration Rate"
-                  strokeDasharray="5 5"
-                />
-                
                 <Legend 
                   verticalAlign="top"
                   align="right"
@@ -302,39 +292,59 @@ export function GFlowNetTrainingDashboard() {
           </div>
         </motion.div>
         
-        {/* Training Progress - Bottom Left */}
+        {/* Loss Components - Bottom Left */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="glass-dark rounded-xl p-3"
+          className="glass-dark rounded-lg p-2"
         >
           <h3 className="text-xs font-medium text-muted-foreground mb-2">
-            Training Progress
+            Loss Components Comparison
           </h3>
           <div style={{ width: '100%', height: 'calc(100% - 32px)' }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+              <AreaChart data={chartData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2D" />
                 <XAxis 
                   dataKey="episode" 
                   stroke="#666"
                   tick={{ fill: '#666', fontSize: 10 }}
+                  domain={brushStartIndex !== null && brushEndIndex !== null ? [chartData[brushStartIndex].episode, chartData[brushEndIndex].episode] : ['dataMin', 'dataMax']}
                 />
                 <YAxis 
                   stroke="#666"
                   tick={{ fill: '#666', fontSize: 10 }}
-                  domain={[0, 1]}
+                  domain={['auto', 'auto']}
                 />
                 <Tooltip content={<CustomTooltip />} />
                 
-                <Line
+                <defs>
+                  <linearGradient id="tbGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#00D9FF" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#00D9FF" stopOpacity={0.1}/>
+                  </linearGradient>
+                  <linearGradient id="flowGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#FF006E" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#FF006E" stopOpacity={0.1}/>
+                  </linearGradient>
+                </defs>
+                
+                <Area
                   type="monotone"
-                  dataKey="exploration_rate"
-                  stroke="#FFA07A"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Exploration Rate"
+                  dataKey="tb_loss"
+                  stackId="1"
+                  stroke="#00D9FF"
+                  fill="url(#tbGradient)"
+                  name="TB Loss"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="flow_loss"
+                  stackId="1"
+                  stroke="#FF006E"
+                  fill="url(#flowGradient)"
+                  name="Flow Loss"
                 />
                 
                 <Legend 
@@ -344,7 +354,7 @@ export function GFlowNetTrainingDashboard() {
                   iconType="line"
                   wrapperStyle={{ fontSize: '10px' }}
                 />
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </motion.div>
@@ -354,7 +364,7 @@ export function GFlowNetTrainingDashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
-          className="glass-dark rounded-xl p-3"
+          className="glass-dark rounded-lg p-2"
         >
           <h3 className="text-xs font-medium text-muted-foreground mb-2">
             Training Statistics
@@ -376,9 +386,9 @@ export function GFlowNetTrainingDashboard() {
             </div>
             <div className="space-y-2">
               <div className="glass-dark rounded-lg px-2 py-1">
-                <div className="text-[10px] text-muted-foreground">Exploration Rate</div>
-                <div className="text-sm font-medium text-neon-orange">
-                  {(trainingState?.current_exploration || metrics.current_exploration * 100).toFixed(1)}%
+                <div className="text-[10px] text-muted-foreground">TB Loss (20ep)</div>
+                <div className="text-sm font-medium text-neon-purple">
+                  {metrics.mean_tb_loss.toFixed(4)}
                 </div>
               </div>
               <div className="glass-dark rounded-lg px-2 py-1">

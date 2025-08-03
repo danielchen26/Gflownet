@@ -547,3 +547,67 @@ When providing training guidance:
 6. **Expected Outcomes**: What to expect with suggested changes
 
 Remember: Training GFlowNets is as much art as science. Start with standard configurations, monitor carefully, and adjust based on domain-specific behavior.
+
+## Visualization System Integration
+
+### Real-Time Training Monitoring
+The GFlowNet.jl visualization system provides powerful tools for monitoring training:
+
+```julia
+# Start training with visualization
+cd("examples/core_features/visualization")
+run(`julia show_visualization.jl`)
+# Browser opens automatically at http://localhost:3000
+```
+
+### Key Visualization Features for Training
+1. **Live Metrics Dashboard**
+   - Loss curves with 250ms updates
+   - Reward tracking
+   - Loss component breakdown (TB, FM, regularization)
+   - Full training history with synchronized zoom
+
+2. **3D Distribution Monitoring**
+   - Real-time density surface updates
+   - Toggle between smooth surface and discrete bars
+   - Posterior probability spheres with labels
+   - Reward landscape visualization
+
+3. **Trajectory Analysis**
+   - Live trajectory sampling window
+   - Path visualization with reward coloring
+   - State visitation heatmaps
+
+### Using Visualization for Hyperparameter Tuning
+```julia
+# Monitor these visual indicators:
+# 1. Loss Components Chart: Shows individual contribution of each loss term
+# 2. Density Surface: Watch for mode collapse (single peak) or good exploration (multiple peaks)
+# 3. Trajectory Diversity: Variety in sampled paths indicates healthy exploration
+# 4. Reward Distribution: Should gradually focus on high-reward regions
+
+# Adjustments based on visualization:
+# - If density is too focused: Increase temperature or learning rate
+# - If loss oscillates: Reduce learning rate
+# - If exploration is poor: Try DETAILED_BALANCE objective
+# - If convergence is slow: Consider SUB_TRAJECTORY_BALANCE for long trajectories
+```
+
+### Integration with Custom Training Loops
+```julia
+# For real GFlowNet integration (replace simple_server.jl):
+function create_training_server(model, env)
+    @post "/api/training/step" function()
+        # Your training step
+        loss, metrics = train_step!(model, env)
+        
+        # Return for visualization
+        json(Dict(
+            "loss" => loss,
+            "loss_components" => metrics.components,
+            "reward" => metrics.avg_reward,
+            "episode" => metrics.episode
+        ))
+    end
+end
+```

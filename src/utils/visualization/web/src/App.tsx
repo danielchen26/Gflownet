@@ -6,6 +6,7 @@ import { GFlowNetFlowField } from './visualizations/GFlowNetFlowField'
 import { ProblemSetup } from './components/ProblemSetup'
 import { MonitoringDashboard } from './components/MonitoringDashboard'
 import { useWebSocket } from './hooks/useWebSocket'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 function App() {
   const [activeView, setActiveView] = useState<'setup' | 'monitor' | 'distribution' | 'flow'>('setup')
@@ -13,6 +14,8 @@ function App() {
   const { isConnected } = useWebSocket()
   
   const handleStartTraining = async (config: any) => {
+    console.log('Starting training with config:', config)
+    
     // Reset training on server
     try {
       await fetch('http://localhost:8080/api/training/reset', {
@@ -24,6 +27,7 @@ function App() {
     }
     
     setProblemConfig(config)
+    console.log('Setting active view to monitor')
     setActiveView('monitor')
   }
 
@@ -112,13 +116,16 @@ function App() {
       </header>
 
       {/* Main content */}
-      <main className="relative z-10 flex-1 overflow-hidden">
+      <main className="relative z-10 flex-1 overflow-hidden h-[calc(100vh-73px)]">
         {activeView === 'setup' && (
           <ProblemSetup onStart={handleStartTraining} />
         )}
         
         {activeView === 'monitor' && problemConfig && (
-          <MonitoringDashboard problemConfig={problemConfig} />
+          <ErrorBoundary>
+            {console.log('Rendering MonitoringDashboard with config:', problemConfig)}
+            <MonitoringDashboard problemConfig={problemConfig} />
+          </ErrorBoundary>
         )}
         
         {activeView === 'distribution' && (

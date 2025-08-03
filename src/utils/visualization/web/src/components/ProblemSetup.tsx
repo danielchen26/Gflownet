@@ -11,7 +11,6 @@ interface ProblemConfig {
   }>
   training_objective: 'TB' | 'SubTB' | 'DB' | 'FM'
   n_episodes: number
-  exploration_rate: number
 }
 
 interface ProblemSetupProps {
@@ -28,7 +27,6 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
     ],
     training_objective: 'TB',
     n_episodes: 1000,
-    exploration_rate: 0.3,
   })
   
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null)
@@ -251,21 +249,6 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             />
           </div>
           
-          {/* Exploration Rate */}
-          <div className="mb-4">
-            <label className="text-sm font-medium block mb-2">
-              Exploration Rate: {config.exploration_rate.toFixed(2)}
-            </label>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={config.exploration_rate}
-              onChange={(e) => setConfig({ ...config, exploration_rate: Number(e.target.value) })}
-              className="w-full"
-            />
-          </div>
           
           {/* Start Button */}
           <motion.button

@@ -13,11 +13,11 @@ export function MonitoringDashboard({ problemConfig }: MonitoringDashboardProps)
   const [expandedView, setExpandedView] = useState<'none' | 'trajectory' | 'training'>('none')
   
   return (
-    <div className="h-screen flex flex-col bg-dark-bg">
+    <div className="h-full flex flex-col bg-dark-bg">
       {/* Header */}
-      <div className="border-b border-dark-border/50 px-6 py-3 flex items-center justify-between">
+      <div className="border-b border-dark-border/50 px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <h2 className="text-xl font-semibold">Training Monitor</h2>
+          <h2 className="text-lg font-semibold">Training Monitor</h2>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Activity className="w-4 h-4 text-neon-green animate-pulse" />
             <span>Live Training</span>
@@ -25,7 +25,7 @@ export function MonitoringDashboard({ problemConfig }: MonitoringDashboardProps)
         </div>
         
         {/* Grid Info */}
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex items-center gap-4 text-xs">
           <span className="text-muted-foreground">
             Grid: {problemConfig.grid_size}×{problemConfig.grid_size}
           </span>
@@ -38,44 +38,74 @@ export function MonitoringDashboard({ problemConfig }: MonitoringDashboardProps)
         </div>
       </div>
       
-      {/* Main Content */}
-      <div className="flex-1 p-4 overflow-auto">
+      {/* Main Content - Two Rows Layout */}
+      <div className="flex-1 flex flex-col p-2 gap-2 overflow-hidden">
         {expandedView === 'none' ? (
-          <div className="h-full grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
-            {/* Left: 2D Trajectory Visualization */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="lg:col-span-2 glass-dark rounded-xl p-4 relative group"
-            >
-              <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => setExpandedView('trajectory')}
-                  className="p-2 bg-dark-panel/80 rounded-lg hover:bg-dark-panel"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              </div>
+          <>
+            {/* Row 1: Trajectory Sampling and Metrics */}
+            <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-2 min-h-0">
+              {/* Left: 2D Trajectory Visualization */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="lg:col-span-2 glass-dark rounded-lg p-3 relative group"
+              >
+                <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => setExpandedView('trajectory')}
+                    className="p-1 bg-dark-panel/80 rounded hover:bg-dark-panel"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                  </button>
+                </div>
+                
+                <h3 className="text-xs font-medium mb-2 flex items-center gap-2">
+                  <Network className="w-3 h-3 text-neon-purple" />
+                  Trajectory Sampling
+                </h3>
+                
+                <div className="h-[calc(100%-1.5rem)] min-h-0">
+                  <GFlowNet2DTrajectory />
+                </div>
+              </motion.div>
               
-              <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-                <Network className="w-4 h-4 text-neon-purple" />
-                Trajectory Sampling
-              </h3>
-              
-              <div className="h-[calc(100%-2rem)] min-h-0">
-                <GFlowNet2DTrajectory />
-              </div>
-            </motion.div>
+              {/* Right: Metrics */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="h-full overflow-auto"
+              >
+                <RealtimeMetrics />
+              </motion.div>
+            </div>
             
-            {/* Right: Metrics */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="space-y-4"
-            >
-              <RealtimeMetrics />
-            </motion.div>
-          </div>
+            {/* Row 2: Training Progress */}
+            <div className="flex-1 min-h-0">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="glass-dark rounded-lg p-3 relative group h-full"
+              >
+                <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => setExpandedView('training')}
+                    className="p-1 bg-dark-panel/80 rounded hover:bg-dark-panel"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                  </button>
+                </div>
+                
+                <h3 className="text-xs font-medium mb-2 flex items-center gap-2">
+                  <BarChart3 className="w-3 h-3 text-neon-blue" />
+                  Training Progress
+                </h3>
+                
+                <div className="h-[calc(100%-1.5rem)] min-h-0">
+                  <GFlowNetTrainingDashboard />
+                </div>
+              </motion.div>
+            </div>
+          </>
         ) : expandedView === 'trajectory' ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -112,35 +142,6 @@ export function MonitoringDashboard({ problemConfig }: MonitoringDashboardProps)
           </motion.div>
         )}
       </div>
-      
-      {/* Bottom: Training Metrics */}
-      {expandedView === 'none' && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="border-t border-dark-border/50 p-4"
-        >
-          <div className="glass-dark rounded-xl p-4 relative group">
-            <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => setExpandedView('training')}
-                className="p-2 bg-dark-panel/80 rounded-lg hover:bg-dark-panel"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
-            </div>
-            
-            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-neon-blue" />
-              Training Progress
-            </h3>
-            
-            <div className="h-80 min-h-80">
-              <GFlowNetTrainingDashboard />
-            </div>
-          </div>
-        </motion.div>
-      )}
     </div>
   )
 }

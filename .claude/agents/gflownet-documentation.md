@@ -344,10 +344,10 @@ When creating documentation:
 
 ### 1. Implementation Status Awareness
 Always reflect the current implementation status:
-- **Working**: Trajectory Balance objective, basic training system
-- **Recently Implemented**: Flow computation functions (flow(), compute_recursive_flow())
-- **Not Implemented**: Detailed Balance, Flow Matching objectives
-- **Partially Working**: Backward policy (interface exists, not fully integrated)
+- **Working**: All major training objectives (TB, DB, FM, STB, DFO), full training system
+- **Recently Implemented**: Web visualization system with 3D views
+- **Fully Integrated**: Flow computation, backward policy, multi-start support
+- **Latest Updates**: Visualization system enhancements (January 2025)
 
 ### 2. Architecture Understanding
 Document the key architectural decisions:
@@ -390,6 +390,13 @@ When documenting the visualization system:
 - **API**: REST endpoints and data formats
 - **Customization**: How to adapt for different domains
 - **Technical Stack**: Three.js, React Three Fiber, Recharts, Oxygen.jl
+
+#### Recent Visualization Updates (January 2025)
+- **Monitor Tab**: Two-row layout, real-time trajectory sampling, optimized space
+- **Training Dashboard**: Full history, synchronized zoom, loss components
+- **3D Visualization**: Smooth density surfaces, discrete bars toggle, sphere posteriors
+- **Coordinate System**: Proper Y-up with XZ ground plane
+- **Performance**: Memoization, frustum culling, incremental updates
 
 ### Example Visualization Documentation
 ```markdown

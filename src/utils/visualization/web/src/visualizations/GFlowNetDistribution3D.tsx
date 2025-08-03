@@ -23,7 +23,174 @@ interface TrajectoryBundle {
   }>
 }
 
-// Smooth density heatmap visualization
+// Smooth density surface visualization
+function DensitySurface({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
+  const { geometry, colorAttribute } = useMemo(() => {
+    const gridSize = 32 // Higher resolution for smoother surface
+    const visitCounts = Array(gridSize).fill(null).map(() => Array(gridSize).fill(0))
+    
+    // Count visits with Gaussian smoothing
+    trajectories.forEach(traj => {
+      traj.states.forEach(state => {
+        // Map from [1,10] to grid coordinates
+        const centerX = (state[0] - 1) / 9 * (gridSize - 1)
+        const centerY = (state[1] - 1) / 9 * (gridSize - 1)
+        
+        // Apply Gaussian kernel with reward weighting
+        const sigma = 2.0
+        const rewardWeight = Math.max(0.1, traj.total_reward / 10)
+        
+        for (let x = 0; x < gridSize; x++) {
+          for (let y = 0; y < gridSize; y++) {
+            const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2)
+            const weight = Math.exp(-(dist ** 2) / (2 * sigma ** 2)) * rewardWeight
+            visitCounts[x][y] += weight
+          }
+        }
+      })
+    })
+    
+    // Apply additional smoothing pass
+    const smoothedCounts = Array(gridSize).fill(null).map(() => Array(gridSize).fill(0))
+    for (let x = 1; x < gridSize - 1; x++) {
+      for (let y = 1; y < gridSize - 1; y++) {
+        smoothedCounts[x][y] = (
+          visitCounts[x][y] * 0.4 +
+          visitCounts[x-1][y] * 0.15 +
+          visitCounts[x+1][y] * 0.15 +
+          visitCounts[x][y-1] * 0.15 +
+          visitCounts[x][y+1] * 0.15
+        )
+      }
+    }
+    
+    // Create plane geometry with proper orientation
+    const geometry = new THREE.PlaneGeometry(10, 10, gridSize - 1, gridSize - 1)
+    geometry.rotateX(-Math.PI / 2) // Rotate to horizontal
+    
+    const vertices = geometry.attributes.position.array as Float32Array
+    const colors = new Float32Array(vertices.length)
+    
+    // Find max for normalization
+    let maxCount = 0
+    for (let x = 0; x < gridSize; x++) {
+      for (let y = 0; y < gridSize; y++) {
+        maxCount = Math.max(maxCount, smoothedCounts[x][y])
+      }
+    }
+    
+    // Set vertex heights and colors
+    let vertexIndex = 0
+    for (let y = 0; y < gridSize; y++) {
+      for (let x = 0; x < gridSize; x++) {
+        const height = smoothedCounts[x][y] / maxCount
+        const smoothHeight = height * height // Square for more dramatic effect
+        
+        vertices[vertexIndex + 1] = smoothHeight * 2.5 // Y is up
+        
+        // Color based on height
+        const color = new THREE.Color()
+        if (height < 0.2) {
+          color.setRGB(0, 0.2, 0.8) // Deep blue
+        } else if (height < 0.4) {
+          color.lerpColors(new THREE.Color(0, 0.2, 0.8), new THREE.Color(0, 0.8, 0.8), (height - 0.2) * 5)
+        } else if (height < 0.6) {
+          color.lerpColors(new THREE.Color(0, 0.8, 0.8), new THREE.Color(0, 1, 0.4), (height - 0.4) * 5)
+        } else if (height < 0.8) {
+          color.lerpColors(new THREE.Color(0, 1, 0.4), new THREE.Color(1, 1, 0), (height - 0.6) * 5)
+        } else {
+          color.lerpColors(new THREE.Color(1, 1, 0), new THREE.Color(1, 0.5, 0), (height - 0.8) * 5)
+        }
+        
+        colors[vertexIndex] = color.r
+        colors[vertexIndex + 1] = color.g
+        colors[vertexIndex + 2] = color.b
+        
+        vertexIndex += 3
+      }
+    }
+    
+    geometry.computeVertexNormals()
+    const colorAttribute = new THREE.BufferAttribute(colors, 3)
+    geometry.setAttribute('color', colorAttribute)
+    
+    return { geometry, colorAttribute }
+  }, [trajectories])
+  
+  return (
+    <mesh geometry={geometry} position={[0, 0, 0]}>
+      <meshStandardMaterial
+        vertexColors
+        wireframe={false}
+        side={THREE.DoubleSide}
+        transparent
+        opacity={0.9}
+        metalness={0.2}
+        roughness={0.6}
+        emissive={new THREE.Color(0x001144)}
+        emissiveIntensity={0.05}
+      />
+    </mesh>
+  )
+}
+
+// 3D Density bars visualization
+function DensityBars({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
+  const densityData = useMemo(() => {
+    const gridSize = 10 // 10x10 grid to match coordinate system
+    const visitCounts = Array(gridSize).fill(null).map(() => Array(gridSize).fill(0))
+    const maxCount = { value: 0 }
+    
+    // Count visits per grid cell
+    trajectories.forEach(traj => {
+      traj.states.forEach(state => {
+        // Map from [1,10] to [0,9] grid indices
+        const gridX = Math.floor(Math.max(0, Math.min(9, state[0] - 1)))
+        const gridY = Math.floor(Math.max(0, Math.min(9, state[1] - 1)))
+        visitCounts[gridX][gridY]++
+        maxCount.value = Math.max(maxCount.value, visitCounts[gridX][gridY])
+      })
+    })
+    
+    return { visitCounts, maxCount: maxCount.value }
+  }, [trajectories])
+  
+  return (
+    <group>
+      {densityData.visitCounts.map((row, x) => 
+        row.map((count, y) => {
+          if (count === 0) return null
+          
+          const height = (count / densityData.maxCount) * 3 // Max height of 3 units
+          const intensity = count / densityData.maxCount
+          
+          // Color gradient from blue (low) to yellow (high)
+          const color = new THREE.Color()
+          if (intensity < 0.5) {
+            color.lerpColors(new THREE.Color(0x0066ff), new THREE.Color(0x00ff88), intensity * 2)
+          } else {
+            color.lerpColors(new THREE.Color(0x00ff88), new THREE.Color(0xffff00), (intensity - 0.5) * 2)
+          }
+          
+          return (
+            <mesh key={`${x}-${y}`} position={[x - 4.5, height / 2, y - 4.5]}>
+              <boxGeometry args={[0.8, height, 0.8]} />
+              <meshStandardMaterial 
+                color={color}
+                emissive={color}
+                emissiveIntensity={0.3}
+                transparent
+                opacity={0.8}
+              />
+            </mesh>
+          )
+        })
+      )}
+    </group>
+  )
+}
+
+// Smooth density heatmap visualization (for texture overlay)
 function TrajectoryDensity({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
   const densityTexture = useMemo(() => {
     const size = 128 // Reduced for better performance
@@ -92,12 +259,13 @@ function TrajectoryDensity({ trajectories }: { trajectories: TrajectoryBundle['t
   }, [trajectories])
   
   return (
-    <mesh position={[0, 0, 0.02]} rotation={[0, 0, 0]}>
+    <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[10, 10]} />
       <meshBasicMaterial 
         map={densityTexture} 
         transparent 
         opacity={0.9}
+        side={THREE.DoubleSide}
       />
     </mesh>
   )
@@ -114,7 +282,7 @@ function TrajectoryPaths({ trajectories }: { trajectories: TrajectoryBundle['tra
       {sortedTrajectories.map((traj, i) => {
         // Map coordinates from [1,10] to [-5,5] for centering
         const points = traj.states.map((state) => 
-          new THREE.Vector3(state[0] - 5.5, state[1] - 5.5, 0.05)
+          new THREE.Vector3(state[0] - 5.5, 0.01, state[1] - 5.5) // Y=0 for ground level
         )
         
         // Color gradient from high reward (green) to low reward (red)
@@ -175,19 +343,20 @@ function RewardLandscape({ peaks }: { peaks: TrajectoryBundle['reward_peaks'] })
   return (
     <group>
       {/* Reward heatmap on ground */}
-      <mesh position={[0, 0, -0.01]} rotation={[0, 0, 0]}>
+      <mesh position={[0, -0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[10, 10]} />
         <meshBasicMaterial 
           map={rewardTexture}
           transparent
           opacity={0.6}
+          side={THREE.DoubleSide}
         />
       </mesh>
       
       {/* Peak markers - adjust position to be within [1,10] range */}
       {peaks.map((peak, i) => (
-        <group key={i} position={[peak.position[0] - 5.5, peak.position[1] - 5.5, 0]}>
-          <mesh position={[0, 0, 0.3]}>
+        <group key={i} position={[peak.position[0] - 5.5, 0, peak.position[1] - 5.5]}>
+          <mesh position={[0, 0.3, 0]}>
             <cylinderGeometry args={[0.2, 0.2, 0.6, 16]} />
             <meshStandardMaterial 
               color={COLORS.reward.high}
@@ -198,12 +367,12 @@ function RewardLandscape({ peaks }: { peaks: TrajectoryBundle['reward_peaks'] })
             />
           </mesh>
           <pointLight 
-            position={[0, 0, 0.5]}
+            position={[0, 0.5, 0]}
             color={COLORS.reward.high}
             intensity={peak.intensity / 20}
             distance={2}
           />
-          <Html position={[0, 0, 0.8]} distanceFactor={10}>
+          <Html position={[0, 0.8, 0]} distanceFactor={10}>
             <div className="text-xs bg-dark-panel/90 px-2 py-1 rounded-md whitespace-nowrap pointer-events-none">
               <div className="text-white font-medium">{peak.name}</div>
               <div className="text-[10px] text-neon-green">R={peak.intensity}</div>
@@ -215,111 +384,90 @@ function RewardLandscape({ peaks }: { peaks: TrajectoryBundle['reward_peaks'] })
   )
 }
 
-// Posterior probability as contour plot
+// Posterior probability as 3D spheres
 function PosteriorVisualization({ trajectories }: { trajectories: TrajectoryBundle['trajectories'] }) {
-  const contourLines = useMemo(() => {
-    // Calculate endpoint density
-    const gridSize = 20
-    const density = new Float32Array(gridSize * gridSize)
-    let maxDensity = 0
+  const sphereData = useMemo(() => {
+    // Calculate endpoint density and rewards
+    const endpoints = new Map<string, { count: number; totalReward: number; position: [number, number] }>()
     
     trajectories.forEach(traj => {
-      const endpoint = traj.states[traj.states.length - 1]
-      // Map from [1,10] to grid coordinates
-      if (endpoint[0] >= 1 && endpoint[0] <= 10 && endpoint[1] >= 1 && endpoint[1] <= 10) {
-        const gx = Math.floor((endpoint[0] - 1) / 9 * (gridSize - 1))
-        const gy = Math.floor((endpoint[1] - 1) / 9 * (gridSize - 1))
+      if (traj.states.length > 0) {
+        const endpoint = traj.states[traj.states.length - 1]
+        const key = `${endpoint[0]},${endpoint[1]}`
         
-        // Gaussian smoothing with smaller kernel
-        for (let dx = -2; dx <= 2; dx++) {
-          for (let dy = -2; dy <= 2; dy++) {
-            const x = gx + dx
-            const y = gy + dy
-            if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
-              const weight = Math.exp(-(dx*dx + dy*dy) / 2)
-              const idx = y * gridSize + x
-              density[idx] += weight * traj.total_reward
-              maxDensity = Math.max(maxDensity, density[idx])
-            }
-          }
+        if (!endpoints.has(key)) {
+          endpoints.set(key, { count: 0, totalReward: 0, position: endpoint })
         }
+        
+        const data = endpoints.get(key)!
+        data.count++
+        data.totalReward += traj.total_reward
       }
     })
     
-    // Generate contour lines at different levels
-    const levels = [0.3, 0.5, 0.7, 0.9]
-    const lines: JSX.Element[] = []
+    // Convert to array and calculate probabilities
+    const spheres = Array.from(endpoints.values()).map(ep => ({
+      position: ep.position,
+      probability: ep.count / trajectories.length,
+      avgReward: ep.totalReward / ep.count,
+      size: Math.sqrt(ep.count / trajectories.length) * 2, // Size based on probability
+    }))
     
-    levels.forEach((level, levelIdx) => {
-      const threshold = level * maxDensity
-      const points: THREE.Vector3[] = []
-      
-      // Simple contour following
-      for (let y = 0; y < gridSize - 1; y++) {
-        for (let x = 0; x < gridSize - 1; x++) {
-          const idx = y * gridSize + x
-          const v0 = density[idx]
-          const v1 = density[idx + 1]
-          const v2 = density[idx + gridSize]
-          const v3 = density[idx + gridSize + 1]
-          
-          // Check if contour crosses this cell
-          if (v0 > 0 || v1 > 0 || v2 > 0 || v3 > 0) {
-            const avg = (v0 + v1 + v2 + v3) / 4
-            if (Math.abs(avg - threshold) < threshold * 0.2) {
-              // Map back to world coordinates centered at origin
-              const wx = (x / (gridSize - 1)) * 10 - 5
-              const wy = (y / (gridSize - 1)) * 10 - 5
-              points.push(new THREE.Vector3(wx, wy, 0.1 + levelIdx * 0.02))
-            }
-          }
-        }
-      }
-      
-      if (points.length > 5) {
-        const geometry = new THREE.BufferGeometry().setFromPoints(points)
-        const color = new THREE.Color().setHSL(0.8 - level * 0.3, 1, 0.6)
-        
-        lines.push(
-          <line key={levelIdx} geometry={geometry}>
-            <lineBasicMaterial 
-              color={color} 
-              linewidth={2} 
-              transparent 
-              opacity={0.6}
-            />
-          </line>
-        )
-      }
-    })
+    // Sort by size for better rendering (larger spheres first)
+    spheres.sort((a, b) => b.size - a.size)
     
-    return lines
+    return spheres
   }, [trajectories])
   
   return (
     <group>
-      {contourLines}
-      <Html position={[3, 3, 1]}>
-        <div className="text-xs bg-dark-panel/90 px-3 py-2 rounded-md pointer-events-none">
-          <div className="font-medium mb-1">Posterior P(x|R)</div>
-          <div className="text-[10px] space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-0.5 bg-purple-600"></div>
-              <span>Low probability</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-0.5 bg-yellow-500"></div>
-              <span>High probability</span>
-            </div>
-          </div>
-        </div>
-      </Html>
+      {sphereData.map((sphere, i) => {
+        // Color based on average reward
+        const color = new THREE.Color()
+        const normalizedReward = Math.min(1, sphere.avgReward / 10)
+        color.lerpColors(new THREE.Color(0x6600ff), new THREE.Color(0xff00ff), normalizedReward)
+        
+        return (
+          <group key={i} position={[sphere.position[0] - 5.5, 0.5 + sphere.size / 2, sphere.position[1] - 5.5]}>
+            <mesh>
+              <sphereGeometry args={[sphere.size * 0.3, 16, 16]} />
+              <meshStandardMaterial
+                color={color}
+                emissive={color}
+                emissiveIntensity={0.3}
+                transparent
+                opacity={0.7}
+                metalness={0.4}
+                roughness={0.2}
+              />
+            </mesh>
+            {/* Add glow effect for larger spheres */}
+            {sphere.size > 0.5 && (
+              <pointLight
+                color={color}
+                intensity={sphere.size * 0.5}
+                distance={sphere.size * 2}
+              />
+            )}
+            {/* Label for significant endpoints */}
+            {sphere.probability > 0.05 && (
+              <Html position={[0, sphere.size * 0.4, 0]} distanceFactor={10}>
+                <div className="text-xs bg-dark-panel/90 px-2 py-1 rounded-md whitespace-nowrap pointer-events-none">
+                  <div className="text-white font-medium">P={sphere.probability.toFixed(2)}</div>
+                  <div className="text-[10px] text-purple-400">R̄={sphere.avgReward.toFixed(1)}</div>
+                </div>
+              </Html>
+            )}
+          </group>
+        )
+      })}
     </group>
   )
 }
 
+
 // Main scene with conditional rendering
-function Scene({ viewMode }: { viewMode: 'density' | 'posterior' | 'combined' }) {
+function Scene({ viewMode, densityMode }: { viewMode: 'density' | 'posterior' | 'combined', densityMode: 'bars' | 'surface' }) {
   const { data } = useQuery({
     queryKey: ['all-trajectories'],
     queryFn: async () => {
@@ -333,8 +481,8 @@ function Scene({ viewMode }: { viewMode: 'density' | 'posterior' | 'combined' })
   
   return (
     <group position={[0, 0, 0]}>
-      {/* Grid on XY plane - centered at origin */}
-      <gridHelper args={[10, 10, '#3A3A3D', '#2A2A2D']} position={[0, 0, 0]} rotation={[0, 0, 0]} />
+      {/* Grid on horizontal plane */}
+      <gridHelper args={[10, 10, '#3A3A3D', '#2A2A2D']} position={[0, 0, 0]} />
       
       {/* Always show reward landscape as base layer */}
       <RewardLandscape peaks={data.reward_peaks} />
@@ -342,16 +490,22 @@ function Scene({ viewMode }: { viewMode: 'density' | 'posterior' | 'combined' })
       {/* Conditional rendering based on view mode */}
       {(viewMode === 'density' || viewMode === 'combined') && (
         <>
+          {/* 3D Density visualization - bars or surface based on mode */}
+          {densityMode === 'bars' ? (
+            <DensityBars trajectories={data.trajectories} />
+          ) : (
+            <DensitySurface trajectories={data.trajectories} />
+          )}
           {/* Trajectory paths on XY plane */}
           <TrajectoryPaths trajectories={data.trajectories} />
-          {/* Trajectory density heatmap overlaid */}
-          <TrajectoryDensity trajectories={data.trajectories} />
+          {/* Trajectory density heatmap overlaid - only for bars mode */}
+          {densityMode === 'bars' && <TrajectoryDensity trajectories={data.trajectories} />}
         </>
       )}
       
       {(viewMode === 'posterior' || viewMode === 'combined') && (
         <>
-          {/* Posterior visualization */}
+          {/* Posterior visualization - 3D spheres */}
           <PosteriorVisualization trajectories={data.trajectories} />
         </>
       )}
@@ -361,6 +515,7 @@ function Scene({ viewMode }: { viewMode: 'density' | 'posterior' | 'combined' })
 
 export function GFlowNetDistribution3D() {
   const [viewMode, setViewMode] = useState<'density' | 'posterior' | 'combined'>('combined')
+  const [densityMode, setDensityMode] = useState<'bars' | 'surface'>('surface')
   
   const { data: stats } = useQuery({
     queryKey: ['distribution-stats'],
@@ -404,6 +559,49 @@ export function GFlowNetDistribution3D() {
           </div>
         </div>
         
+        {/* Density Display Mode - Only show when density view is active */}
+        {(viewMode === 'density' || viewMode === 'combined') && (
+          <div className="glass-dark rounded-lg p-4">
+            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-neon-blue" />
+              Density Display
+            </h3>
+            <div className="space-y-2">
+              <motion.button
+                onClick={() => setDensityMode('surface')}
+                className={`w-full p-3 rounded-lg flex items-center gap-3 transition-colors ${
+                  densityMode === 'surface'
+                    ? 'bg-neon-blue/20 border border-neon-blue/50 text-neon-blue'
+                    : 'glass-dark hover:bg-dark-panel'
+                }`}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="w-4 h-4 rounded bg-gradient-to-br from-blue-500 via-green-500 to-yellow-500" />
+                <span className="text-sm">Smooth Surface</span>
+              </motion.button>
+              <motion.button
+                onClick={() => setDensityMode('bars')}
+                className={`w-full p-3 rounded-lg flex items-center gap-3 transition-colors ${
+                  densityMode === 'bars'
+                    ? 'bg-neon-blue/20 border border-neon-blue/50 text-neon-blue'
+                    : 'glass-dark hover:bg-dark-panel'
+                }`}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="w-4 h-4 grid grid-cols-2 gap-0.5">
+                  <div className="bg-blue-500 rounded-sm" />
+                  <div className="bg-green-500 rounded-sm" />
+                  <div className="bg-yellow-500 rounded-sm" />
+                  <div className="bg-red-500 rounded-sm" />
+                </div>
+                <span className="text-sm">Discrete Bars</span>
+              </motion.button>
+            </div>
+          </div>
+        )}
+        
         {/* Info Panel */}
         <div className="glass-dark rounded-lg p-4">
           <h3 className="text-sm font-medium mb-2 flex items-center space-x-2">
@@ -413,21 +611,40 @@ export function GFlowNetDistribution3D() {
           <div className="text-xs text-muted-foreground space-y-2">
             {viewMode === 'density' && (
               <>
-                <p><strong>Height bars:</strong> State visitation frequency - taller bars indicate states visited more often during sampling.</p>
+                {densityMode === 'surface' ? (
+                  <>
+                    <p><strong>3D surface:</strong> Smooth density landscape showing state visitation frequency.</p>
+                    <p><strong>Surface height:</strong> Taller regions indicate states visited more often.</p>
+                    <p><strong>Color gradient:</strong> Blue (low) → Cyan → Green → Yellow (high frequency)</p>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>3D bars:</strong> Discrete state visitation frequency per grid cell.</p>
+                    <p><strong>Bar height:</strong> Taller bars indicate higher visitation counts.</p>
+                    <p><strong>Bar colors:</strong> Blue (low) → Green → Yellow (high frequency)</p>
+                  </>
+                )}
                 <p><strong>Path colors:</strong> Trajectory quality - green paths have higher rewards, red paths have lower rewards.</p>
               </>
             )}
             {viewMode === 'posterior' && (
               <>
-                <p><strong>Purple spheres:</strong> Posterior distribution P(x|R) showing where high-reward trajectories tend to terminate.</p>
-                <p><strong>Size indicates:</strong> Combined probability and reward - larger spheres represent both frequent and high-reward endpoints.</p>
+                <p><strong>3D spheres:</strong> Posterior distribution P(x|R) showing trajectory endpoints.</p>
+                <p><strong>Sphere size:</strong> Proportional to endpoint probability.</p>
+                <p><strong>Sphere color:</strong> Purple (low reward) → Pink (high reward)</p>
+                <p><strong>Labels:</strong> Show probability P and average reward R̄ for significant endpoints.</p>
               </>
             )}
             {viewMode === 'combined' && (
               <>
-                <p><strong>Multi-layered view:</strong> Shows both trajectory density and posterior distribution.</p>
+                <p><strong>Multi-layered view:</strong> Shows density, trajectory paths, and posterior distribution.</p>
+                {densityMode === 'surface' ? (
+                  <p><strong>3D surface:</strong> Smooth density landscape with color gradient.</p>
+                ) : (
+                  <p><strong>3D bars:</strong> Discrete state visitation frequency.</p>
+                )}
                 <p><strong>Green cylinders:</strong> Reward peaks that attract trajectories.</p>
-                <p><strong>Purple spheres:</strong> High-value endpoints weighted by both frequency and reward.</p>
+                <p><strong>3D spheres:</strong> Posterior probability distribution at endpoints.</p>
               </>
             )}
           </div>
@@ -458,25 +675,25 @@ export function GFlowNetDistribution3D() {
           </h4>
           <div className="space-y-1 text-xs">
             <div className="flex items-center space-x-2">
-              <div className="w-3 h-6 bg-gradient-to-t from-red-500 to-yellow-500 rounded"></div>
-              <span>Visitation Density</span>
+              <div className="w-3 h-6 bg-gradient-to-t from-blue-500 via-green-500 to-yellow-500 rounded"></div>
+              <span>Density Bars</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-12 h-0.5 bg-gradient-to-r from-red-500 via-yellow-500 to-green-500"></div>
-              <span>Reward Quality</span>
+              <span>Trajectory Reward</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 rounded-full bg-neon-purple"></div>
-              <span>Posterior P(x|R)</span>
+              <div className="w-3 h-3 rounded-full bg-neon-green"></div>
+              <span>Reward Peaks</span>
             </div>
           </div>
         </div>
       </div>
       
-      {/* 3D Canvas - Better camera angle for XY plane viewing */}
+      {/* 3D Canvas - Better camera angle for horizontal plane viewing */}
       <div className="flex-1">
         <Canvas 
-          camera={{ position: [0, -12, 10], fov: 50 }}
+          camera={{ position: [8, 8, 8], fov: 50 }}
           gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         >
           <color attach="background" args={['#0A0A0B']} />
@@ -487,7 +704,7 @@ export function GFlowNetDistribution3D() {
           <pointLight position={[-10, -10, 15]} intensity={0.8} color={COLORS.reward.high} />
           <directionalLight position={[0, 20, 10]} intensity={0.5} />
           
-          <Scene viewMode={viewMode} />
+          <Scene viewMode={viewMode} densityMode={densityMode} />
           
           <OrbitControls
             enablePan={true}

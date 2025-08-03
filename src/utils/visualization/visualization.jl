@@ -48,6 +48,6 @@ Visualization is now handled by a modern web stack:
 - Oxygen.jl API for data export
 
 To start the visualization dashboard:
-1. Start the API server: `julia --project -e 'include("src/utils/visualization/api/server.jl")'`
-2. Start the web dashboard: `cd src/utils/visualization/web && npm start`
+1. Start the GFlowNet server: `julia --project -e 'include("src/utils/visualization/api/gflownet_server.jl")'`
+2. Start the web dashboard: `cd src/utils/visualization/web && npm run dev`
 """

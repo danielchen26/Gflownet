@@ -84,7 +84,17 @@ export function GFlowNet2DTrajectory() {
     }
   }, [isTraining, data])
   
-  if (!data) return <div>Loading...</div>
+  if (!data) {
+    // Return a simple placeholder for now
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Waiting for trajectory data...</p>
+          <p className="text-sm text-muted-foreground mt-2">Start training to see visualizations</p>
+        </div>
+      </div>
+    )
+  }
   
   const trajectory = data.trajectories[selectedTrajectory]
   const cellSize = 40

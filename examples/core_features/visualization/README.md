@@ -60,8 +60,7 @@ visualization/
 
 src/utils/visualization/
 ├── api/
-│   ├── simple_server.jl   # Mock API server
-│   └── gflownet_server.jl # Full GFlowNet integration
+│   └── gflownet_server.jl # GFlowNet visualization server
 └── web/
     ├── src/
     │   ├── components/    # React components
@@ -109,12 +108,13 @@ src/utils/visualization/
 2. Update grid size and parameters in `ProblemSetup.tsx`
 3. Adjust visualization bounds in 3D components
 
-### Connecting to Real GFlowNet
+### Server Details
 
-Replace `simple_server.jl` with `gflownet_server.jl` and provide:
-- Actual trajectory data
-- Real-time training metrics
-- Domain-specific state representations
+The `gflownet_server.jl` handles:
+- Problem configuration from the setup page
+- Dynamic training simulation
+- Real-time metrics and trajectory generation
+- Flow field and state statistics calculation
 
 ## Development
 
@@ -125,12 +125,12 @@ npm install
 npm run dev
 
 # Backend development
-julia --project=. src/utils/visualization/api/simple_server.jl
+julia --project=. src/utils/visualization/api/gflownet_server.jl
 ```
 
 ## Troubleshooting
 
-- **WebSocket errors**: Expected - the simple server uses polling instead
+- **WebSocket errors**: Expected - the server uses polling for simplicity
 - **Blank visualizations**: Ensure both servers are running
 - **Performance issues**: Reduce trajectory count or grid resolution
 

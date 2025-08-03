@@ -18,8 +18,9 @@ const WEB_DIR = joinpath(VIZ_ROOT, "web")
 
 # Clean up any existing servers
 println("🧹 Cleaning up...")
-try run(`pkill -f "node.*vite"`, wait=false) catch end
-try run(`pkill -f "julia.*gflownet_server"`, wait=false) catch end
+# Suppress output and errors from pkill when no processes are found
+try run(pipeline(`pkill -f "node.*vite"`, devnull), wait=false) catch end
+try run(pipeline(`pkill -f "julia.*gflownet_server"`, devnull), wait=false) catch end
 sleep(2)  # Give more time for cleanup
 
 # Start API server in background with proper environment
@@ -115,8 +116,8 @@ catch e
     end
 finally
     println("\n👋 Stopping servers...")
-    # Kill all processes
-    try run(`pkill -f "node.*vite"`) catch end
-    try run(`pkill -f "julia.*gflownet_server"`) catch end
+    # Kill all processes (suppress output)
+    try run(pipeline(`pkill -f "node.*vite"`, devnull)) catch end
+    try run(pipeline(`pkill -f "julia.*gflownet_server"`, devnull)) catch end
     println("✅ Done!")
 end

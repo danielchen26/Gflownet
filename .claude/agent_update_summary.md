@@ -1,8 +1,8 @@
 # Agent Instruction Files Update Summary
 
-## Date: January 2025
+## Date: January 2025 (Latest Update)
 
-All agent instruction files in `.claude/agents/` have been comprehensively updated to reflect the current state of the GFlowNet.jl codebase after the training reorganization.
+All agent instruction files in `.claude/agents/` have been comprehensively updated to reflect the current state of the GFlowNet.jl codebase after the training reorganization and visualization system enhancements.
 
 ## Key Updates Made
 
@@ -69,6 +69,24 @@ All agents know the correct imports:
 - Already updated in previous session
 - Reflects all new features and configurations
 
+### 5. Visualization System Updates (January 2025)
+
+All relevant agents now know about:
+- Interactive web visualization system in `src/utils/visualization/`
+- Major visualization enhancements:
+  - Two-row monitor layout without scrolling
+  - Full training history with synchronized zoom
+  - Smooth density surfaces with discrete bars toggle
+  - Sphere-based posterior probability display
+  - Proper Y-up coordinate system
+- React/TypeScript frontend with Three.js
+- Julia backend with Oxygen.jl REST API
+
+#### Updated Agents for Visualization:
+- **gflownet-documentation.md**: Added visualization documentation section and recent updates
+- **gflownet-architecture-analyzer.md**: Added web visualization to architecture components
+- **gflownet-training-expert.md**: Added visualization integration for training monitoring
+
 ## Impact
 
 These updates ensure that all specialized agents have accurate, up-to-date knowledge about:
@@ -76,5 +94,6 @@ These updates ensure that all specialized agents have accurate, up-to-date knowl
 2. Recent bug fixes and improvements
 3. Proper import paths and function locations
 4. Working examples with correct syntax
+5. Web visualization system capabilities and recent enhancements
 
-This allows the agents to provide accurate assistance without referencing outdated patterns or broken features.
+This allows the agents to provide accurate assistance without referencing outdated patterns or broken features, and helps users leverage the powerful visualization tools for training analysis.

@@ -14,6 +14,7 @@ Your primary responsibilities:
    - Training infrastructure in dedicated `training/` folder (configuration, objectives, training, losses, utils)
    - Clean separation: `interface.jl` for model creation only, training logic in `training/`
    - Professional tooling architecture (validation, logging, visualization, reporting)
+   - Web visualization system with React frontend and Julia backend
    - Domain application patterns and interface requirements
    - Extension mechanisms for advanced features
 
@@ -45,6 +46,11 @@ Your primary responsibilities:
    - Flow estimator network for direct flow estimation (optional component)
    - Clean module structure with proper separation of concerns
    - Domain-agnostic implementations throughout
+   - Interactive web visualization system:
+     - React/TypeScript frontend with Three.js 3D graphics
+     - Julia backend with Oxygen.jl REST API
+     - Real-time training monitoring and 3D distribution views
+     - Located in `src/utils/visualization/`
 
 When analyzing architecture:
 - Start with a high-level overview before diving into specifics

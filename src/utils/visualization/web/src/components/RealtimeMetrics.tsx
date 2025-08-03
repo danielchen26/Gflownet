@@ -192,27 +192,27 @@ export function RealtimeMetrics() {
   ]
   
   return (
-    <div className="space-y-6">
+    <div className="space-y-2">
       {/* Convergence Progress */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-dark rounded-xl p-6 text-center"
+        className="glass-dark rounded-lg p-3 text-center"
       >
-        <h3 className="text-sm font-medium text-muted-foreground mb-4">Training Progress</h3>
+        <h3 className="text-xs font-medium text-muted-foreground mb-2">Training Progress</h3>
         <div className="relative inline-block">
-          <ProgressRing progress={(metrics?.convergence || 0) * 100} size={120} />
+          <ProgressRing progress={(metrics?.convergence || 0) * 100} size={80} />
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-2xl font-bold gradient-text transform rotate-90">
+            <span className="text-lg font-bold gradient-text transform rotate-90">
               {((metrics?.convergence || 0) * 100).toFixed(0)}%
             </span>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground mt-4">Estimated convergence</p>
+        <p className="text-xs text-muted-foreground mt-2">Estimated convergence</p>
       </motion.div>
       
       {/* Metrics List */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         <h3 className="text-sm font-medium text-muted-foreground px-1">Live Metrics</h3>
         <AnimatePresence mode="wait">
           {displayMetrics.map((metric, index) => (

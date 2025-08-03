@@ -10,7 +10,7 @@ export function useWebSocket(url: string = 'ws://localhost:8080/ws') {
   const [isConnected, setIsConnected] = useState(false)
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null)
   const ws = useRef<WebSocket | null>(null)
-  const reconnectTimer = useRef<NodeJS.Timeout>()
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
   const reconnectAttempts = useRef(0)
   
   const connect = useCallback(() => {

@@ -61,12 +61,19 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - Trades accuracy for computational efficiency
    - Ideal for large state spaces where recursive flow is expensive
 
-10. **Interactive Web Visualization System** ✅ (August 2025)
+10. **Interactive Web Visualization System** ✅ (January 2025)
    - Beautiful real-time visualization for GFlowNet training and analysis
    - Three main views: Training Monitor, 3D Distribution, Policy Flow
    - React + Three.js frontend with smooth animations
    - Julia backend with dynamic training simulation
    - Located in `examples/core_features/visualization/`
+   
+11. **Visualization System Major Update** ✅ (January 2025)
+   - **Monitor Tab**: Two-row layout, real-time trajectory sampling, optimized space usage
+   - **Training Dashboard**: Full history with synchronized zoom, loss components breakdown
+   - **3D Visualization**: Smooth density surfaces, discrete bars toggle, sphere-based posteriors
+   - **Performance**: Memoization, frustum culling, incremental updates
+   - **Bug Fixes**: Navigation issues, 3D alignment, proper Y-up coordinate system
 
 ## Development Guidance
 
@@ -80,13 +87,31 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
 - **Frontend**: React 18 + TypeScript + Three.js/React Three Fiber for 3D visualization
 - **Backend**: Julia with Oxygen.jl providing REST API endpoints
 - **Real-time Updates**: Polling-based system (250ms for metrics, 500ms for charts)
-- **3D Rendering**: High-resolution (256x256) textures with Gaussian smoothing
+- **3D Rendering**: High-resolution (256x256) textures with reward-weighted Gaussian smoothing
 
 #### Key Components
-1. **Training Monitor**: Real-time metrics with smooth transitions and multi-chart display
-2. **3D Distribution View**: Trajectory density heatmaps on z=0 plane with reward landscape
-3. **Policy Flow Field**: Arrow-based visualization showing learned action policies
-4. **Problem Setup**: Interactive configuration for reward peaks and training parameters
+1. **Training Monitor**: 
+   - Two-row layout without scrolling
+   - Real-time trajectory sampling window
+   - Live metrics with smooth transitions
+   - Full-width training progress charts
+   
+2. **3D Distribution View**: 
+   - Smooth density surface with natural hill appearance
+   - Toggle between smooth surface and discrete bars
+   - Sphere-based posterior probability display
+   - Proper Y-up coordinate system with XZ ground plane
+   
+3. **Training Dashboard**:
+   - Full training history display (no slicing)
+   - Synchronized zoom with Recharts Brush
+   - Loss components breakdown chart
+   - Removed unused exploration_rate parameter
+   
+4. **Problem Setup**: 
+   - Interactive configuration for reward peaks
+   - Training parameter adjustment
+   - Real-time preview of reward landscape
 
 #### File Structure
 ```
@@ -109,9 +134,17 @@ examples/core_features/visualization/
 #### Important Implementation Details
 - Dynamic training simulation starts automatically on server launch
 - Training progress based on elapsed time (2 episodes/second)
-- All 3D elements render on same z=0 plane for proper alignment
+- All 3D elements use proper Y-up coordinate system with XZ ground plane
 - Policy flow arrows use simplified geometry for WebGL compatibility
 - CORS enabled for local development
+
+#### Visualization Updates (January 2025)
+- **Density Calculation**: Reward-weighted Gaussian kernel for natural appearance
+- **Sphere Rendering**: Size proportional to P(s_T), color gradient by reward
+- **Coordinate Fix**: Y-up system with grid on XZ plane, proper depth sorting
+- **Performance**: Memoization, frustum culling, texture caching
+- **UI Improvements**: Reduced padding, optimized layouts, synchronized controls
+- **Bug Fixes**: Navigation black screen, component lifecycle, proper cleanup
 
 ## Testing Strategy
 
