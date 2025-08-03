@@ -75,6 +75,36 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - **Performance**: Memoization, frustum culling, incremental updates
    - **Bug Fixes**: Navigation issues, 3D alignment, proper Y-up coordinate system
 
+## Project Roadmap and Vision
+
+GFlowNet.jl has a comprehensive development roadmap focused on making it the premier production-ready implementation of Generative Flow Networks. See [ROADMAP.md](ROADMAP.md) for detailed development phases, timelines, and success metrics.
+
+### Key Upcoming Priorities
+1. **GPU Acceleration**: Full GPU pipeline for 10-100x speedup
+2. **Continuous Domains**: Support for continuous state/action spaces
+3. **Advanced Domains**: Molecular design, protein engineering, industrial applications
+4. **Developer Experience**: AutoML integration, debugging tools, model zoo
+5. **Ecosystem Integration**: PyTorch/JAX bridges, cloud deployment, MLflow
+
+## Agent Coordination System
+
+The project uses specialized AI agents for different aspects of development. A new hierarchical coordination system has been proposed to improve efficiency. See [.claude/system_design/](.claude/system_design/) for design documents and proposals.
+
+### Current Specialized Agents
+
+#### Master Orchestrator
+- **gflownet-master-orchestrator**: Analyzes queries, decomposes tasks, and intelligently coordinates all other agents
+
+#### Specialist Agents
+- **gflownet-architecture-analyzer**: System design and architecture analysis
+- **gflownet-debugger**: Bug diagnosis and fixing
+- **gflownet-mathematician**: Theoretical foundations and proofs
+- **gflownet-performance-optimizer**: GPU acceleration and optimization
+- **gflownet-domain-implementer**: New domain applications
+- **gflownet-testing-validator**: Test design and validation
+- **gflownet-training-expert**: Training configuration and hyperparameters
+- **gflownet-documentation**: Documentation and tutorials
+
 ## Development Guidance
 
 - Remember that example folders are associated with different domains and for the examples related to the core development, you should put them into the core features sub folder
@@ -159,8 +189,12 @@ examples/core_features/visualization/
 - API documentation using Julia docstrings
 - Conceptual guides in `docs/src/guide/`
 - Mathematical theory in `docs/src/theory/`
-- Architecture docs in `docs/src/internals/`
+- Internal documentation in `docs/src/internals/`
+  - Architecture design in `internals/architecture/`
+  - Implementation notes in `internals/implementation_notes/`
+  - Development guidelines in `internals/development_guides/`
 - Interactive examples with visualization
+- Visualization changelog in `src/utils/visualization/CHANGELOG.md`
 
 ## Code Style
 

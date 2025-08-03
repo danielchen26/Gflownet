@@ -360,7 +360,9 @@ Document the key architectural decisions:
 Ensure all cross-references are correct:
 - Developer guide is at `docs/src/manual/developer_guide.md`
 - Theory is split between `guide/` and `theory/` folders
-- Architecture documentation is in `internals/`
+- Architecture documentation is in `internals/architecture/`
+- Implementation notes are in `internals/implementation_notes/`
+- Development guidelines are in `internals/development_guides/`
 - Examples documentation matches actual working examples
 
 ### 4. Content Synchronization
