@@ -20,11 +20,10 @@ Detailed implementation documentation for specific features:
 ### 🛠️ [development_guides/](development_guides/)
 Development guidelines and best practices:
 - **[comprehensive_gflownet_rules.md](development_guides/comprehensive_gflownet_rules.md)** - Critical development rules (Zygote compatibility, etc.)
+- **[known_limitations.md](development_guides/known_limitations.md)** - Current limitations and planned improvements
+- **[roadmap.md](development_guides/roadmap.md)** - Project development roadmap and vision
 - **[training_reorganization_plan.md](development_guides/training_reorganization_plan.md)** - Training system refactoring guide
 - **[visualization_fixes_plan.md](development_guides/visualization_fixes_plan.md)** - Visualization improvement plan
-
-### 🚧 [known_limitations.md](known_limitations.md)
-Current limitations and planned improvements
 
 ## Quick Navigation
 

@@ -77,7 +77,7 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
 
 ## Project Roadmap and Vision
 
-GFlowNet.jl has a comprehensive development roadmap focused on making it the premier production-ready implementation of Generative Flow Networks. See [ROADMAP.md](ROADMAP.md) for detailed development phases, timelines, and success metrics.
+GFlowNet.jl has a comprehensive development roadmap focused on making it the premier production-ready implementation of Generative Flow Networks. See [docs/src/internals/development_guides/roadmap.md](docs/src/internals/development_guides/roadmap.md) for detailed development phases, timelines, and success metrics.
 
 ### Key Upcoming Priorities
 1. **GPU Acceleration**: Full GPU pipeline for 10-100x speedup
