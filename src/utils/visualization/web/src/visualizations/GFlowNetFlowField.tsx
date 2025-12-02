@@ -110,11 +110,11 @@ function FlowVectors({ flowData }: { flowData: FlowFieldData }) {
   return (
     <group ref={arrowsRef}>
       {flowData.data.map((point, i) => {
-        if (point.magnitude < 0.05) return null // Skip very low flow
+        if (point.magnitude < 0.01 && point.flow_value < 0.05) return null // Skip very low flow
         
         const dir = new THREE.Vector3(...point.velocity).normalize()
-        const length = Math.min(0.6, Math.max(0.2, point.magnitude * 2))
-        const flowNorm = Math.max(0, Math.min(1, point.flow_value / 5))
+        const flowNorm = Math.max(0, Math.min(1, point.flow_value))
+        const length = Math.min(0.6, Math.max(0.15, point.magnitude * 1.5 + flowNorm * 0.2))
         const rewardNorm = Math.max(0, Math.min(1, point.reward / 10))
         
         // Color gradient based on flow value

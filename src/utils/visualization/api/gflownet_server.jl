@@ -206,43 +206,53 @@ function generate_training_data()
     )
 end
 
-# Generate flow field for the grid world
+# Generate policy flow field from sampled trajectories (empirical transition directions)
 function generate_flow_field()
     resolution = PROBLEM_CONFIG[].grid_size
-    flow_data = []
+    flow_sums = Dict{Tuple{Int,Int}, Tuple{Float64,Float64,Int}}()  # (dx_sum, dy_sum, count)
+    max_count = 0
     
+    # Accumulate transitions from sampled trajectories
+    for traj in TRAJECTORIES
+        states = traj["states"]
+        for i in 1:length(states)-1
+            curr = states[i]["grid_position"]
+            nxt = states[i+1]["grid_position"]
+            dx = nxt[1] - curr[1]
+            dy = nxt[2] - curr[2]
+            key = (curr[1], curr[2])
+            prev = get(flow_sums, key, (0.0, 0.0, 0))
+            new = (prev[1] + dx, prev[2] + dy, prev[3] + 1)
+            flow_sums[key] = new
+            max_count = max(max_count, new[3])
+        end
+    end
+    
+    flow_data = []
     for x in 1:resolution
         for y in 1:resolution
-            state = GridState(x, y, false)
-            reward = compute_reward(state)
-            
-            # Flow direction points towards higher rewards
-            grad_x = 0.0
-            grad_y = 0.0
-            
-            # Compute gradient
-            if x > 1
-                grad_x += compute_reward(GridState(x-1, y, false)) - reward
+            reward = compute_reward(GridState(x, y, false))
+            key = (x, y)
+            dx_sum, dy_sum, count = get(flow_sums, key, (0.0, 0.0, 0))
+            if count > 0
+                mean_dx = dx_sum / count
+                mean_dy = dy_sum / count
+                count_norm = max_count > 0 ? count / max_count : 0.0
+                magnitude = sqrt(mean_dx^2 + mean_dy^2) * count_norm
+                flow_value = count_norm
+                velocity = [mean_dx, mean_dy, 0.0]
+            else
+                magnitude = 0.0
+                flow_value = 0.0
+                velocity = [0.0, 0.0, 0.0]
             end
-            if x < resolution
-                grad_x += compute_reward(GridState(x+1, y, false)) - reward
-            end
-            if y > 1
-                grad_y += compute_reward(GridState(x, y-1, false)) - reward
-            end
-            if y < resolution
-                grad_y += compute_reward(GridState(x, y+1, false)) - reward
-            end
-            
-            # Normalize
-            mag = sqrt(grad_x^2 + grad_y^2) + 0.01
             
             push!(flow_data, Dict(
                 "position" => [x, y, 0],
-                "velocity" => [grad_x/mag, grad_y/mag, 0],
-                "magnitude" => reward,
+                "velocity" => velocity,
+                "magnitude" => magnitude,
                 "reward" => reward,
-                "flow_value" => reward * 10  # Estimated flow
+                "flow_value" => flow_value
             ))
         end
     end
