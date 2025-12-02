@@ -123,7 +123,6 @@ function App() {
         
         {activeView === 'monitor' && problemConfig && (
           <ErrorBoundary>
-            {console.log('Rendering MonitoringDashboard with config:', problemConfig)}
             <MonitoringDashboard problemConfig={problemConfig} />
           </ErrorBoundary>
         )}

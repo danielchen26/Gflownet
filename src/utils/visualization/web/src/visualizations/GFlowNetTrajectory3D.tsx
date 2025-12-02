@@ -8,6 +8,12 @@ import axios from '../lib/axios'
 import { motion } from 'framer-motion'
 import { Play, Pause, SkipForward, Info } from 'lucide-react'
 
+interface RewardPeak {
+  position: [number, number]
+  intensity: number
+  name: string
+}
+
 interface Trajectory {
   id: string
   trajectory_id: number
@@ -22,6 +28,15 @@ interface Trajectory {
   total_reward: number
   start_position: [number, number]
   end_position: [number, number]
+}
+
+interface TrajectoriesResponse {
+  trajectories: Trajectory[]
+  grid_size?: [number, number]
+}
+
+interface FlowFieldResponse {
+  reward_peaks: RewardPeak[]
 }
 
 // Grid floor to show the state space
@@ -70,11 +85,11 @@ function GridFloor() {
 }
 
 // Reward peaks visualization
-function RewardPeaks({ peaks }: { peaks: any[] }) {
+function RewardPeaks({ peaks }: { peaks: RewardPeak[] }) {
   return (
     <>
       {peaks.map((peak, i) => (
-        <group key={i} position={[peak.position[0], peak.position[1], 0]}>
+        <group key={i} position={[peak.position[0] - 1, peak.position[1] - 1, 0]}>
           {/* Glowing cylinder for reward */}
           <mesh>
             <cylinderGeometry args={[peak.intensity / 10, peak.intensity / 10, 0.1, 32]} />
@@ -128,7 +143,7 @@ function TrajectoryPath({ trajectory, isActive, color, onClick }: {
   
   const points = useMemo(() => {
     return trajectory.states.map(s => 
-      new THREE.Vector3(s.grid_position[0], s.grid_position[1], s.position[2])
+      new THREE.Vector3(s.grid_position[0] - 1, s.grid_position[1] - 1, s.position[2])
     )
   }, [trajectory])
   
@@ -169,7 +184,7 @@ function TrajectoryPath({ trajectory, isActive, color, onClick }: {
       
       {/* State nodes */}
       {trajectory.states.map((state, i) => (
-        <group key={i} position={[state.grid_position[0], state.grid_position[1], state.position[2]]}>
+        <group key={i} position={[state.grid_position[0] - 1, state.grid_position[1] - 1, state.position[2]]}>
           <mesh>
             <sphereGeometry args={[isActive ? 0.15 : 0.08, 16, 16]} />
             <meshBasicMaterial color={colors[i]} />
@@ -231,24 +246,26 @@ function Scene({ activeTrajectory, setActiveTrajectory }: {
   setActiveTrajectory: (idx: number) => void 
 }) {
   
-  const { data: trajectoriesData } = useQuery({
+  const { data: trajectoriesData } = useQuery<TrajectoriesResponse>({
     queryKey: ['trajectories-3d'],
     queryFn: async () => {
       const response = await axios.get('/api/trajectories?view=3d')
-      return response.data
+      return response.data as TrajectoriesResponse
     },
   })
   
-  const { data: flowField } = useQuery({
+  const { data: flowField } = useQuery<FlowFieldResponse>({
     queryKey: ['flow-field'],
     queryFn: async () => {
       const response = await axios.get('/api/analysis/flow-field')
-      return response.data
+      return response.data as FlowFieldResponse
     },
   })
   
   const trajectories = trajectoriesData?.trajectories || []
   const peaks = flowField?.reward_peaks || []
+  const gridSize = trajectoriesData?.grid_size?.[0] ?? 10
+  const gridOffset = -((gridSize - 1) / 2)
   
   return (
     <>
@@ -258,7 +275,7 @@ function Scene({ activeTrajectory, setActiveTrajectory }: {
       <pointLight position={[0, 0, 5]} intensity={0.5} color="#00D9FF" />
       
       {/* Center the grid */}
-      <group position={[-5, -5, 0]}>
+      <group position={[gridOffset, gridOffset, 0]}>
         <GridFloor />
         <RewardPeaks peaks={peaks} />
         
@@ -281,11 +298,11 @@ export function GFlowNetTrajectory3D() {
   const [isPlaying, setIsPlaying] = useState(true)
   const [selectedTrajectory, setSelectedTrajectory] = useState(0)
   
-  const { data: trajectoriesData } = useQuery({
+  const { data: trajectoriesData } = useQuery<TrajectoriesResponse>({
     queryKey: ['trajectories-3d'],
     queryFn: async () => {
       const response = await axios.get('/api/trajectories?view=3d')
-      return response.data
+      return response.data as TrajectoriesResponse
     },
   })
   
@@ -351,13 +368,13 @@ export function GFlowNetTrajectory3D() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Start:</span>
               <span className="font-mono">
-                ({trajectories[selectedTrajectory].start_position.join(',')})
+                ({trajectories[selectedTrajectory].start_position.map((v) => v - 1).join(',')})
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">End:</span>
               <span className="font-mono">
-                ({trajectories[selectedTrajectory].end_position.join(',')})
+                ({trajectories[selectedTrajectory].end_position.map((v) => v - 1).join(',')})
               </span>
             </div>
             <div className="flex justify-between">

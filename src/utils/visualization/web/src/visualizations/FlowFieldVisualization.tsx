@@ -188,28 +188,28 @@ function SlicingPlane({ axis, position, bounds }: { axis: 'x' | 'y' | 'z', posit
   
   const { planeGeometry, planePosition, planeRotation } = useMemo(() => {
     let geometry: [number, number, number, number]
-    let position: [number, number, number]
+    let planePosition: [number, number, number]
     let rotation: [number, number, number]
     
     switch (axis) {
       case 'x':
         geometry = [0.1, bounds.y[1] - bounds.y[0], bounds.z[1] - bounds.z[0], 1]
-        position = [position, 0, 0]
+        planePosition = [position, 0, 0]
         rotation = [0, Math.PI / 2, 0]
         break
       case 'y':
         geometry = [bounds.x[1] - bounds.x[0], 0.1, bounds.z[1] - bounds.z[0], 1]
-        position = [0, position, 0]
+        planePosition = [0, position, 0]
         rotation = [Math.PI / 2, 0, 0]
         break
       case 'z':
       default:
         geometry = [bounds.x[1] - bounds.x[0], bounds.y[1] - bounds.y[0], 0.1, 1]
-        position = [0, 0, position]
+        planePosition = [0, 0, position]
         rotation = [0, 0, 0]
     }
     
-    return { planeGeometry: geometry, planePosition: position, planeRotation: rotation }
+    return { planeGeometry: geometry, planePosition, planeRotation: rotation }
   }, [axis, position, bounds])
   
   return (

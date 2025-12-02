@@ -67,7 +67,15 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
   const startTraining = async () => {
     setIsRunning(true)
     try {
-      await axios.post('/api/training/start', config)
+      // Server expects 1-based grid coordinates; convert before sending
+      const payload = {
+        ...config,
+        reward_peaks: config.reward_peaks.map((peak) => ({
+          ...peak,
+          position: [peak.position[0] + 1, peak.position[1] + 1] as [number, number],
+        })),
+      }
+      await axios.post('/api/training/start', payload)
       onStart(config)
     } catch (error) {
       console.error('Failed to start training:', error)

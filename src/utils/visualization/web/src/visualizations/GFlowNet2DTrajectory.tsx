@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Play, Pause, SkipBack, SkipForward, Info, Target, Flag } from 'lucide-react'
@@ -45,46 +45,83 @@ export function GFlowNet2DTrajectory() {
     queryKey: ['trajectories'],
     queryFn: async () => {
       const response = await axios.get('/api/trajectories')
-      const trajData = response.data as TrajectoryData
-      // Sort trajectories by total reward (highest first)
-      trajData.trajectories.sort((a, b) => b.total_reward - a.total_reward)
-      return trajData
+      return response.data as TrajectoryData
     },
     refetchInterval: isTraining ? 500 : (isPlaying ? false : 10000), // Update more frequently during training
   })
   
-  // Auto-play animation
-  useMemo(() => {
-    if (isPlaying && data) {
-      const trajectory = data.trajectories[selectedTrajectory]
+  const [sortMode, setSortMode] = useState<'reward' | 'recent' | 'length'>('reward')
+  
+  const trajectories = useMemo(() => {
+    if (!data) return []
+    const arr = [...data.trajectories]
+    switch (sortMode) {
+      case 'length':
+        return arr.sort((a, b) => b.length - a.length)
+      case 'recent':
+        return arr // preserve arrival order (newest last)
+      case 'reward':
+      default:
+        return arr.sort((a, b) => b.total_reward - a.total_reward)
+    }
+  }, [data, sortMode])
+  
+  // Reset selection when sort changes or list size changes
+  useEffect(() => {
+    setSelectedTrajectory(0)
+    setCurrentStep(0)
+  }, [sortMode, trajectories.length])
+  
+  // Auto-play animation when training or when user hits play
+  useEffect(() => {
+    if (!trajectories.length) return
+    const trajectory = trajectories[selectedTrajectory]
+    if (!trajectory) return
+    
+    // Auto-start during live training
+    if (isTraining && !isPlaying) {
+      setIsPlaying(true)
+    }
+    
+    if (isPlaying) {
       const interval = setInterval(() => {
         setCurrentStep(prev => {
           if (prev >= trajectory.length - 1) {
-            setIsPlaying(false)
-            return prev
+            // Loop for both training and manual playback
+            return 0
           }
           return prev + 1
         })
       }, 800) // Slower animation for better visibility
       return () => clearInterval(interval)
     }
-  }, [isPlaying, data, selectedTrajectory])
+  }, [isPlaying, isTraining, trajectories, selectedTrajectory])
   
   // Auto-advance to new trajectories when training
-  useMemo(() => {
-    if (isTraining && data && data.trajectories.length > 0) {
+  useEffect(() => {
+    if (isTraining && trajectories.length > 0) {
       const interval = setInterval(() => {
         setSelectedTrajectory(prev => {
-          const next = (prev + 1) % Math.min(data.trajectories.length, 5) // Cycle through first 5
+          const next = (prev + 1) % Math.min(trajectories.length, 5) // Cycle through first 5
           setCurrentStep(0)
           return next
         })
       }, 3000) // Switch trajectories every 3 seconds during training
       return () => clearInterval(interval)
     }
-  }, [isTraining, data])
+  }, [isTraining, trajectories.length])
   
-  if (!data) {
+  // Ensure current step stays in range when trajectories update
+  useEffect(() => {
+    if (!trajectories.length) return
+    const trajectory = trajectories[selectedTrajectory]
+    if (!trajectory) return
+    if (currentStep >= trajectory.length) {
+      setCurrentStep(Math.max(trajectory.length - 1, 0))
+    }
+  }, [trajectories, selectedTrajectory, currentStep])
+  
+  if (!data || trajectories.length === 0) {
     // Return a simple placeholder for now
     return (
       <div className="h-full flex items-center justify-center">
@@ -96,10 +133,11 @@ export function GFlowNet2DTrajectory() {
     )
   }
   
-  const trajectory = data.trajectories[selectedTrajectory]
+  const trajectory = trajectories[selectedTrajectory]
   const cellSize = 40
   const gridWidth = data.grid_size[0] * cellSize
   const gridHeight = data.grid_size[1] * cellSize
+  const toCanvasCoord = (coord: number) => (coord - 1) * cellSize + cellSize / 2 + 1
   
   return (
     <div className="h-full flex gap-4">
@@ -148,14 +186,14 @@ export function GFlowNet2DTrajectory() {
               {data.reward_peaks.map((peak, i) => (
                 <g key={i}>
                   <circle
-                    cx={peak.position[0] * cellSize + cellSize/2 + 1}
-                    cy={peak.position[1] * cellSize + cellSize/2 + 1}
+                    cx={toCanvasCoord(peak.position[0])}
+                    cy={toCanvasCoord(peak.position[1])}
                     r={cellSize * 2}
                     fill={`url(#peak${i})`}
                   />
                   <text
-                    x={peak.position[0] * cellSize + cellSize/2 + 1}
-                    y={peak.position[1] * cellSize + cellSize/2 + 1}
+                    x={toCanvasCoord(peak.position[0])}
+                    y={toCanvasCoord(peak.position[1])}
                     textAnchor="middle"
                     className="fill-white text-xs font-medium"
                   >
@@ -171,10 +209,10 @@ export function GFlowNet2DTrajectory() {
                 return (
                   <line
                     key={i}
-                    x1={prevState[0] * cellSize + cellSize/2 + 1}
-                    y1={prevState[1] * cellSize + cellSize/2 + 1}
-                    x2={state[0] * cellSize + cellSize/2 + 1}
-                    y2={state[1] * cellSize + cellSize/2 + 1}
+                    x1={toCanvasCoord(prevState[0])}
+                    y1={toCanvasCoord(prevState[1])}
+                    x2={toCanvasCoord(state[0])}
+                    y2={toCanvasCoord(state[1])}
                     stroke={COLORS.primary.purple}
                     strokeWidth="3"
                     strokeDasharray={i === currentStep ? "5,5" : ""}
@@ -186,8 +224,8 @@ export function GFlowNet2DTrajectory() {
               {/* Start marker */}
               <g>
                 <circle
-                  cx={trajectory.states[0][0] * cellSize + cellSize/2 + 1}
-                  cy={trajectory.states[0][1] * cellSize + cellSize/2 + 1}
+                  cx={toCanvasCoord(trajectory.states[0][0])}
+                  cy={toCanvasCoord(trajectory.states[0][1])}
                   r="12"
                   fill={COLORS.primary.green}
                   stroke={COLORS.primary.green}
@@ -196,8 +234,8 @@ export function GFlowNet2DTrajectory() {
                 />
                 <Flag 
                   className="w-4 h-4"
-                  x={trajectory.states[0][0] * cellSize + cellSize/2 - 8 + 1}
-                  y={trajectory.states[0][1] * cellSize + cellSize/2 - 8 + 1}
+                  x={toCanvasCoord(trajectory.states[0][0]) - 8}
+                  y={toCanvasCoord(trajectory.states[0][1]) - 8}
                   fill={COLORS.primary.green}
                 />
               </g>
@@ -206,12 +244,12 @@ export function GFlowNet2DTrajectory() {
               {currentStep < trajectory.states.length && (
                 <motion.g
                   initial={{ 
-                    x: trajectory.states[0][0] * cellSize + cellSize/2 + 1,
-                    y: trajectory.states[0][1] * cellSize + cellSize/2 + 1
+                    x: toCanvasCoord(trajectory.states[0][0]),
+                    y: toCanvasCoord(trajectory.states[0][1])
                   }}
                   animate={{ 
-                    x: trajectory.states[currentStep][0] * cellSize + cellSize/2 + 1,
-                    y: trajectory.states[currentStep][1] * cellSize + cellSize/2 + 1
+                    x: toCanvasCoord(trajectory.states[currentStep][0]),
+                    y: toCanvasCoord(trajectory.states[currentStep][1])
                   }}
                   transition={{ duration: 0.6, ease: "easeInOut" }}
                 >
@@ -236,8 +274,8 @@ export function GFlowNet2DTrajectory() {
               {currentStep === trajectory.states.length - 1 && (
                 <g>
                   <circle
-                    cx={trajectory.states[currentStep][0] * cellSize + cellSize/2 + 1}
-                    cy={trajectory.states[currentStep][1] * cellSize + cellSize/2 + 1}
+                    cx={toCanvasCoord(trajectory.states[currentStep][0])}
+                    cy={toCanvasCoord(trajectory.states[currentStep][1])}
                     r="12"
                     fill={COLORS.primary.pink}
                     stroke={COLORS.primary.pink}
@@ -246,8 +284,8 @@ export function GFlowNet2DTrajectory() {
                   />
                   <Target 
                     className="w-4 h-4"
-                    x={trajectory.states[currentStep][0] * cellSize + cellSize/2 - 8 + 1}
-                    y={trajectory.states[currentStep][1] * cellSize + cellSize/2 - 8 + 1}
+                    x={toCanvasCoord(trajectory.states[currentStep][0]) - 8}
+                    y={toCanvasCoord(trajectory.states[currentStep][1]) - 8}
                     fill={COLORS.primary.pink}
                   />
                 </g>
@@ -309,30 +347,54 @@ export function GFlowNet2DTrajectory() {
       </div>
       
       {/* Trajectory List */}
-      <div className="w-80 glass-dark rounded-lg p-4">
-        <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-          <Info className="w-4 h-4 text-neon-purple" />
-          Sampled Trajectories
-          {isTraining && (
-            <motion.span 
-              className="ml-auto text-xs text-neon-green"
-              animate={{ opacity: [1, 0.5, 1] }}
-              transition={{ duration: 1, repeat: Infinity }}
-            >
-              Live Training...
-            </motion.span>
-          )}
-        </h3>
+        <div className="w-80 glass-dark rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Info className="w-4 h-4 text-neon-purple" />
+            <h3 className="text-sm font-medium">Sampled Trajectories</h3>
+            {isTraining && (
+              <motion.span 
+                className="ml-auto text-xs text-neon-green"
+                animate={{ opacity: [1, 0.5, 1] }}
+                transition={{ duration: 1, repeat: Infinity }}
+              >
+                Live Training...
+              </motion.span>
+            )}
+          </div>
+          
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-muted-foreground">Sort:</span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setSortMode('reward')}
+                className={`px-2 py-1 text-xs rounded ${sortMode === 'reward' ? 'bg-neon-purple/30 text-white' : 'glass-dark hover:bg-dark-panel'}`}
+              >
+                Reward
+              </button>
+              <button
+                onClick={() => setSortMode('recent')}
+                className={`px-2 py-1 text-xs rounded ${sortMode === 'recent' ? 'bg-neon-purple/30 text-white' : 'glass-dark hover:bg-dark-panel'}`}
+              >
+                Recent
+              </button>
+              <button
+                onClick={() => setSortMode('length')}
+                className={`px-2 py-1 text-xs rounded ${sortMode === 'length' ? 'bg-neon-purple/30 text-white' : 'glass-dark hover:bg-dark-panel'}`}
+              >
+                Length
+              </button>
+            </div>
+          </div>
         
         <div className="space-y-2 max-h-96 overflow-y-auto">
-          {data.trajectories.slice(0, 10).map((traj, idx) => (
+          {trajectories.slice(0, 10).map((traj, idx) => (
             <motion.div
               key={traj.id}
               whileHover={{ scale: 1.02 }}
               onClick={() => {
                 setSelectedTrajectory(idx)
                 setCurrentStep(0)
-                setIsPlaying(false)
+                setIsPlaying(true) // keep animation visible after selection
               }}
               className={`p-3 rounded-lg cursor-pointer transition-colors ${
                 selectedTrajectory === idx

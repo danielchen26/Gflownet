@@ -101,7 +101,7 @@ function TrajectoryFlow({ trajectory }: { trajectory: Trajectory }) {
     const points = trajectory.states.map(state => 
       new THREE.Vector3(state.position[0] - 5, state.position[1] - 5, state.position[2] - 2)
     )
-    return new THREE.CatmullRomCurve3(points, false, 'smooth')
+    return new THREE.CatmullRomCurve3(points, false, 'catmullrom')
   }, [trajectory])
   
   useFrame((state) => {
@@ -251,7 +251,11 @@ export function TrajectoryViewer3D() {
             luminanceSmoothing={0.9}
             height={300}
           />
-          <ChromaticAberration offset={[0.002, 0.002]} />
+          <ChromaticAberration
+            offset={new THREE.Vector2(0.002, 0.002)}
+            radialModulation={false}
+            modulationOffset={0}
+          />
         </EffectComposer>
       </Canvas>
       
