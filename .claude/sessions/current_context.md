@@ -1,15 +1,17 @@
 # Current Context - GFlowNet.jl
 
-*Last Updated: August 3, 2025 - Evening*
-*Last Session: session_2025-08-03_complete.md*
+*Last Updated: January 28, 2026*
+*Last Session: session_2025-08-03_complete.md (historical)*
+*Latest Commits: 724ecac7 (DAG docs), 39697005 (viz plan revision)*
 
 ## Current State
 
 ### Repository Organization
 - ✅ Documentation reorganized into clear structure
-- ✅ Master agent system designed and ready for implementation
+- ✅ Master agent system designed (template created)
 - ✅ Root directory cleaned (only README, RELEASE_NOTES, CLAUDE)
 - ✅ Conversation persistence system created
+- ✅ Real training visualization plan revised and validated (Jan 2026)
 
 ### Recent Major Changes
 1. **Documentation Structure**:
@@ -35,33 +37,38 @@
 - No uncommitted changes currently
 
 ### Implemented Features
-- ✅ All training objectives (TB, DB, FM, STB, DIRECT_FLOW)
-- ✅ Flow computation with memoization
-- ✅ Backward policy validation
-- ✅ Web visualization system
-- ✅ Multi-start GFlowNets
+- ✅ All core training objectives (TB, DB, FM, STB, DIRECT_FLOW, COMBINED)
+- ✅ Flow computation with memoization (on-demand DAG)
+- ✅ Backward policy validation and learning
+- ✅ Web visualization system (React + Three.js frontend, mock backend)
+- ✅ Multi-start GFlowNets with per-state partition functions
+- ✅ Learnable partition function Z (LEARNABLE_ESTIMATION)
+- ✅ Training code reorganization (src/training/ module)
 
-### In Progress
-- 🔄 GPU acceleration
-- 🔄 Continuous state spaces
-- 🔄 Master agent system implementation
+### Planned (Roadmap)
+- ⏳ GPU acceleration (Phase 1: Q1 2025)
+- ⏳ Continuous state spaces (Phase 2: Q1-Q2 2025)
+- ⏳ Real training visualization integration (plan revised Jan 2026)
+- ⏳ Master agent coordination logic (template exists, logic pending)
 
 ## Next TODOs
 
-### Immediate:
-1. Test master orchestrator agent with real tasks
-2. Implement shared context system for agents
-3. Create agent coordination pattern library
+### Immediate (January 2026):
+1. ✅ Fix outdated documentation in `.claude/` and `.cursor/rules/` (in progress)
+2. Implement real training visualization (domain adapter + server integration)
+3. Test real GFlowNet training with visualization UI
 
-### Short-term:
-1. GPU kernel implementation for trajectory sampling
-2. Continuous domain support
-3. Performance profiling tools
+### Short-term (Q1 2026):
+1. GPU kernel implementation for trajectory sampling (Phase 1 roadmap)
+2. Performance profiling suite
+3. Distributed training infrastructure
+4. Master agent coordination logic implementation
 
-### Long-term:
-1. Distributed training
-2. Advanced molecular design domains
-3. Cloud deployment templates
+### Long-term (Q2-Q4 2026):
+1. Continuous domain support (Phase 2)
+2. Advanced molecular design domains (Phase 2)
+3. PyTorch/JAX bridges (Phase 5)
+4. Cloud deployment templates (Phase 5)
 
 ## Key Files to Remember
 

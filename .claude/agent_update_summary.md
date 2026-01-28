@@ -1,6 +1,11 @@
 # Agent Instruction Files Update Summary
 
-## Date: January 2025 (Latest Update)
+## Date: January 2026 (Latest Update)
+
+### Update History:
+- **January 2026**: Documentation audit and fixes (`.claude/` and `.cursor/rules/`)
+- **August 2025**: Master orchestrator agent system designed
+- **January 2025**: Core training objectives and visualization system completed
 
 All agent instruction files in `.claude/agents/` have been comprehensively updated to reflect the current state of the GFlowNet.jl codebase after the training reorganization and visualization system enhancements.
 
@@ -87,13 +92,29 @@ All relevant agents now know about:
 - **gflownet-architecture-analyzer.md**: Added web visualization to architecture components
 - **gflownet-training-expert.md**: Added visualization integration for training monitoring
 
+### 6. Real Training Visualization Plan Revision (January 2026)
+
+**Latest Update (Commit 39697005)**:
+- Comprehensive plan revision validated against actual codebase
+- Fixed all API signature mismatches
+- Added missing utility functions (parse_objective, error tracking)
+- Corrected TrainingConfig construction patterns
+- Added frontend integration details and test plan
+- Document location: `docs/src/internals/development_guides/real_training_visualization_plan.md`
+
+**Status**:
+- Visualization UI: ✅ Production-ready (React + Three.js)
+- Backend Integration: ⏳ Planned (implementation pending)
+- Domain Adapters: ⏳ Designed (Grid World adapter specified)
+
 ## Impact
 
 These updates ensure that all specialized agents have accurate, up-to-date knowledge about:
-1. The current code organization
+1. The current code organization (as of January 2026)
 2. Recent bug fixes and improvements
 3. Proper import paths and function locations
 4. Working examples with correct syntax
 5. Web visualization system capabilities and recent enhancements
+6. Real training visualization integration plan and status
 
 This allows the agents to provide accurate assistance without referencing outdated patterns or broken features, and helps users leverage the powerful visualization tools for training analysis.

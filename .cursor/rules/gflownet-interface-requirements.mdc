@@ -59,25 +59,45 @@ const ACTION_CONST = SpecificAction()
 
 ## Model Creation Pattern
 
-Use the standard high-level pattern:
+Use the high-level API (RECOMMENDED):
 
 ```julia
+# Method 1: Generic high-level API (for any domain)
 function create_domain_model()
     # 1. Define initial state and actions
     initial_state = YourState(...)
-    actions = [ACTION1, ACTION2, TERMINATE]
-    
-    # 2. Create DAG
-    dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
-    
-    # 3. Use high-level neural network creation
-    forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(...)
-    flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(...)
-    
-    # 4. Create model with optimizer
-    optimizer = Optimisers.setup(Optimisers.Adam(learning_rate), parameters)
-    return GFlowNet.GFlowNetModel(...)
+    all_actions = [ACTION1, ACTION2, TERMINATE]
+
+    # 2. Create model using high-level interface
+    model = GFlowNet.create_gflownet(
+        initial_state,
+        all_actions;
+        state_dim = 3,              # Output of state_to_features()
+        hidden_dim = 64,            # Neural network hidden layer size
+        learning_rate = 0.01,
+        include_backward = false,   # Set true for DETAILED_BALANCE
+        include_flow_estimator = false  # Set true for FLOW_MATCHING/DIRECT_FLOW
+    )
+
+    return model
 end
+
+# Method 2: Domain-specific convenience function (Grid World example)
+model = GFlowNet.create_grid_world_gflownet(
+    grid_size = 8,
+    reward_positions = Dict((3,3) => 10.0, (8,8) => 15.0),
+    hidden_dim = 64,
+    learning_rate = 0.01
+)
+```
+
+### Advanced: Low-Level API (Not Recommended)
+
+For advanced users only, low-level DAG creation is available:
+```julia
+# Low-level approach (use only if high-level API doesn't fit)
+dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
+# Then manual model assembly...
 ```
 
 ## Validation Requirements

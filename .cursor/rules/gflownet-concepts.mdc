@@ -13,27 +13,71 @@ The core principle of GFlowNets is flow conservation:
 **For non-terminal states:** `F(s) = Σ F(s,s')` (outgoing flow equals total incoming flow)
 **For terminal states:** `F(s) = R(s)` (flow equals reward)
 
-### Training Objectives
+### Training Objectives (All 6 Implemented)
 
-#### 1. Trajectory Balance (Primary)
-**Equation:** `Z * P_F(τ) = R(s_τ)`
-**Implementation:**
+GFlowNet.jl supports 6 training objectives. Choose based on your problem requirements:
+
+#### 1. TRAJECTORY_BALANCE (Standard/Default)
+**Equation:** `Z * ∏P_F(s'|s) = R(s_T)`
+**Use Case:** Default choice for most problems
+**Complexity:** O(T) learning signals per trajectory
+**Requirements:** None (just forward policy)
+
 ```julia
-function trajectory_balance_loss(model, trajectories)
-    # Minimize: (log(Z) + sum(log P_F) - log(R))²
-    for trajectory in trajectories
-        log_forward_prob_sum = sum(log(P_F(transition)) for transition in trajectory)
-        log_Z = log(model.partition_function)
-        log_reward = log(reward(trajectory.states[end]))
-        balance_error = log_Z + log_forward_prob_sum - log_reward
-        total_loss += balance_error^2
-    end
-end
+config = TrainingConfig(
+    objective = TRAJECTORY_BALANCE,
+    n_iterations = 1000,
+    batch_size = 32
+)
 ```
 
-#### 2. Flow Consistency (Alternative)
-**Edge Level:** `F(s) * P_F(s→s') = F(s') * P_B(s'→s)` (Detailed Balance)
-**State Level:** `Σ incoming_flow = Σ outgoing_flow` (Flow Matching)
+#### 2. DETAILED_BALANCE ✨
+**Equation:** `P_F(s'|s) * F(s) = P_B(s|s') * F(s')`
+**Use Case:** Better credit assignment for complex state spaces
+**Complexity:** O(T²) pairwise constraints
+**Requirements:** Backward policy (`include_backward=true`)
+
+```julia
+model = create_gflownet(..., include_backward=true)
+config = TrainingConfig(objective = DETAILED_BALANCE, ...)
+```
+
+#### 3. FLOW_MATCHING ✨
+**Equation:** `(Z(s) - F(s))²` minimization
+**Use Case:** Direct flow estimation (faster than recursive)
+**Complexity:** O(T) per state
+**Requirements:** Flow estimator network (`include_flow_estimator=true`)
+
+```julia
+model = create_gflownet(..., include_flow_estimator=true)
+config = TrainingConfig(objective = FLOW_MATCHING, ...)
+```
+
+#### 4. SUB_TRAJECTORY_BALANCE ✨
+**Equation:** TB applied to sub-trajectories
+**Use Case:** Long trajectories, improved credit assignment
+**Complexity:** O(T²) learning signals
+**Requirements:** None (domain-agnostic)
+
+```julia
+config = TrainingConfig(objective = SUB_TRAJECTORY_BALANCE, ...)
+```
+
+#### 5. DIRECT_FLOW_OBJECTIVE ✨
+**Equation:** Direct neural network F(s) estimation
+**Use Case:** Large state spaces where recursive flow is expensive
+**Complexity:** O(T) with NN inference
+**Requirements:** Flow estimator network
+
+```julia
+model = create_gflownet(..., include_flow_estimator=true)
+config = TrainingConfig(objective = DIRECT_FLOW_OBJECTIVE, ...)
+```
+
+#### 6. COMBINED_OBJECTIVES
+**Equation:** Weighted combination of multiple objectives
+**Use Case:** Advanced training with multiple constraints
+**Complexity:** Sum of component complexities
 
 ### Partition Function Management
 **This implementation uses periodic estimation:**
