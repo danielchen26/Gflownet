@@ -27,3 +27,7 @@
 # Test artifacts
 /test_env/
 /results/
+
+# Web visualization build artifacts
+src/utils/visualization/web/dist/
+src/utils/visualization/web/node_modules/
