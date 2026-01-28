@@ -80,13 +80,52 @@ config = TrainingConfig(objective = DIRECT_FLOW_OBJECTIVE, ...)
 **Complexity:** Sum of component complexities
 
 ### Partition Function Management
-**This implementation uses periodic estimation:**
+
+GFlowNet.jl supports 4 methods for managing the partition function Z:
+
+#### 1. SIMPLE_ESTIMATION (Default)
+**Z = 1** (fixed constant)
+- **Pros**: Fast, simple, no overhead
+- **Cons**: Inaccurate for multi-modal distributions
+- **Use when**: Quick experiments, single-mode problems
+
 ```julia
-# Every N iterations: estimate Z as sum of terminal rewards
-if iteration % config.partition_update_frequency == 0
-    model.partition_function = sum(reward(s) for s in terminal_states)
-end
+model = create_grid_world_gflownet(
+    partition_function_method = SIMPLE_ESTIMATION  # Default
+)
 ```
+
+#### 2. LEARNABLE_ESTIMATION ⭐ **RECOMMENDED**
+**Z learned as trainable parameter**
+- **Pros**: Theoretically correct, ~42% better exploration, minimal overhead
+- **Cons**: None significant
+- **Use when**: Any serious application (recommended default)
+
+```julia
+model = create_grid_world_gflownet(
+    partition_function_method = LEARNABLE_ESTIMATION
+)
+
+config = TrainingConfig(
+    partition_function_method = LEARNABLE_ESTIMATION,
+    # ... other params
+)
+
+# Access learned Z
+learned_Z = exp(model.parameters.log_Z)
+```
+
+#### 3. SAMPLING_ESTIMATION
+**Sample-based estimation from trajectories**
+- **Pros**: More accurate than SIMPLE
+- **Cons**: Higher computational cost
+- **Use when**: Need accurate Z without learning overhead
+
+#### 4. ADAPTIVE_ESTIMATION
+**Adaptive approach that adjusts during training**
+- **Pros**: Balances accuracy and efficiency
+- **Cons**: More complex implementation
+- **Use when**: Dynamic adjustment needed
 
 ## Implementation Requirements
 
@@ -170,21 +209,26 @@ end
 ```
 
 ### Policy Network Architecture
-```julia
-# Forward policy: state → action probabilities
-forward_model = Chain(
-    Dense(state_dim => hidden_dim, relu),
-    Dense(hidden_dim => action_dim),
-    # Note: softmax applied during sampling, not in model
-)
 
-# Flow estimator: state → scalar flow value
-flow_model = Chain(
-    Dense(state_dim => hidden_dim, relu),
-    Dense(hidden_dim => 1),
-    # Note: exp() applied to ensure positive flow
+**Use the high-level interface** - neural networks are created automatically:
+
+```julia
+# The framework handles architecture internally
+model = GFlowNet.create_gflownet(
+    initial_state,
+    all_actions;
+    state_dim = 3,           # Input dimension (from state_to_features)
+    hidden_dim = 64,         # This configures internal network architecture
+    include_flow_estimator = true  # Adds flow network if needed
 )
 ```
+
+**Internal Architecture** (for advanced users):
+- Forward policy: `state_dim → hidden_dim (ReLU) → action_dim`
+- Flow estimator: `state_dim → hidden_dim (ReLU) → 1 (exp for positive flow)`
+- Backward policy: Uses joint representation (source ⊕ target)
+
+For implementation details: see `src/core/interface.jl:196`
 
 ## Training Process
 

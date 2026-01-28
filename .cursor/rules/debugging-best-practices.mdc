@@ -125,21 +125,34 @@ julia script.jl  # Does this work?
 4. **"One change at a time"**
 5. **"Previous success proves the approach is sound"**
 
-## Success Story: Grid World Debug
+## Example Debugging Workflow: Grid World
 
-**Evidence Found**: 
-- HTML report from `2025-07-25_18-59-32` showing 50 trajectories
-- Max reward 10.0 achieved in previous runs
-- Training completed successfully before
+**Evidence Gathering**:
+```julia
+# 1. Generate HTML report for trajectory analysis
+analyze_grid_world_results(trajectories, grid_size)
 
-**Root Cause**: 
-- Mutations in `apply_action` function broke Zygote differentiation
-- NOT the training configuration or reward structure
+# 2. Check terminal state distribution
+terminals = [t.states[end] for t in trajectories]
+position_counts = countmap([(s.x, s.y) for s in terminals])
 
-**Fix**: 
-- Replace `y += 1` with `y = condition ? state.y + 1 : state.y`
-- Keep all other working configuration intact
+# 3. Verify reward values
+rewards = [reward(s) for s in terminals]
+println("Reward stats: min=$(minimum(rewards)), max=$(maximum(rewards))")
+```
 
-**Result**: 
-- Fixed with minimal changes
-- Maintained all working functionality
+**Common Root Causes**:
+- Mutations in `apply_action` break Zygote differentiation
+- Incorrect `is_applicable` logic prevents exploration
+- NaN rewards from numerical instability
+- Type mismatches (Float64 vs Float32)
+
+**Systematic Fix Process**:
+1. Identify exact error line with stack trace
+2. Check for mutations (replace with immutable operations)
+3. Verify mathematical correctness (rewards > 0, probabilities sum to 1)
+4. Test incrementally (one fix at a time)
+
+**Result**:
+- Minimal changes to fix root cause
+- All working functionality preserved

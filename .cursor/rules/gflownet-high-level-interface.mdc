@@ -80,6 +80,22 @@ trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:50]
 3. **Core Sampling:**
    - `GFlowNet.sample_trajectory()`
 
+## Configuration Helpers (Convenience Functions)
+
+GFlowNet provides preset configuration templates for common scenarios:
+
+```julia
+# Quick configuration templates
+config = GFlowNet.create_default_config()   # Balanced settings (recommended)
+config = GFlowNet.create_fast_config()      # Fast iterations, lower quality
+config = GFlowNet.create_robust_config()    # Slower, higher quality
+
+# Custom optimizer setup
+optimizer = GFlowNet.create_optimizer(model, learning_rate=0.001)
+```
+
+These helper functions are useful when you need quick setup without specifying all parameters manually.
+
 ## Training Interface
 
 Use the high-level training interface:
@@ -99,22 +115,27 @@ training_history = GFlowNet.train_gflownet(model, config; verbose=true)
 
 ## Model Creation
 
-Follow the standard pattern for model creation:
+Use the highest-level API for model creation:
 
 ```julia
-# Create model with proper optimizer setup
-optimizer = Optimisers.setup(Optimisers.Adam(learning_rate), parameters)
-model = GFlowNet.GFlowNetModel(
-    dag=dag,
-    forward_policy=forward_policy,
-    flow_estimator=flow_estimator,
-    optimizer=optimizer,
-    parameters=parameters,
-    states=states
+# ✅ RECOMMENDED: Highest-level API
+model = GFlowNet.create_gflownet(
+    initial_state,
+    all_actions;
+    state_dim = 3,                    # Output dimension of state_to_features()
+    hidden_dim = 64,                  # Neural network hidden layer size
+    learning_rate = 0.01,
+    include_backward = false,         # Set true for DETAILED_BALANCE
+    include_flow_estimator = false    # Set true for FLOW_MATCHING/DIRECT_FLOW
+)
+
+# ✅ DOMAIN-SPECIFIC CONVENIENCE (Grid World example)
+model = GFlowNet.create_grid_world_gflownet(
+    grid_size = 8,
+    reward_positions = Dict((3,3) => 10.0, (8,8) => 15.0),
+    hidden_dim = 64,
+    learning_rate = 0.01
 )
 ```
-
-This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details. 
-
 
 This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details. 
