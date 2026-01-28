@@ -177,6 +177,99 @@ end
 end
 ```
 
+## Testing New Training Objectives
+
+### DETAILED_BALANCE Tests
+**Location**: `test/objectives/detailed_balance/`
+
+```julia
+@testset "Detailed Balance Objective" begin
+    # Test backward policy normalization
+    model = create_test_model(include_backward=true)
+    is_valid, total_prob, parents = validate_backward_policy_normalization(
+        model, test_state, all_actions
+    )
+    @test is_valid
+    @test abs(total_prob - 1.0) < 1e-3
+
+    # Test gradient computation
+    loss, grad = compute_detailed_balance_loss(model, trajectories)
+    @test !isnan(loss)
+    @test haskey(grad, :backward)
+
+    # Test flow conservation
+    @test validate_flow_conservation(model, test_states)
+end
+```
+
+### SUB_TRAJECTORY_BALANCE Tests
+**Location**: `test/objectives/sub_trajectory_balance/`
+
+```julia
+@testset "Sub-Trajectory Balance" begin
+    # Test sub-trajectory sampling correctness
+    traj = sample_trajectory(model)
+    sub_trajs = generate_sub_trajectories(traj, sub_length=3)
+    @test length(sub_trajs) == length(traj.states) - sub_length + 1
+
+    # Test O(T²) learning signals
+    @test length(sub_trajs) > length([traj])  # More signals than TB
+
+    # Test domain-agnostic implementation
+    for sub_traj in sub_trajs
+        @test isa(sub_traj, Trajectory)
+        @test length(sub_traj.states) == sub_length
+    end
+end
+```
+
+### FLOW_MATCHING Tests
+**Location**: `test/objectives/flow_matching/`
+
+```julia
+@testset "Flow Matching Objective" begin
+    # Test flow estimator network
+    model = create_test_model(include_flow_estimator=true)
+    @test !isnothing(model.flow_estimator)
+
+    # Test flow estimate computation
+    flow_val = flow_estimate(
+        model.flow_estimator, test_state,
+        model.parameters.flow, model.states.flow
+    )
+    @test flow_val > 0
+    @test isfinite(flow_val)
+
+    # Test loss computation
+    loss = flow_matching_loss(model, trajectories)
+    @test !isnan(loss)
+    @test loss >= 0
+end
+```
+
+### DIRECT_FLOW_OBJECTIVE Tests
+**Location**: `test/objectives/direct_flow/`
+
+```julia
+@testset "Direct Flow Objective" begin
+    # Test flow estimator integration
+    model = create_test_model(include_flow_estimator=true)
+    config = TrainingConfig(objective=DIRECT_FLOW_OBJECTIVE)
+
+    # Test neural network F(s) estimation
+    flow_val = flow_estimate(
+        model.flow_estimator, test_state,
+        model.parameters.flow, model.states.flow
+    )
+    @test flow_val > 0
+
+    # Test gradient computation
+    loss, grad = compute_loss_and_grad(model, trajectories, config)
+    @test haskey(grad, :flow)
+    @test all(isfinite, grad.flow.weights)
+end
+```
+
 ## Integration with Examples
 
 ### Example-Specific Testing

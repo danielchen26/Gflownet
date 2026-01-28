@@ -266,6 +266,26 @@ class SharedContext:
 - [ ] Simple shared context system
 - [ ] Basic coordination patterns
 
+#### Implementation Status (January 2026)
+
+The following table clarifies what's actually implemented and usable versus what exists as templates or design documents only:
+
+| Component | Status | Location | Usable? | Notes |
+|-----------|--------|----------|---------|-------|
+| **Master Orchestrator** | ✅ Created | `.claude/agents/gflownet-master-orchestrator.md` | ⚠️ Template only | Agent file exists but coordination logic not implemented |
+| **Domain Specialists** | ✅ Complete | `.claude/agents/` (11 agents) | ✅ Yes | All specialist agents fully functional and ready |
+| **Coordination Protocol** | ⏳ Design only | `AGENT_COORDINATION_PROPOSAL.md` | ❌ Not implemented | Communication protocol designed but not coded |
+| **Task Decomposition** | ⏳ Planned | - | ❌ Not implemented | Conceptual only, no code exists |
+| **Shared Context System** | ⏳ Planned | `.claude/context/` (proposed) | ❌ Not implemented | Directory structure proposed but not created |
+| **Git Integration** | ✅ Designed | Master orchestrator instructions | ⚠️ Template only | Included in master agent but logic not implemented |
+
+**Usage Guidance**:
+- ✅ **Individual specialist agents**: Ready to use directly via Task tool invocations
+- ⚠️ **Master orchestrator**: Template exists with comprehensive instructions, but automatic coordination logic is not yet implemented—must be manually directed
+- ❌ **Advanced coordination**: All Phase 2+ features (parallel execution, shared context, learning system) remain in planning/design phase
+
+**Recommendation**: Continue using individual specialist agents directly until Phase 2-3 coordination logic is implemented. The master orchestrator template provides a roadmap but requires manual orchestration in its current state.
+
 ### Phase 2: Current Improvements (Weeks 3-4)
 - [ ] Standardized output formats
 - [ ] Context files in `.claude/context/`

@@ -52,4 +52,32 @@ When working on examples:
 3. Ensure results directory contains only latest outputs
 4. Remove development artifacts and debug files
 
+## Documented Exceptions
+
+### Intentional Archives
+
+Archive directories (`archive/`) are acceptable when they serve research or educational purposes and include proper documentation:
+
+**Required for Archive Acceptance:**
+- `ARCHIVE_README.md` explaining the archive's purpose
+- Clear versioning structure (e.g., `v1/`, `v2/`, `v3/`)
+- Documented research/educational value
+- Comparison methodology or historical context
+
+**Example: Acceptable Archive**
+```
+examples/domain_name/
+├── main.jl              ← Current production version
+├── README.md
+└── archive/
+    ├── ARCHIVE_README.md  ← Documents evolution and value
+    ├── v1/                ← Original implementation
+    ├── v2/                ← Enhanced version
+    └── v3/                ← Modern patterns
+```
+
+**Purpose**: Preserves implementation evolution for reproducibility, methodology comparison, and educational reference.
+
+**Note**: Random temporary files or undocumented archives should still be removed per the cleanliness standards above.
+
 This maintains a professional codebase that's easy to navigate and understand.
