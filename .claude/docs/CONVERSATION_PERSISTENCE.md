@@ -1,5 +1,29 @@
 # Conversation Persistence System
 
+## Quick Start
+
+**To save current session:**
+```
+"Please save our conversation summary to .claude/sessions/"
+```
+
+**To load previous session:**
+```
+"Please load the previous session context from .claude/sessions/"
+```
+
+**To continue from last session:**
+```
+"Continue from where we left off"
+```
+
+**Best pattern for continuity:**
+1. Start: "Load previous session from .claude/sessions/"
+2. Work: Normal conversation
+3. End: "Save session summary before I close"
+
+---
+
 ## Overview
 
 This system ensures conversation continuity between Claude sessions by automatically saving and loading conversation history.

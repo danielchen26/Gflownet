@@ -8,7 +8,7 @@ When starting a conversation:
 1. Check `.claude/sessions/` for recent session logs
 2. Load the latest session context if user requests it
 3. Continue from previous TODOs and decisions
-4. See `.claude/CONVERSATION_PERSISTENCE.md` for details
+4. See `.claude/docs/CONVERSATION_PERSISTENCE.md` for details
 
 ## Development Principles
 
@@ -199,6 +199,8 @@ The following critical rules are always available as context (not skills):
 - ❌ NEVER manually define neural networks with `Chain()` or `Dense()`
 - ✅ Always use `create_gflownet()` for model creation
 - ✅ Always use `train_gflownet()` for training
+
+**For quick reference**: See [docs/src/reference/quick_reference.md](docs/src/reference/quick_reference.md) for critical rules, current state, key locations, and common pitfalls.
 
 ## Development Guidance
 
