@@ -113,11 +113,99 @@ The project uses specialized AI agents for different aspects of development. A n
 - **gflownet-training-expert**: Training configuration and hyperparameters
 - **gflownet-documentation**: Documentation and tutorials
 
+## Claude Code Skills
+
+The `.skills/` directory contains workflow-oriented skills for GFlowNet development. These provide active, step-by-step guidance that should be invoked via the Skill tool.
+
+### Available Skills
+
+#### `systematic-debugging`
+**When to use**: Encountering bugs, training failures, or Zygote errors
+**What it does**: Evidence-first debugging methodology that checks previous successful runs before making changes
+
+**Key workflow**:
+1. Gather success evidence (check results/, git history)
+2. Compare working vs broken versions
+3. Identify root cause (Zygote mutations, type issues, numerical instability)
+4. Fix root cause only, keep everything else intact
+
+#### `domain-implementation`
+**When to use**: Implementing a new GFlowNet domain or application
+**What it does**: Step-by-step workflow for creating domains with all required interfaces
+
+**Key workflow**:
+1. Define state and action types
+2. Implement 5 required interface functions (state_to_features, is_applicable, apply_action, is_terminal_state, reward)
+3. Create model using high-level API (never manual networks!)
+4. Configure training with TrainingConfig
+5. Write comprehensive tests
+
+#### `code-review`
+**When to use**: Before commits, after implementation, or reviewing generated code
+**What it does**: Comprehensive code quality checklist with Zygote compatibility verification
+
+**Key checks**:
+- ✅ Zygote compatibility (no mutations!)
+- ✅ Clean comment style (no development tags)
+- ✅ Proper type system usage
+- ✅ Numerical stability (positive rewards, safe operations)
+- ✅ Example directory structure compliance
+
+#### `testing-strategy`
+**When to use**: Writing tests for new features or domains
+**What it does**: Comprehensive testing workflow with property-based tests and benchmarks
+
+**Key tests**:
+- Mathematical properties (flow conservation, probability normalization)
+- Zygote compatibility (gradient computation)
+- Training objectives (all 6 objectives)
+- Interface compliance (all required functions)
+- Performance benchmarks
+
+### Using Skills
+
+Skills are invoked automatically by Claude Code when appropriate. You can also explicitly request them:
+
+```
+user: "The grid world training is failing with a Zygote error"
+# Claude automatically invokes systematic-debugging skill
+# Creates TodoWrite checklist for debugging workflow
+```
+
+### Skills vs Reference Documentation
+
+**Skills** (`.skills/` directory):
+- Workflow-oriented procedures
+- Create TodoWrite checklists
+- Invoked actively via Skill tool
+- Guide HOW to do something
+
+**Reference Docs** (`docs/src/reference/`):
+- Fact-oriented specifications
+- Read passively for information
+- Provide context and API details
+- Explain WHAT something is
+
+### Critical Context Always Available
+
+The following critical rules are always available as context (not skills):
+
+**Julia/Zygote Compatibility** (from `.cursor/rules/julia-coding-standards.mdc`):
+- ❌ NO mutations in differentiable functions (`+=`, `push!`, etc.)
+- ✅ Pure functional transformations only
+- ✅ Use conditional expressions instead of mutations
+
+**High-Level API Usage** (from `.cursor/rules/gflownet-high-level-interface.mdc`):
+- ❌ NEVER manually define neural networks with `Chain()` or `Dense()`
+- ✅ Always use `create_gflownet()` for model creation
+- ✅ Always use `train_gflownet()` for training
+
 ## Development Guidance
 
 - Remember that example folders are associated with different domains and for the examples related to the core development, you should put them into the core features sub folder
 - Remember you should put the test in the relevent folder not just scatter it in the test folder, we already have a Hierarchical folders
-- You should remember that every time we update the documentation and changes in the architecture we should automatically update the agents and all files in the @.claude 
+- You should remember that every time we update the documentation and changes in the architecture we should automatically update the agents and all files in the @.claude
+- **Use skills proactively**: Invoke `systematic-debugging` when encountering bugs, `domain-implementation` for new domains, `code-review` before commits, `testing-strategy` when writing tests 
 
 ### Visualization System Notes
 

@@ -1,5 +1,26 @@
 # GFlowNet Cursor Rules Summary
 
+> **⚠️ MIGRATION NOTICE (January 2026)**: This directory is now **LEGACY**.
+>
+> **Workflow-oriented content has been migrated to Claude Code skills** (`.skills/` directory):
+> - `debugging-best-practices.mdc` → `.skills/systematic-debugging.md`
+> - `testing-validation.mdc` → `.skills/testing-strategy.md`
+> - `gflownet-interface-requirements.mdc` → `.skills/domain-implementation.md`
+> - `gflownet-code-cleanliness.mdc` + `code-quality-maintenance.mdc` → `.skills/code-review.md`
+>
+> **Reference documentation has been moved to `docs/src/reference/`**:
+> - `gflownet-project-structure.mdc` → `docs/src/reference/project_structure.md`
+> - `gflownet-concepts.mdc` → `docs/src/reference/core_concepts.md`
+> - `gflownet-architecture.mdc` → `docs/src/reference/architecture.md`
+>
+> **Critical context remains here for backwards compatibility**:
+> - `julia-coding-standards.mdc` - Zygote/AD compatibility rules (always loaded)
+> - `gflownet-high-level-interface.mdc` - Core API patterns (always loaded)
+>
+> **For active development, use the new skills via the Skill tool** - they provide workflow-driven guidance with TodoWrite integration.
+
+---
+
 This directory contains Cursor rules that guide AI assistance for GFlowNet development. These rules were consolidated and updated based on real debugging experiences and best practices.
 
 ## 🚨 Critical Rules (Always Applied)
