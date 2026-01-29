@@ -2,11 +2,11 @@
 
 > **⚠️ MIGRATION NOTICE (January 2026)**: This directory is now **LEGACY**.
 >
-> **Workflow-oriented content has been migrated to Claude Code skills** (`.skills/` directory):
-> - `debugging-best-practices.mdc` → `.skills/systematic-debugging.md`
-> - `testing-validation.mdc` → `.skills/testing-strategy.md`
-> - `gflownet-interface-requirements.mdc` → `.skills/domain-implementation.md`
-> - `gflownet-code-cleanliness.mdc` + `code-quality-maintenance.mdc` → `.skills/code-review.md`
+> **Workflow-oriented content has been migrated to Claude Code skills** (`.claude/skills/` directory):
+> - `debugging-best-practices.mdc` → `.claude/skills/systematic-debugging.md`
+> - `testing-validation.mdc` → `.claude/skills/testing-strategy.md`
+> - `gflownet-interface-requirements.mdc` → `.claude/skills/domain-implementation.md`
+> - `gflownet-code-cleanliness.mdc` + `code-quality-maintenance.mdc` → `.claude/skills/code-review.md`
 >
 > **Reference documentation has been moved to `docs/src/reference/`**:
 > - `gflownet-project-structure.mdc` → `docs/src/reference/project_structure.md`

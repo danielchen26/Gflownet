@@ -50,7 +50,7 @@ This directory contains Claude Code skills specifically designed for GFlowNet.jl
 
 ## Skills vs Reference Documentation
 
-**Skills** (`.skills/` directory):
+**Skills** (`.claude/skills/` directory):
 - Workflow-oriented (procedures with steps)
 - Invoked actively via Skill tool
 - Create TodoWrite checklists

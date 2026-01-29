@@ -115,7 +115,7 @@ The project uses specialized AI agents for different aspects of development. A n
 
 ## Claude Code Skills
 
-The `.skills/` directory contains workflow-oriented skills for GFlowNet development. These provide active, step-by-step guidance that should be invoked via the Skill tool.
+The `.claude/skills/` directory contains workflow-oriented skills for GFlowNet development. These provide active, step-by-step guidance that should be invoked via the Skill tool.
 
 ### Available Skills
 
@@ -174,7 +174,7 @@ user: "The grid world training is failing with a Zygote error"
 
 ### Skills vs Reference Documentation
 
-**Skills** (`.skills/` directory):
+**Skills** (`.claude/skills/` directory):
 - Workflow-oriented procedures
 - Create TodoWrite checklists
 - Invoked actively via Skill tool
