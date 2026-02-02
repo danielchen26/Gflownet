@@ -1,4 +1,3 @@
-
 # Julia Coding Standards for GFlowNet
 
 ## 🚨 CRITICAL: Automatic Differentiation (Zygote) Compatibility
@@ -21,10 +20,10 @@ function apply_action(action::GridAction, state::GridState)
     # Use conditional expressions instead of mutations
     x = isa(action, MoveLeft) ? state.x - 1 :
         isa(action, MoveRight) ? state.x + 1 : state.x
-    
+
     y = isa(action, MoveUp) ? state.y + 1 :
         isa(action, MoveDown) ? state.y - 1 : state.y
-    
+
     return GridState(x, y, false)
 end
 ```
@@ -36,7 +35,7 @@ end
 # Pure transformations
 new_state = transform(old_state)
 
-# Conditional assignments  
+# Conditional assignments
 x = condition ? value_a : value_b
 
 # Construct new objects
@@ -153,10 +152,20 @@ end
 - Clear caches when parameters change: `clear_flow_cache!()`
 - Use thread-local caches to avoid locking
 
-### Memory Management
-- Prefer in-place operations where possible
-- Use `@views` for array slicing to avoid allocations
-- Pre-allocate arrays in training loops
+### Memory Management (Outside Gradient Computation)
+
+**IMPORTANT**: The following optimizations apply ONLY to code that is NOT part of the gradient computation path:
+
+```julia
+# ✅ Safe in non-differentiable code (data processing, logging, etc.)
+# Use @views for array slicing to avoid allocations
+data_slice = @view data[1:100]
+
+# Pre-allocate buffers for result collection
+results = Vector{Float32}(undef, n_iterations)
+```
+
+**⚠️ NEVER use these in functions called during backpropagation!** Always prioritize Zygote compatibility over performance in differentiable code.
 
 ## Documentation Standards
 

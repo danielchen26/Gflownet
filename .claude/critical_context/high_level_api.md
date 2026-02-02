@@ -1,10 +1,4 @@
----
-description: GFlowNet High-Level Interface Usage
-globs:
-  - "**/*.jl"
----
-
-# GFlowNet High-Level Interface Usage
+# GFlowNet High-Level API Requirements
 
 ## ❌ NEVER Manually Define Neural Networks
 
@@ -14,7 +8,7 @@ Users should NEVER see manual neural network definitions in examples:
 # ❌ WRONG - Manual neural network definition
 forward_nn = Chain(
     Dense(input_dim => 64, tanh),
-    Dense(64 => 32, tanh), 
+    Dense(64 => 32, tanh),
     Dense(32 => n_actions)
 )
 ```
@@ -72,13 +66,6 @@ training_history = GFlowNet.train_gflownet(model, config; verbose=true)
 # 4. Use high-level evaluation
 trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:50]
 ```
-
-2. **Training Configuration:**
-   - `GFlowNet.TrainingConfig()`
-   - `GFlowNet.train_gflownet()`
-
-3. **Core Sampling:**
-   - `GFlowNet.sample_trajectory()`
 
 ## Configuration Helpers (Convenience Functions)
 
@@ -138,4 +125,4 @@ model = GFlowNet.create_grid_world_gflownet(
 )
 ```
 
-This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details. 
+This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details.

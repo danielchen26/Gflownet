@@ -186,21 +186,140 @@ user: "The grid world training is failing with a Zygote error"
 - Provide context and API details
 - Explain WHAT something is
 
-### Critical Context Always Available
+### Critical Context Files
 
-The following critical rules are always available as context (not skills):
+Critical development rules are maintained in `.claude/critical_context/` and must be consulted before any code generation or modification:
 
-**Julia/Zygote Compatibility** (from `.cursor/rules/julia-coding-standards.mdc`):
-- ❌ NO mutations in differentiable functions (`+=`, `push!`, etc.)
+#### 1. Zygote Compatibility ([.claude/critical_context/zygote_compatibility.md](.claude/critical_context/zygote_compatibility.md))
+**ALWAYS CHECK BEFORE**: Writing any domain logic, implementing state transitions, or creating differentiable functions
+
+**Key Rules**:
+- ❌ NO mutations in differentiable functions (`+=`, `push!`, array mutations)
 - ✅ Pure functional transformations only
 - ✅ Use conditional expressions instead of mutations
+- ✅ Debugging: Look for `+=`, `-=`, `push!`, `append!` when Zygote errors occur
 
-**High-Level API Usage** (from `.cursor/rules/gflownet-high-level-interface.mdc`):
+**When to Read**: Before implementing `apply_action()`, `state_to_features()`, or any function called during backpropagation
+
+#### 2. High-Level API Usage ([.claude/critical_context/high_level_api.md](.claude/critical_context/high_level_api.md))
+**ALWAYS CHECK BEFORE**: Creating models, writing examples, or training GFlowNets
+
+**Key Rules**:
 - ❌ NEVER manually define neural networks with `Chain()` or `Dense()`
 - ✅ Always use `create_gflownet()` for model creation
 - ✅ Always use `train_gflownet()` for training
+- ✅ Use configuration helpers: `create_default_config()`, `create_fast_config()`, etc.
 
-**For quick reference**: See [docs/src/reference/quick_reference.md](docs/src/reference/quick_reference.md) for critical rules, current state, key locations, and common pitfalls.
+**When to Read**: Before writing any example, creating models, or showing users how to train
+
+#### Quick Reference
+See [docs/src/reference/quick_reference.md](docs/src/reference/quick_reference.md) for a condensed overview of critical rules, current project state, key file locations, and common pitfalls.
+
+## Invoking Mechanism: How .claude/ Structure Works
+
+The `.claude/` directory contains different types of guidance that are invoked at different times:
+
+### 1. Critical Context (`.claude/critical_context/`) - ALWAYS AVAILABLE
+**When Invoked**: Automatically loaded at session start, consulted before any code generation
+**Purpose**: Non-negotiable development rules that must ALWAYS be followed
+**Files**:
+- `zygote_compatibility.md` - AD/Zygote compatibility rules
+- `high_level_api.md` - API usage requirements
+
+**Usage Pattern**:
+```
+Before writing ANY Julia code → Check zygote_compatibility.md
+Before creating ANY model or example → Check high_level_api.md
+```
+
+### 2. Skills (`.claude/skills/`) - ACTIVELY INVOKED
+**When Invoked**: Explicitly invoked via Skill tool when matching workflow is needed
+**Purpose**: Step-by-step workflows for complex tasks
+**Files**:
+- `systematic-debugging.md` - Debug bugs and errors
+- `domain-implementation.md` - Implement new domains
+- `code-review.md` - Review code quality
+- `testing-strategy.md` - Write comprehensive tests
+
+**Usage Pattern**:
+```
+User reports bug → Invoke systematic-debugging skill
+User wants new domain → Invoke domain-implementation skill
+Before commit → Invoke code-review skill
+Writing tests → Invoke testing-strategy skill
+```
+
+### 3. Reference Docs (`docs/src/reference/`) - PASSIVELY READ
+**When Invoked**: Read when specific factual information is needed
+**Purpose**: Fact-oriented specifications and API details
+**Files**:
+- `architecture.md` - System architecture overview
+- `project_structure.md` - Directory layout and file organization
+- `core_concepts.md` - GFlowNet mathematical foundations
+- `quick_reference.md` - Quick lookup for common patterns
+
+**Usage Pattern**:
+```
+Need to understand codebase structure → Read project_structure.md
+Need mathematical background → Read core_concepts.md
+Need quick lookup → Read quick_reference.md
+```
+
+### 4. Agent Definitions (`.claude/agents/`) - TASK-SPECIFIC
+**When Invoked**: Via Task tool when specialized expertise is needed
+**Purpose**: Domain-specific agents for complex multi-step tasks
+**Usage Pattern**:
+```
+Complex debugging → Launch gflownet-debugger agent
+Performance optimization → Launch gflownet-performance-optimizer agent
+Architecture questions → Launch gflownet-architecture-analyzer agent
+```
+
+### 5. System Design (`.claude/system_design/`) - COORDINATION
+**When Invoked**: When designing agent workflows or improving development process
+**Purpose**: Agent coordination protocols and system design docs
+
+### 6. Session Logs (`.claude/sessions/`) - CONTINUITY
+**When Invoked**: At session start if user requests continuation
+**Purpose**: Preserve context across sessions
+**See**: `.claude/docs/CONVERSATION_PERSISTENCE.md`
+
+### Comprehensive Workflow Example
+
+```
+User: "I want to implement a molecule generation domain"
+
+Step 1: Check critical context (ALWAYS)
+  → Read .claude/critical_context/zygote_compatibility.md
+  → Read .claude/critical_context/high_level_api.md
+  → Internalize: No mutations, use create_gflownet()
+
+Step 2: Invoke appropriate skill (ACTIVE)
+  → Invoke domain-implementation skill
+  → Get step-by-step workflow with TodoWrite checklist
+
+Step 3: Consult reference docs as needed (PASSIVE)
+  → Read docs/src/reference/project_structure.md to find where to put files
+  → Read docs/src/reference/core_concepts.md for domain design patterns
+
+Step 4: Implement following critical context rules
+  → Write pure functional apply_action() (no mutations!)
+  → Use create_gflownet() API (no manual networks!)
+
+Step 5: Before commit
+  → Invoke code-review skill
+  → Verify Zygote compatibility, API usage, code quality
+
+Step 6: Write tests
+  → Invoke testing-strategy skill
+  → Add mathematical property tests, Zygote tests, etc.
+```
+
+This structure ensures:
+- **Critical rules are NEVER violated** (always available context)
+- **Complex workflows are SYSTEMATIC** (skills with checklists)
+- **Information is ACCESSIBLE** (reference docs for lookup)
+- **Expertise is AVAILABLE** (agents for specialized tasks)
 
 ## Development Guidance
 
