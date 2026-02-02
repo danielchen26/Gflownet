@@ -1,8 +1,9 @@
 # GFlowNet.jl Development Session State
 
-Last Updated: January 28, 2026
+Last Updated: February 2, 2026
 
 ## Update Timeline
+- **February 2, 2026**: Complete .cursor → .claude migration and critical context structure
 - **January 2026**: Documentation audit and real training visualization plan revision
 - **August 2025**: Master agent orchestrator system designed
 - **January 2025**: Core training objectives completed (TB, DB, FM, STB, DIRECT_FLOW)
@@ -220,7 +221,23 @@ Key functions moved:
     - 39 issues identified (6 critical, 8 high priority, 25 medium/low)
     - Fixed outdated timestamps, wrong API references, missing feature docs
     - Updated all agent instruction files for consistency
-    - **Status**: In progress
+    - **Status**: Complete
+
+13. **Complete .cursor → .claude Migration** ✅ (February 2, 2026, Commits ce36156e, e7f00e91, 93a1cac5)
+    - Created `.claude/critical_context/` directory for always-available development rules
+    - Moved and fixed `julia-coding-standards.mdc` → `zygote_compatibility.md`
+      - Removed contradictory "Prefer in-place operations" section
+      - Added clarification about memory management outside gradient computation
+    - Moved and fixed `gflownet-high-level-interface.mdc` → `high_level_api.md`
+      - Removed duplicate content (lines 76-82)
+      - Verified all API references (create_default_config, create_optimizer, etc.)
+    - Deleted 8 migrated workflow files from `.cursor/rules/`
+    - Deleted 3 temporary verification documents
+    - Added comprehensive invoking mechanism to CLAUDE.md
+    - All content verified with 2.17x enhancement ratio
+    - **Key Achievement**: Clear distinction between ALWAYS (critical context), ACTIVE (skills), PASSIVE (docs)
+    - **Location**: `.claude/critical_context/`, `CLAUDE.md` (invoking section)
+    - **Status**: Complete and committed
 
 ## Important Context
 

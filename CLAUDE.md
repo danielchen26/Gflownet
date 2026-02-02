@@ -69,14 +69,18 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - Trades accuracy for computational efficiency
    - Ideal for large state spaces where recursive flow is expensive
 
-10. **Interactive Web Visualization System** ✅ (January 2025)
-   - Beautiful real-time visualization for GFlowNet training and analysis
-   - Three main views: Training Monitor, 3D Distribution, Policy Flow
-   - React + Three.js frontend with smooth animations
-   - Julia backend with dynamic training simulation
+10. **Interactive Web Visualization System** ✅ (Frontend Production-Ready, January 2025)
+   - **Frontend**: Beautiful real-time visualization UI with Three.js
+     - Three main views: Training Monitor, 3D Distribution, Policy Flow
+     - Production-ready React + TypeScript implementation
+     - Smooth animations, interactive controls, responsive design
+   - **Backend**: Mock simulation for demonstration
+     - Julia Oxygen.jl server with simulated training data
+     - **Note**: Real GFlowNet training integration NOT yet implemented
+     - Integration plan exists: `docs/src/internals/development_guides/real_training_visualization_plan.md`
    - Located in `examples/core_features/visualization/`
-   
-11. **Visualization System Major Update** ✅ (January 2025)
+
+11. **Visualization Frontend Enhancements** ✅ (January 2025)
    - **Monitor Tab**: Two-row layout, real-time trajectory sampling, optimized space usage
    - **Training Dashboard**: Full history with synchronized zoom, loss components breakdown
    - **3D Visualization**: Smooth density surfaces, discrete bars toggle, sphere-based posteriors
