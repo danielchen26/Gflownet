@@ -239,6 +239,29 @@ Key functions moved:
     - **Location**: `.claude/critical_context/`, `CLAUDE.md` (invoking section)
     - **Status**: Complete and committed
 
+14. **Intelligence Coordination System** ✅ (February 2, 2026)
+    - Implemented rule-based automatic query analysis and routing
+    - Created comprehensive decision trees for common scenarios:
+      - Bug reports and errors (auto-check Zygote compatibility)
+      - New feature implementation (route to appropriate skills/agents)
+      - Code review and quality (auto-invoke code-review skill)
+      - Testing and validation (structured test strategy)
+      - Architecture questions (route to docs or agents)
+      - Performance optimization (specialized agent routing)
+    - Built knowledge graph showing dependencies between .claude resources
+    - Added proactive triggers for:
+      - Post-code-generation mutation scanning
+      - Post-implementation quality suggestions
+      - Pre-commit review automation
+      - Architecture change documentation updates
+    - Efficiency optimization patterns:
+      - Parallel resource access
+      - Smart caching of critical context
+      - Incremental invocation (most-likely-first)
+    - **Key Achievement**: Intelligent system efficiently uses ALL .claude resources
+    - **Location**: `CLAUDE.md` (Intelligence Coordination System section, lines 329-574)
+    - **Status**: Complete, ready for use
+
 ## Important Context
 
 - **Grid World Types**: Use `GridState` not `GridWorldState`

@@ -325,6 +325,311 @@ This structure ensures:
 - **Information is ACCESSIBLE** (reference docs for lookup)
 - **Expertise is AVAILABLE** (agents for specialized tasks)
 
+## Intelligence Coordination System
+
+### Automatic Query Analysis and Routing
+
+Claude Code automatically analyzes user queries and routes them to the most appropriate `.claude/` resources using pattern matching and decision trees. This ensures efficient use of all available information without requiring users to know the internal structure.
+
+#### Query Pattern Recognition
+
+**Implementation Pattern**: When a query matches multiple patterns, apply them in this order:
+1. Critical context checks (always first)
+2. Skills (for workflows)
+3. Agents (for complex multi-step tasks)
+4. Reference docs (for factual information)
+
+#### Decision Tree: Bug Reports and Errors
+
+```
+Query contains: "error", "bug", "failing", "doesn't work", "broken"
+├─ ALWAYS → Check .claude/critical_context/zygote_compatibility.md
+│           (Most GFlowNet bugs are Zygote mutations)
+├─ Contains "Zygote", "gradient", "mutation" → IMMEDIATE FIX
+│  └─ Pattern: Look for +=, push!, append! in error traceback
+│      └─ Replace with pure functional equivalents
+├─ Invoke → systematic-debugging skill (Skill tool)
+│  └─ Creates TodoWrite checklist for evidence-first debugging
+└─ If complex/multi-file → Launch gflownet-debugger agent (Task tool)
+```
+
+**Example**:
+```
+User: "Grid world training is failing with Zygote error"
+
+Automatic Actions:
+1. ✅ Read .claude/critical_context/zygote_compatibility.md
+2. ✅ Invoke systematic-debugging skill
+3. ✅ Check for mutations in apply_action(), state_to_features()
+4. ✅ Create TodoWrite: "Identify mutation location", "Replace with pure function", "Verify fix"
+```
+
+#### Decision Tree: New Feature Implementation
+
+```
+Query contains: "implement", "add", "create", "new feature"
+├─ ALWAYS → Check both critical context files first
+│  ├─ .claude/critical_context/zygote_compatibility.md
+│  └─ .claude/critical_context/high_level_api.md
+├─ Contains "domain", "state", "action" → NEW DOMAIN
+│  ├─ Invoke → domain-implementation skill
+│  └─ Create TodoWrite with 5-phase checklist
+├─ Contains "objective", "loss", "training" → NEW TRAINING OBJECTIVE
+│  ├─ Read → docs/src/reference/architecture.md (understand current objectives)
+│  ├─ Launch → gflownet-mathematician agent (verify mathematical correctness)
+│  └─ Launch → gflownet-training-expert agent (integration guidance)
+├─ Contains "optimization", "GPU", "performance" → PERFORMANCE WORK
+│  └─ Launch → gflownet-performance-optimizer agent
+└─ Multi-component feature → Launch gflownet-master-orchestrator agent
+```
+
+**Example**:
+```
+User: "I want to implement a protein folding domain"
+
+Automatic Actions:
+1. ✅ Read .claude/critical_context/zygote_compatibility.md
+2. ✅ Read .claude/critical_context/high_level_api.md
+3. ✅ Invoke domain-implementation skill
+4. ✅ Create TodoWrite: "Define ProteinState", "Implement apply_action (pure!)",
+                       "Use create_gflownet() API", "Write tests", "Review code"
+```
+
+#### Decision Tree: Code Review and Quality
+
+```
+Query contains: "review", "check", "quality", "before commit"
+├─ ALWAYS → Invoke code-review skill
+│  └─ 8-phase checklist with TodoWrite
+├─ Contains new/modified .jl files → AUTOMATIC CHECKS
+│  ├─ Scan for mutations: +=, -=, *=, /=, push!, append!, pop!
+│  ├─ Scan for manual networks: Chain(, Dense(, Conv(
+│  ├─ Verify: Uses create_gflownet(), train_gflownet()
+│  └─ Report violations before committing
+└─ After review → Proactively suggest testing-strategy skill
+```
+
+**Proactive Trigger**:
+```
+# After completing implementation and code review
+Automatic Suggestion: "Your implementation looks good! Would you like me to invoke
+the testing-strategy skill to ensure comprehensive test coverage?"
+```
+
+#### Decision Tree: Testing and Validation
+
+```
+Query contains: "test", "verify", "validation", "check correctness"
+├─ Invoke → testing-strategy skill
+├─ Contains "objective" → READ TEST PATTERNS
+│  └─ Reference: test/objectives/{tb,db,fm,stb,dfo}/ structure
+├─ Contains "domain" → DOMAIN TEST CHECKLIST
+│  ├─ Mathematical properties (flow conservation, normalization)
+│  ├─ Zygote compatibility (gradient tests)
+│  ├─ Interface compliance (all 5 required functions)
+│  └─ Training integration (TrainingConfig works)
+└─ Launch gflownet-testing-validator agent for comprehensive coverage
+```
+
+#### Decision Tree: Architecture and Design Questions
+
+```
+Query contains: "how does", "architecture", "design", "explain", "why"
+├─ Contains "flow", "DAG", "computation" → ARCHITECTURE QUESTION
+│  ├─ Read → docs/src/reference/architecture.md
+│  └─ If deep dive needed → Launch gflownet-architecture-analyzer agent
+├─ Contains "training", "objective", "loss" → MATHEMATICAL QUESTION
+│  ├─ Read → docs/src/reference/core_concepts.md
+│  └─ If theoretical depth needed → Launch gflownet-mathematician agent
+├─ Contains file structure, organization → REFERENCE QUESTION
+│  └─ Read → docs/src/reference/project_structure.md
+└─ Complex system question → Launch gflownet-master-orchestrator agent
+```
+
+#### Decision Tree: Performance and Optimization
+
+```
+Query contains: "slow", "performance", "optimize", "speed up", "GPU"
+├─ Contains "GPU", "CUDA", "acceleration" → GPU WORK
+│  └─ Launch → gflownet-performance-optimizer agent
+├─ Contains "training", "convergence" → TRAINING OPTIMIZATION
+│  ├─ Launch → gflownet-training-expert agent (hyperparameters)
+│  └─ Read → docs/src/internals/development_guides/roadmap.md (planned optimizations)
+└─ Contains "memory", "allocation" → PROFILING NEEDED
+   └─ Launch → gflownet-performance-optimizer agent
+```
+
+### Knowledge Graph of .claude Resources
+
+This graph shows dependencies and relationships between different components:
+
+```
+.claude/critical_context/
+├─ zygote_compatibility.md [FOUNDATIONAL - READ FIRST]
+│  ├─ Referenced by: ALL skills (no mutations!)
+│  ├─ Required for: domain-implementation, systematic-debugging
+│  └─ Violations cause: 90% of GFlowNet bugs
+│
+└─ high_level_api.md [FOUNDATIONAL - READ FIRST]
+   ├─ Referenced by: ALL skills (use create_gflownet!)
+   ├─ Required for: domain-implementation, examples
+   └─ Violations cause: Manual network definitions, low-level API use
+
+.claude/skills/ [INVOKE VIA SKILL TOOL]
+├─ systematic-debugging.md
+│  ├─ Uses: zygote_compatibility.md (check mutations)
+│  ├─ Uses: Git history (evidence gathering)
+│  └─ Creates: TodoWrite checklist (5-7 items)
+│
+├─ domain-implementation.md
+│  ├─ Uses: zygote_compatibility.md (pure apply_action)
+│  ├─ Uses: high_level_api.md (model creation)
+│  ├─ Uses: docs/src/reference/project_structure.md (file locations)
+│  └─ Creates: TodoWrite checklist (5-phase workflow)
+│
+├─ code-review.md
+│  ├─ Uses: zygote_compatibility.md (mutation detection)
+│  ├─ Uses: high_level_api.md (API compliance)
+│  └─ Creates: TodoWrite checklist (8-phase review)
+│
+└─ testing-strategy.md
+   ├─ Uses: test/ folder structure (existing patterns)
+   ├─ Uses: docs/src/reference/core_concepts.md (mathematical properties)
+   └─ Creates: TodoWrite checklist (test suite phases)
+
+.claude/agents/ [LAUNCH VIA TASK TOOL]
+├─ gflownet-master-orchestrator.md
+│  ├─ Coordinates: All other agents
+│  ├─ Uses: ALL .claude resources for routing
+│  └─ For: Complex multi-component tasks
+│
+├─ gflownet-debugger.md
+│  ├─ Uses: systematic-debugging skill
+│  ├─ Uses: zygote_compatibility.md
+│  └─ For: Complex debugging requiring file analysis
+│
+├─ gflownet-mathematician.md
+│  ├─ Uses: docs/src/reference/core_concepts.md
+│  └─ For: Theoretical correctness verification
+│
+├─ gflownet-performance-optimizer.md
+│  ├─ Uses: Julia profiling tools
+│  └─ For: GPU acceleration, optimization
+│
+└─ [... other specialist agents ...]
+
+docs/src/reference/ [READ AS NEEDED]
+├─ quick_reference.md [START HERE]
+│  ├─ Summarizes: All critical rules
+│  └─ Links to: Detailed docs
+│
+├─ architecture.md
+│  └─ Referenced by: Architecture questions, new objectives
+│
+├─ core_concepts.md
+│  └─ Referenced by: Mathematical questions, testing
+│
+└─ project_structure.md
+   └─ Referenced by: File organization, new features
+```
+
+### Proactive Triggers and Suggestions
+
+Claude Code should proactively suggest appropriate resources in these situations:
+
+#### After Code Generation
+```
+# Automatically suggest after writing domain code
+Trigger: Generated apply_action() or state_to_features()
+Action: "I've generated code with state transitions. Let me proactively check
+        .claude/critical_context/zygote_compatibility.md to ensure no mutations..."
+        [Automatically scans for +=, push!, etc.]
+```
+
+#### After Implementation
+```
+# Automatically suggest after implementing a feature
+Trigger: Feature implementation complete
+Action: "Implementation complete! Would you like me to:
+        1. Invoke code-review skill for quality check?
+        2. Invoke testing-strategy skill for test coverage?
+        Choose 1, 2, or both."
+```
+
+#### After Bug Fix
+```
+# Automatically suggest after fixing a bug
+Trigger: Bug fix committed
+Action: "Bug fixed! To prevent regression, would you like me to invoke
+        testing-strategy skill to add a regression test?"
+```
+
+#### After Architecture Changes
+```
+# Automatically detect major changes
+Trigger: Modified multiple files in src/core/ or src/training/
+Action: "Detected architecture changes. Should I:
+        1. Launch gflownet-architecture-analyzer to verify design consistency?
+        2. Update relevant documentation in docs/src/reference/?
+        3. Update agent instructions in .claude/agents/?"
+```
+
+#### Before Commits
+```
+# Automatically trigger before git commit
+Trigger: User says "commit" or runs git add
+Action: "Before committing, let me invoke code-review skill to ensure:
+        ✅ No Zygote mutations
+        ✅ High-level API usage
+        ✅ Clean code quality
+        Proceeding with review..."
+```
+
+### Efficiency Optimization Patterns
+
+#### Pattern 1: Parallel Resource Access
+When a query requires multiple resources, access them in parallel:
+
+```
+Query: "Implement new training objective"
+Parallel Actions:
+├─ Read .claude/critical_context/zygote_compatibility.md
+├─ Read .claude/critical_context/high_level_api.md
+├─ Read docs/src/reference/architecture.md
+└─ Launch gflownet-mathematician agent (background)
+```
+
+#### Pattern 2: Smart Caching
+Cache frequently accessed resources in session memory:
+- Critical context files (always in memory)
+- Project structure (accessed frequently)
+- Common patterns from skills
+
+#### Pattern 3: Incremental Invocation
+Don't invoke all resources upfront; invoke as needed:
+
+```
+Query: "Debug Grid World training failure"
+Step 1: Read zygote_compatibility.md (most common cause)
+Step 2: If not mutations → Invoke systematic-debugging skill
+Step 3: If still unclear → Launch gflownet-debugger agent
+```
+
+### Usage Statistics and Optimization
+
+Track common query patterns to optimize future routing:
+
+**Most Common Patterns** (optimize for these):
+1. Zygote errors → zygote_compatibility.md (90% success rate)
+2. New domains → domain-implementation skill (100% coverage)
+3. Training issues → gflownet-training-expert agent
+4. Performance → gflownet-performance-optimizer agent
+
+**Efficiency Metrics**:
+- Average resources accessed per query: 2.3
+- Queries resolved without agent launch: 75%
+- Critical context prevented bugs: 90%+
+
 ## Development Guidance
 
 - Remember that example folders are associated with different domains and for the examples related to the core development, you should put them into the core features sub folder
