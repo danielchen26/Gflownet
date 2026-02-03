@@ -4,7 +4,7 @@ import { OrbitControls, Text, Html, Line } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useQuery } from '@tanstack/react-query'
-import axios from '../lib/axios'
+import { api } from '../services/api'
 import { motion } from 'framer-motion'
 import { Info, Map, BarChart3, Activity, Target, Zap, TrendingUp } from 'lucide-react'
 import { COLORS, interpolateRewardColor, interpolateFlowColor } from '../utils/colors'
@@ -177,7 +177,7 @@ function TrajectoryPaths() {
   const { data: trajectories } = useQuery({
     queryKey: ['recent-trajectories'],
     queryFn: async () => {
-      const response = await axios.get('/api/trajectories')
+      const response = await api.trajectories.getRecent(20)
       return response.data.trajectories
     },
   })
@@ -299,7 +299,7 @@ function Scene({ viewMode }: { viewMode: 'flow' | 'visits' | 'combined' }) {
   const { data: flowField } = useQuery({
     queryKey: ['flow-field'],
     queryFn: async () => {
-      const response = await axios.get('/api/analysis/flow-field')
+      const response = await api.analysis.getFlowField()
       return response.data as FlowFieldData
     },
   })
@@ -307,7 +307,7 @@ function Scene({ viewMode }: { viewMode: 'flow' | 'visits' | 'combined' }) {
   const { data: stateStats } = useQuery({
     queryKey: ['state-statistics'],
     queryFn: async () => {
-      const response = await axios.get('/api/analysis/state-statistics')
+      const response = await api.training.getState()
       return response.data as StateStats
     },
   })
@@ -374,7 +374,7 @@ export function GFlowNetFlowField() {
   const { data: stateStats } = useQuery({
     queryKey: ['state-statistics'],
     queryFn: async () => {
-      const response = await axios.get('/api/analysis/state-statistics')
+      const response = await api.training.getState()
       return response.data as StateStats
     },
   })

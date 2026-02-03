@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Brush } from 'recharts'
 import { motion } from 'framer-motion'
 import { TrendingUp, TrendingDown, Activity, Zap, Target, Gauge } from 'lucide-react'
-import axios from '../lib/axios'
+import { api } from '../services/api'
 import { useMemo, useState } from 'react'
 
 interface TrainingData {
@@ -95,23 +95,79 @@ export function GFlowNetTrainingDashboard() {
   const { data: trainingState } = useQuery({
     queryKey: ['training-state'],
     queryFn: async () => {
-      const response = await axios.get('/api/training/state')
-      return response.data
+      return await api.training.getState()
     },
     refetchInterval: 250, // Fast updates for smooth animation
   })
-  
+
   const isTraining = trainingState?.is_training || false
-  
-  // Get full training history
-  const { data: history } = useQuery({
+
+  // Get full training history from v2 API
+  const { data: historyRaw } = useQuery({
     queryKey: ['training-history'],
     queryFn: async () => {
-      const response = await axios.get('/api/training/history')
-      return response.data as TrainingData
+      return await api.training.getHistory()
     },
     refetchInterval: isTraining ? 500 : false, // Update during training
   })
+
+  // Transform v2 API response to match expected format
+  // If backend doesn't have history, fall back to showing current state
+  const history: TrainingData | undefined = useMemo(() => {
+    // Backend returns {losses: [], rewards: [], gradient_norms: [], iteration_times: []}
+    // We need to transform this to our expected format
+
+    console.log('📊 Training history raw data:', {
+      hasHistoryRaw: !!historyRaw,
+      hasLosses: historyRaw?.losses?.length > 0,
+      hasRewards: historyRaw?.rewards?.length > 0,
+      lossesLength: historyRaw?.losses?.length || 0,
+      rewardsLength: historyRaw?.rewards?.length || 0,
+    })
+
+    // Check if backend returned historical arrays
+    if (historyRaw && historyRaw.losses && historyRaw.losses.length > 0) {
+      const length = historyRaw.losses.length
+      return {
+        episodes: Array.from({ length }, (_, i) => i + 1), // 1, 2, 3, ..., n
+        losses: historyRaw.losses,
+        rewards: historyRaw.rewards || Array(length).fill(0),
+        tb_losses: historyRaw.losses, // V2 doesn't separate loss components
+        flow_losses: Array(length).fill(0),
+        metrics: {
+          mean_loss: historyRaw.losses.reduce((a:number, b:number) => a + b, 0) / length,
+          mean_reward: historyRaw.rewards ? historyRaw.rewards.reduce((a:number, b:number) => a + b, 0) / length : 0,
+          mean_tb_loss: 0,
+          mean_flow_loss: 0,
+          total_episodes: length,
+          convergence_estimate: (trainingState?.current_iteration || 0) / (trainingState?.total_iterations || 1),
+        }
+      }
+    }
+
+    // Fallback: If no history, create a single-point dataset from current training state
+    if (trainingState && trainingState.current_iteration > 0) {
+      console.log('📊 Using fallback: creating single-point history from current state')
+      return {
+        episodes: [trainingState.current_iteration],
+        losses: [trainingState.latest_loss || 0],
+        rewards: [trainingState.latest_reward || 0],
+        tb_losses: [trainingState.latest_loss || 0],
+        flow_losses: [0],
+        metrics: {
+          mean_loss: trainingState.latest_loss || 0,
+          mean_reward: trainingState.metrics?.mean_reward || 0,
+          mean_tb_loss: 0,
+          mean_flow_loss: 0,
+          total_episodes: trainingState.current_iteration,
+          convergence_estimate: trainingState.current_iteration / (trainingState.total_iterations || 1),
+        }
+      }
+    }
+
+    console.log('📊 No history data available')
+    return undefined
+  }, [historyRaw, trainingState])
   
   // Prepare chart data - show ALL episodes for full history
   const chartData = useMemo(() => {
@@ -136,21 +192,21 @@ export function GFlowNetTrainingDashboard() {
       <div className="grid grid-cols-3 gap-1">
         <MetricCard
           title="Current Loss"
-          value={trainingState?.current_loss || history.losses[history.losses.length - 1]}
+          value={trainingState?.latest_loss || history.losses[history.losses.length - 1]}
           subtitle="Latest Episode"
           icon={Activity}
           color="text-neon-purple"
-          trend={trainingState?.current_loss < metrics.mean_loss ? "down" : "up"}
-          percentage={Math.abs(((trainingState?.current_loss || history.losses[history.losses.length - 1]) - metrics.mean_loss) / metrics.mean_loss * 100)}
+          trend={(trainingState?.latest_loss || history.losses[history.losses.length - 1]) < metrics.mean_loss ? "down" : "up"}
+          percentage={Math.abs(((trainingState?.latest_loss || history.losses[history.losses.length - 1]) - metrics.mean_loss) / metrics.mean_loss * 100)}
         />
         <MetricCard
           title="Current Reward"
-          value={trainingState?.current_reward || history.rewards[history.rewards.length - 1]}
-          subtitle={`Episode ${trainingState?.current_episode || metrics.total_episodes}`}
+          value={trainingState?.latest_reward || history.rewards[history.rewards.length - 1]}
+          subtitle={`Episode ${trainingState?.current_iteration || metrics.total_episodes}`}
           icon={Target}
           color="text-neon-green"
-          trend={trainingState?.current_reward > metrics.mean_reward ? "up" : "down"}
-          percentage={Math.abs(((trainingState?.current_reward || history.rewards[history.rewards.length - 1]) - metrics.mean_reward) / metrics.mean_reward * 100)}
+          trend={(trainingState?.latest_reward || history.rewards[history.rewards.length - 1]) > metrics.mean_reward ? "up" : "down"}
+          percentage={Math.abs(((trainingState?.latest_reward || history.rewards[history.rewards.length - 1]) - metrics.mean_reward) / metrics.mean_reward * 100)}
         />
         <MetricCard
           title="Convergence"
@@ -394,7 +450,7 @@ export function GFlowNetTrainingDashboard() {
               <div className="glass-dark rounded-lg px-2 py-1">
                 <div className="text-[10px] text-muted-foreground">Total Episodes</div>
                 <div className="text-sm font-medium">
-                  {trainingState?.current_episode || metrics.total_episodes}
+                  {trainingState?.current_iteration || metrics.total_episodes}
                 </div>
               </div>
             </div>

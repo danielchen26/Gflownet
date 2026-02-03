@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Play, Pause, SkipBack, SkipForward, Info, Target, Flag } from 'lucide-react'
-import axios from '../lib/axios'
+import { api } from '../services/api'
 import { COLORS, interpolateRewardColor } from '../utils/colors'
 
 interface Trajectory {
@@ -31,29 +31,48 @@ export function GFlowNet2DTrajectory() {
   
   // Check if training is active
   const { data: metrics } = useQuery({
-    queryKey: ['training-metrics'],
+    queryKey: ['training-state'],
     queryFn: async () => {
-      const response = await axios.get('/api/training/metrics')
-      return response.data
+      return await api.training.getState()
     },
     refetchInterval: 1000,
   })
-  
+
   const isTraining = metrics?.is_training || false
-  
-  const { data } = useQuery({
+
+  const { data, error, isError, dataUpdatedAt } = useQuery({
     queryKey: ['trajectories'],
     queryFn: async () => {
-      const response = await axios.get('/api/trajectories')
-      return response.data as TrajectoryData
+      try {
+        console.log('🔄 Fetching trajectories from /api/v2/trajectories...')
+        const result = await api.trajectories.getRecent(20)
+        console.log('✅ GFlowNet2DTrajectory API SUCCESS:', {
+          hasData: !!result,
+          hasDomain: !!result?.domain,
+          domainType: typeof result?.domain,
+          hasTrajectories: !!result?.trajectories,
+          trajCount: result?.trajectories?.length || 0,
+          domainKeys: result?.domain ? Object.keys(result.domain) : 'NO DOMAIN',
+          gridSize: result?.domain?.grid_size,
+          rewardPeaksCount: result?.domain?.reward_peaks?.length
+        })
+        return result
+      } catch (err) {
+        console.error('❌ GFlowNet2DTrajectory API ERROR:', err)
+        throw err
+      }
     },
-    refetchInterval: isTraining ? 500 : (isPlaying ? false : 10000), // Update more frequently during training
+    refetchInterval: isTraining ? 500 : 3000, // Poll every 3s when not training
+    retry: 3,
+    gcTime: 0, // React Query v5: use gcTime instead of cacheTime
+    staleTime: 0,
+    refetchOnMount: true,
   })
   
   const [sortMode, setSortMode] = useState<'reward' | 'recent' | 'length'>('reward')
   
   const trajectories = useMemo(() => {
-    if (!data) return []
+    if (!data || !data.trajectories || !Array.isArray(data.trajectories)) return []
     const arr = [...data.trajectories]
     switch (sortMode) {
       case 'length':
@@ -121,22 +140,48 @@ export function GFlowNet2DTrajectory() {
     }
   }, [trajectories, selectedTrajectory, currentStep])
   
-  if (!data || trajectories.length === 0) {
+  // Debug logging
+  console.log('🔍 GFlowNet2DTrajectory render check:', {
+    hasData: !!data,
+    hasDomain: !!data?.domain,
+    trajectoriesLength: trajectories.length,
+    condition: !data || !data.domain || trajectories.length === 0,
+    isError,
+    errorMessage: error?.toString()
+  })
+
+  if (isError) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-500">Error loading trajectory data</p>
+          <p className="text-xs text-muted-foreground mt-2">{error?.toString()}</p>
+          <p className="text-xs text-muted-foreground mt-2">Check console for details</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!data || !data.domain || trajectories.length === 0) {
     // Return a simple placeholder for now
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <p className="text-muted-foreground">Waiting for trajectory data...</p>
           <p className="text-sm text-muted-foreground mt-2">Start training to see visualizations</p>
+          <p className="text-xs text-yellow-500 mt-4">
+            Debug: data={String(!!data)} | domain={String(!!data?.domain)} | trajectories={trajectories.length}
+          </p>
+          <p className="text-xs text-muted-foreground">Check browser console (F12) for API response details</p>
         </div>
       </div>
     )
   }
-  
+
   const trajectory = trajectories[selectedTrajectory]
   const cellSize = 40
-  const gridWidth = data.grid_size[0] * cellSize
-  const gridHeight = data.grid_size[1] * cellSize
+  const gridWidth = data.domain.grid_size[0] * cellSize
+  const gridHeight = data.domain.grid_size[1] * cellSize
   const toCanvasCoord = (coord: number) => (coord - 1) * cellSize + cellSize / 2 + 1
   
   return (
@@ -149,7 +194,7 @@ export function GFlowNet2DTrajectory() {
             {/* Grid Background */}
             <svg width={gridWidth + 2} height={gridHeight + 2} className="absolute top-0 left-0">
               {/* Grid lines */}
-              {Array.from({ length: data.grid_size[0] + 1 }).map((_, i) => (
+              {Array.from({ length: data.domain.grid_size[0] + 1 }).map((_, i) => (
                 <line
                   key={`v${i}`}
                   x1={i * cellSize + 1}
@@ -160,7 +205,7 @@ export function GFlowNet2DTrajectory() {
                   strokeWidth="1"
                 />
               ))}
-              {Array.from({ length: data.grid_size[1] + 1 }).map((_, i) => (
+              {Array.from({ length: data.domain.grid_size[1] + 1 }).map((_, i) => (
                 <line
                   key={`h${i}`}
                   x1={1}
@@ -174,16 +219,16 @@ export function GFlowNet2DTrajectory() {
               
               {/* Reward peaks as gradients */}
               <defs>
-                {data.reward_peaks.map((peak, i) => (
+                {data.domain.reward_peaks.map((peak: any, i: number) => (
                   <radialGradient key={i} id={`peak${i}`}>
                     <stop offset="0%" stopColor={COLORS.reward.high} stopOpacity="0.6" />
                     <stop offset="100%" stopColor={COLORS.reward.high} stopOpacity="0" />
                   </radialGradient>
                 ))}
               </defs>
-              
+
               {/* Render reward peaks */}
-              {data.reward_peaks.map((peak, i) => (
+              {data.domain.reward_peaks.map((peak: any, i: number) => (
                 <g key={i}>
                   <circle
                     cx={toCanvasCoord(peak.position[0])}
@@ -203,7 +248,7 @@ export function GFlowNet2DTrajectory() {
               ))}
               
               {/* Trajectory path up to current step */}
-              {trajectory.states.slice(0, currentStep + 1).map((state, i) => {
+              {trajectory.states.slice(0, currentStep + 1).map((state: any, i: number) => {
                 if (i === 0) return null
                 const prevState = trajectory.states[i - 1]
                 return (

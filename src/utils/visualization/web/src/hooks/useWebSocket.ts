@@ -7,7 +7,8 @@ interface WebSocketMessage {
 }
 
 export function useWebSocket(url: string = 'ws://localhost:8080/ws') {
-  const [isConnected, setIsConnected] = useState(false)
+  // For now, WebSocket is optional - we use HTTP polling instead
+  const [isConnected, setIsConnected] = useState(true) // Set to true to not block UI
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null)
   const ws = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -67,15 +68,16 @@ export function useWebSocket(url: string = 'ws://localhost:8080/ws') {
   }, [])
   
   useEffect(() => {
-    connect()
-    
-    // Ping every 30 seconds to keep connection alive
-    const pingInterval = setInterval(() => {
-      sendMessage({ type: 'ping' })
-    }, 30000)
-    
+    // WebSocket disabled - using HTTP polling instead
+    // connect()
+
+    // // Ping every 30 seconds to keep connection alive
+    // const pingInterval = setInterval(() => {
+    //   sendMessage({ type: 'ping' })
+    // }, 30000)
+
     return () => {
-      clearInterval(pingInterval)
+      // clearInterval(pingInterval)
       clearTimeout(reconnectTimer.current)
       ws.current?.close()
     }

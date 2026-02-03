@@ -59,12 +59,22 @@ function create_grid_world_model_and_adapter(config::Dict)
     grid_size = get(config, "grid_size", 8)
 
     # Parse reward peaks
+    # CRITICAL: Frontend uses 0-indexed positions, Julia uses 1-indexed
+    # Convert by adding 1 to each coordinate
     peaks_config = get(config, "reward_peaks", [])
     reward_positions = Dict{Tuple{Int,Int}, Float64}()
     for peak in peaks_config
         pos = peak["position"]
         intensity = get(peak, "intensity", 10.0)
-        reward_positions[(Int(pos[1]), Int(pos[2]))] = Float64(intensity)
+        # Convert 0-indexed (frontend) to 1-indexed (Julia)
+        julia_x = Int(pos[1]) + 1
+        julia_y = Int(pos[2]) + 1
+        # Validate bounds
+        if 1 <= julia_x <= grid_size && 1 <= julia_y <= grid_size
+            reward_positions[(julia_x, julia_y)] = Float64(intensity)
+        else
+            @warn "Reward position out of bounds" pos=(pos[1], pos[2]) julia_pos=(julia_x, julia_y) grid_size
+        end
     end
 
     # Default peaks if none specified
@@ -80,6 +90,10 @@ function create_grid_world_model_and_adapter(config::Dict)
     needs_flow_est = objective_str == "FLOW_MATCHING" || objective_str == "DIRECT_FLOW_OBJECTIVE"
 
     # Create the real GFlowNet model using high-level API
+    # CRITICAL: Use LEARNABLE_ESTIMATION for proper TB training
+    # With SIMPLE_ESTIMATION (Z=1), the TB equation log(P_F) = log(R) is unsatisfiable
+    # because P_F is a probability (<1) and R can be >1.
+    # LEARNABLE_ESTIMATION allows the model to learn Z such that Z*P_F ∝ R
     model = GFlowNet.create_grid_world_gflownet(
         grid_size               = grid_size,
         reward_positions        = reward_positions,
@@ -87,6 +101,7 @@ function create_grid_world_model_and_adapter(config::Dict)
         learning_rate           = get(config, "learning_rate", 0.001),
         include_backward        = needs_backward,
         allow_all_moves         = get(config, "allow_all_moves", false),
+        partition_function_method = GFlowNet.LEARNABLE_ESTIMATION,
     )
 
     adapter = GridWorldAdapter(grid_size, reward_positions)

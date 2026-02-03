@@ -4,7 +4,7 @@ import { OrbitControls, Text, Html, Line } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useQuery } from '@tanstack/react-query'
-import axios from '../lib/axios'
+import { api } from '../services/api'
 import { motion } from 'framer-motion'
 import { BarChart3, Info, Layers, Eye, Target, Activity } from 'lucide-react'
 import { COLORS, interpolateRewardColor } from '../utils/colors'
@@ -468,13 +468,20 @@ function PosteriorVisualization({ trajectories }: { trajectories: TrajectoryBund
 
 // Main scene with conditional rendering
 function Scene({ viewMode, densityMode }: { viewMode: 'density' | 'posterior' | 'combined', densityMode: 'bars' | 'surface' }) {
+  // Reduced refetch frequency for 3D view to prevent flashing during geometry recreation
   const { data } = useQuery({
-    queryKey: ['all-trajectories'],
+    queryKey: ['distribution-data'],
     queryFn: async () => {
-      const response = await axios.get('/api/trajectories/all')
-      return response.data as TrajectoryBundle
+      const dist = await api.analysis.getDistribution()
+      const trajs = await api.trajectories.getRecent(50)
+      return {
+        ...dist,
+        trajectories: trajs.trajectories || [],
+        reward_peaks: trajs.domain?.reward_peaks || []
+      } as TrajectoryBundle
     },
-    refetchInterval: 10000,
+    refetchInterval: 5000, // 5s interval to prevent flashing (geometry recreation is expensive)
+    staleTime: 4000,       // Keep data fresh for 4s
   })
   
   if (!data) return null
@@ -520,9 +527,10 @@ export function GFlowNetDistribution3D() {
   const { data: stats } = useQuery({
     queryKey: ['distribution-stats'],
     queryFn: async () => {
-      const response = await axios.get('/api/analysis/distribution')
-      return response.data
+      return await api.analysis.getDistribution()
     },
+    refetchInterval: 5000, // Same as scene data to prevent flashing
+    staleTime: 4000,
   })
   
   return (

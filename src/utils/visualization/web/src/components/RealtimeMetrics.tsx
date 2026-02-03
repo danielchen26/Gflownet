@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, Zap, TrendingUp, Clock, Layers, Award } from 'lucide-react'
-import axios from '../lib/axios'
+import { api } from '../services/api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useEffect, useState } from 'react'
 
@@ -132,21 +132,21 @@ export function RealtimeMetrics() {
   const { lastMessage } = useWebSocket()
   
   const { data: metrics } = useQuery({
-    queryKey: ['training-metrics'],
+    queryKey: ['training-state'],
     queryFn: async () => {
-      const response = await axios.get('/api/training/metrics')
-      return response.data
+      const state = await api.training.getState()
+      return state
     },
-    refetchInterval: 1000, // Update every second during training
+    refetchInterval: 250, // Update every 250ms for real-time feel
   })
-  
+
   const { data: trajectories } = useQuery({
-    queryKey: ['trajectories-count'],
+    queryKey: ['trajectories'],
     queryFn: async () => {
-      const response = await axios.get('/api/trajectories')
-      return response.data
+      const data = await api.trajectories.getRecent(10)
+      return { count: data.trajectories?.length || 0 }
     },
-    refetchInterval: metrics?.is_training ? 2000 : 10000, // Update more frequently during training
+    refetchInterval: metrics?.is_training ? 1000 : 5000, // Update more frequently during training
   })
   
   // Update from WebSocket
@@ -165,27 +165,27 @@ export function RealtimeMetrics() {
   const displayMetrics: Metric[] = [
     {
       label: 'Current Loss',
-      value: realtimeMetrics.currentLoss || metrics?.latest_loss || 0,
+      value: metrics?.latest_loss?.toFixed(2) || '0.00',
       icon: Activity,
       color: 'from-neon-purple to-neon-purple/50',
-      trend: realtimeMetrics.currentLoss < 0.5 ? 'down' : 'stable',
+      trend: (metrics?.latest_loss || 0) < 10 ? 'down' : 'stable',
     },
     {
-      label: 'Best Reward',
-      value: realtimeMetrics.currentReward || metrics?.latest_reward || 0,
+      label: 'Mean Reward',
+      value: metrics?.metrics?.mean_reward?.toFixed(2) || '0.00',
       icon: Award,
       color: 'from-neon-green to-neon-green/50',
-      trend: 'up',
+      trend: (metrics?.metrics?.mean_reward || 0) > 1 ? 'up' : 'stable',
     },
     {
-      label: 'Total Episodes',
-      value: realtimeMetrics.episodeCount || metrics?.total_episodes || 0,
+      label: 'Iteration',
+      value: `${metrics?.current_iteration || 0}/${metrics?.total_iterations || 0}`,
       icon: Layers,
       color: 'from-neon-blue to-neon-blue/50',
     },
     {
-      label: 'Trajectories',
-      value: trajectories?.count || 0,
+      label: 'Gradient Norm',
+      value: metrics?.latest_gradient_norm?.toFixed(2) || '0.00',
       icon: Zap,
       color: 'from-gradient-orange-from to-gradient-orange-to',
     },
@@ -201,14 +201,16 @@ export function RealtimeMetrics() {
       >
         <h3 className="text-xs font-medium text-muted-foreground mb-2">Training Progress</h3>
         <div className="relative inline-block">
-          <ProgressRing progress={(metrics?.convergence || 0) * 100} size={80} />
+          <ProgressRing progress={((metrics?.current_iteration || 0) / (metrics?.total_iterations || 1)) * 100} size={80} />
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-lg font-bold gradient-text transform rotate-90">
-              {((metrics?.convergence || 0) * 100).toFixed(0)}%
+              {(((metrics?.current_iteration || 0) / (metrics?.total_iterations || 1)) * 100).toFixed(0)}%
             </span>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground mt-2">Estimated convergence</p>
+        <p className="text-xs text-muted-foreground mt-2">
+          {metrics?.current_iteration || 0} / {metrics?.total_iterations || 0} iterations
+        </p>
       </motion.div>
       
       {/* Metrics List */}

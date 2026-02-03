@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Settings, Grid3x3, Target, Zap, Play, RefreshCw } from 'lucide-react'
-import axios from '../lib/axios'
 
 interface ProblemConfig {
   grid_size: number
@@ -9,8 +8,11 @@ interface ProblemConfig {
     position: [number, number]
     intensity: number
   }>
-  training_objective: 'TB' | 'SubTB' | 'DB' | 'FM'
+  training_objective: 'TRAJECTORY_BALANCE' | 'SUB_TRAJECTORY_BALANCE' | 'DETAILED_BALANCE' | 'FLOW_MATCHING'
   n_episodes: number
+  batch_size?: number
+  learning_rate?: number
+  hidden_dim?: number
 }
 
 interface ProblemSetupProps {
@@ -18,30 +20,33 @@ interface ProblemSetupProps {
 }
 
 export function ProblemSetup({ onStart }: ProblemSetupProps) {
+  // Defaults tuned for reliable convergence on 8x8 grid world demo
   const [config, setConfig] = useState<ProblemConfig>({
-    grid_size: 10,
+    grid_size: 8,
     reward_peaks: [
-      { position: [8, 8], intensity: 10 },
-      { position: [2, 8], intensity: 8 },
-      { position: [5, 5], intensity: 6 },
+      { position: [7, 7], intensity: 10 },
+      { position: [0, 7], intensity: 8 },
     ],
-    training_objective: 'TB',
-    n_episodes: 1000,
+    training_objective: 'TRAJECTORY_BALANCE',
+    n_episodes: 500,        // 500 episodes for reliable convergence
+    batch_size: 16,         // Larger batches reduce variance
+    learning_rate: 0.001,   // Lower LR for stable training
+    hidden_dim: 64,
   })
-  
+
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null)
   const [isRunning, setIsRunning] = useState(false)
-  
+
   const handleCellClick = (x: number, y: number) => {
     setSelectedCell([x, y])
   }
-  
+
   const addRewardPeak = () => {
     if (selectedCell) {
       const existing = config.reward_peaks.findIndex(
         p => p.position[0] === selectedCell[0] && p.position[1] === selectedCell[1]
       )
-      
+
       if (existing === -1) {
         setConfig({
           ...config,
@@ -50,39 +55,27 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
       }
     }
   }
-  
+
   const removeRewardPeak = (index: number) => {
     setConfig({
       ...config,
       reward_peaks: config.reward_peaks.filter((_, i) => i !== index)
     })
   }
-  
+
   const updatePeakIntensity = (index: number, intensity: number) => {
     const newPeaks = [...config.reward_peaks]
     newPeaks[index].intensity = intensity
     setConfig({ ...config, reward_peaks: newPeaks })
   }
-  
-  const startTraining = async () => {
+
+  const startTraining = () => {
+    console.log('ProblemSetup: Starting training with config:', config)
     setIsRunning(true)
-    try {
-      // Server expects 1-based grid coordinates; convert before sending
-      const payload = {
-        ...config,
-        reward_peaks: config.reward_peaks.map((peak) => ({
-          ...peak,
-          position: [peak.position[0] + 1, peak.position[1] + 1] as [number, number],
-        })),
-      }
-      await axios.post('/api/training/start', payload)
-      onStart(config)
-    } catch (error) {
-      console.error('Failed to start training:', error)
-      setIsRunning(false)
-    }
+    // Pass config to parent (App.tsx) which handles the v2 API call
+    onStart(config)
   }
-  
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <motion.div
@@ -97,7 +90,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
           Configure your problem domain and start training
         </p>
       </motion.div>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Grid Configuration */}
         <motion.div
@@ -109,12 +102,12 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             <Grid3x3 className="w-5 h-5 text-neon-purple" />
             Grid World Configuration
           </h2>
-          
+
           {/* Interactive Grid */}
           <div className="mb-4">
-            <div 
+            <div
               className="inline-block border border-dark-border rounded-lg p-2 bg-dark-panel"
-              style={{ 
+              style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${config.grid_size}, 1fr)`,
                 gap: '2px',
@@ -128,7 +121,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                   p => p.position[0] === x && p.position[1] === y
                 )
                 const isSelected = selectedCell?.[0] === x && selectedCell?.[1] === y
-                
+
                 return (
                   <motion.div
                     key={i}
@@ -137,8 +130,8 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                     onClick={() => handleCellClick(x, y)}
                     className={`
                       w-8 h-8 rounded cursor-pointer transition-all
-                      ${peak 
-                        ? `bg-gradient-to-br from-neon-green to-neon-green/50` 
+                      ${peak
+                        ? `bg-gradient-to-br from-neon-green to-neon-green/50`
                         : 'bg-dark-bg hover:bg-dark-border'
                       }
                       ${isSelected ? 'ring-2 ring-neon-purple' : ''}
@@ -156,7 +149,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                 )
               })}
             </div>
-            
+
             {selectedCell && (
               <div className="mt-4 flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">
@@ -171,22 +164,22 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
               </div>
             )}
           </div>
-          
+
           {/* Grid Size */}
           <div className="space-y-2 mb-4">
             <label className="text-sm font-medium">Grid Size</label>
             <input
               type="range"
-              min={5}
-              max={20}
+              min={4}
+              max={16}
               value={config.grid_size}
-              onChange={(e) => setConfig({ ...config, grid_size: Number(e.target.value) })}
+              onChange={(e) => setConfig({ ...config, grid_size: Number(e.target.value), reward_peaks: [] })}
               className="w-full"
             />
             <span className="text-xs text-muted-foreground">{config.grid_size} × {config.grid_size}</span>
           </div>
         </motion.div>
-        
+
         {/* Training Configuration */}
         <motion.div
           initial={{ opacity: 0, x: 20 }}
@@ -197,7 +190,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             <Settings className="w-5 h-5 text-neon-blue" />
             Training Configuration
           </h2>
-          
+
           {/* Reward Peaks List */}
           <div className="mb-4">
             <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
@@ -230,34 +223,55 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
               ))}
             </div>
           </div>
-          
+
           {/* Training Objective */}
           <div className="mb-4">
             <label className="text-sm font-medium block mb-2">Training Objective</label>
             <select
               value={config.training_objective}
               onChange={(e) => setConfig({ ...config, training_objective: e.target.value as any })}
-              className="w-full px-3 py-2 bg-dark-panel border border-dark-border rounded-md"
+              className="w-full px-3 py-2 bg-dark-panel border border-dark-border rounded-md text-white"
             >
-              <option value="TB">Trajectory Balance (TB)</option>
-              <option value="SubTB">Sub-Trajectory Balance</option>
-              <option value="DB">Detailed Balance</option>
-              <option value="FM">Flow Matching</option>
+              <option value="TRAJECTORY_BALANCE">Trajectory Balance (TB)</option>
+              <option value="SUB_TRAJECTORY_BALANCE">Sub-Trajectory Balance</option>
+              <option value="DETAILED_BALANCE">Detailed Balance (DB)</option>
+              <option value="FLOW_MATCHING">Flow Matching (FM)</option>
             </select>
           </div>
-          
+
           {/* Episodes */}
           <div className="mb-4">
-            <label className="text-sm font-medium block mb-2">Number of Episodes</label>
+            <label className="text-sm font-medium block mb-2">
+              Number of Episodes
+              <span className="text-xs text-muted-foreground ml-2">(500+ recommended for convergence)</span>
+            </label>
             <input
               type="number"
               value={config.n_episodes}
               onChange={(e) => setConfig({ ...config, n_episodes: Number(e.target.value) })}
-              className="w-full px-3 py-2 bg-dark-panel border border-dark-border rounded-md"
+              className="w-full px-3 py-2 bg-dark-panel border border-dark-border rounded-md text-white"
+              min={50}
+              max={2000}
             />
           </div>
-          
-          
+
+          {/* Learning Rate */}
+          <div className="mb-4">
+            <label className="text-sm font-medium block mb-2">
+              Learning Rate
+              <span className="text-xs text-muted-foreground ml-2">(0.001 recommended)</span>
+            </label>
+            <input
+              type="number"
+              step={0.0001}
+              value={config.learning_rate}
+              onChange={(e) => setConfig({ ...config, learning_rate: Number(e.target.value) })}
+              className="w-full px-3 py-2 bg-dark-panel border border-dark-border rounded-md text-white"
+              min={0.0001}
+              max={0.1}
+            />
+          </div>
+
           {/* Start Button */}
           <motion.button
             whileHover={{ scale: 1.02 }}
@@ -284,7 +298,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
               </>
             )}
           </motion.button>
-          
+
           {config.reward_peaks.length === 0 && (
             <p className="text-xs text-red-500 mt-2">
               Please add at least one reward peak
@@ -292,7 +306,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
           )}
         </motion.div>
       </div>
-      
+
       {/* Quick Presets */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -306,10 +320,10 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             onClick={() => setConfig({
               ...config,
               reward_peaks: [
-                { position: [8, 8], intensity: 10 },
-                { position: [2, 8], intensity: 8 },
-                { position: [5, 5], intensity: 6 },
-                { position: [8, 2], intensity: 7 },
+                { position: [7, 7], intensity: 10 },
+                { position: [1, 7], intensity: 8 },
+                { position: [4, 4], intensity: 6 },
+                { position: [7, 1], intensity: 7 },
               ]
             })}
             className="px-3 py-1 text-sm bg-dark-panel hover:bg-dark-border rounded-md"
@@ -320,7 +334,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             onClick={() => setConfig({
               ...config,
               reward_peaks: [
-                { position: [9, 9], intensity: 10 },
+                { position: [config.grid_size - 1, config.grid_size - 1], intensity: 10 },
               ]
             })}
             className="px-3 py-1 text-sm bg-dark-panel hover:bg-dark-border rounded-md"
@@ -331,10 +345,10 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             onClick={() => setConfig({
               ...config,
               reward_peaks: [
-                { position: [2, 2], intensity: 5 },
-                { position: [7, 7], intensity: 5 },
-                { position: [2, 7], intensity: 5 },
-                { position: [7, 2], intensity: 5 },
+                { position: [1, 1], intensity: 5 },
+                { position: [config.grid_size - 2, config.grid_size - 2], intensity: 5 },
+                { position: [1, config.grid_size - 2], intensity: 5 },
+                { position: [config.grid_size - 2, 1], intensity: 5 },
               ]
             })}
             className="px-3 py-1 text-sm bg-dark-panel hover:bg-dark-border rounded-md"

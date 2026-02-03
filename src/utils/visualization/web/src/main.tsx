@@ -7,8 +7,11 @@ import './styles/globals.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 10, // 10 seconds
-      refetchInterval: 1000 * 30, // 30 seconds
+      staleTime: 0, // Always consider data stale for real-time updates
+      gcTime: 1000 * 60, // Garbage collect after 1 minute (v5 renamed cacheTime to gcTime)
+      refetchOnMount: true,
+      refetchOnWindowFocus: true,
+      retry: 2,
     },
   },
 })
