@@ -13,14 +13,14 @@ Starting visualization system...
 
 # Paths
 const VIZ_ROOT = joinpath(@__DIR__, "..", "..", "..", "src", "utils", "visualization")
-const API_SERVER = joinpath(VIZ_ROOT, "api", "gflownet_server.jl") 
+const API_SERVER = joinpath(VIZ_ROOT, "api", "unified_server.jl") 
 const WEB_DIR = joinpath(VIZ_ROOT, "web")
 
 # Clean up any existing servers
 println("🧹 Cleaning up...")
 # Suppress output and errors from pkill when no processes are found
 try run(pipeline(`pkill -f "node.*vite"`, devnull), wait=false) catch end
-try run(pipeline(`pkill -f "julia.*gflownet_server"`, devnull), wait=false) catch end
+try run(pipeline(`pkill -f "julia.*unified_server"`, devnull), wait=false) catch end
 sleep(2)  # Give more time for cleanup
 
 # Start API server in background with proper environment
@@ -118,6 +118,6 @@ finally
     println("\n👋 Stopping servers...")
     # Kill all processes (suppress output)
     try run(pipeline(`pkill -f "node.*vite"`, devnull)) catch end
-    try run(pipeline(`pkill -f "julia.*gflownet_server"`, devnull)) catch end
+    try run(pipeline(`pkill -f "julia.*unified_server"`, devnull)) catch end
     println("✅ Done!")
 end

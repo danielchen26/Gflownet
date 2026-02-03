@@ -179,9 +179,29 @@ export function GFlowNet2DTrajectory() {
   }
 
   const trajectory = trajectories[selectedTrajectory]
+
+  // Safety check - if trajectory is undefined, show loading state
+  if (!trajectory || !trajectory.states || trajectory.states.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Loading trajectory data...</p>
+          <p className="text-xs text-yellow-500 mt-2">
+            Selected: {selectedTrajectory} / Available: {trajectories.length}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // Safely get grid size with fallback
+  const gridSizeArray = Array.isArray(data.domain.grid_size)
+    ? data.domain.grid_size
+    : [data.domain.grid_size || 10, data.domain.grid_size || 10]
+
   const cellSize = 40
-  const gridWidth = data.domain.grid_size[0] * cellSize
-  const gridHeight = data.domain.grid_size[1] * cellSize
+  const gridWidth = gridSizeArray[0] * cellSize
+  const gridHeight = gridSizeArray[1] * cellSize
   const toCanvasCoord = (coord: number) => (coord - 1) * cellSize + cellSize / 2 + 1
   
   return (
@@ -194,7 +214,7 @@ export function GFlowNet2DTrajectory() {
             {/* Grid Background */}
             <svg width={gridWidth + 2} height={gridHeight + 2} className="absolute top-0 left-0">
               {/* Grid lines */}
-              {Array.from({ length: data.domain.grid_size[0] + 1 }).map((_, i) => (
+              {Array.from({ length: gridSizeArray[0] + 1 }).map((_, i) => (
                 <line
                   key={`v${i}`}
                   x1={i * cellSize + 1}
@@ -205,7 +225,7 @@ export function GFlowNet2DTrajectory() {
                   strokeWidth="1"
                 />
               ))}
-              {Array.from({ length: data.domain.grid_size[1] + 1 }).map((_, i) => (
+              {Array.from({ length: gridSizeArray[1] + 1 }).map((_, i) => (
                 <line
                   key={`h${i}`}
                   x1={1}
@@ -219,7 +239,7 @@ export function GFlowNet2DTrajectory() {
               
               {/* Reward peaks as gradients */}
               <defs>
-                {data.domain.reward_peaks.map((peak: any, i: number) => (
+                {(data.domain.reward_peaks || []).map((peak: any, i: number) => (
                   <radialGradient key={i} id={`peak${i}`}>
                     <stop offset="0%" stopColor={COLORS.reward.high} stopOpacity="0.6" />
                     <stop offset="100%" stopColor={COLORS.reward.high} stopOpacity="0" />
@@ -228,7 +248,7 @@ export function GFlowNet2DTrajectory() {
               </defs>
 
               {/* Render reward peaks */}
-              {data.domain.reward_peaks.map((peak: any, i: number) => (
+              {(data.domain.reward_peaks || []).map((peak: any, i: number) => (
                 <g key={i}>
                   <circle
                     cx={toCanvasCoord(peak.position[0])}

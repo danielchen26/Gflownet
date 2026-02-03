@@ -41,13 +41,17 @@ export export_trajectory_data, export_training_history
 @info """
 GFlowNet Web Visualization System
 ================================
-Visualization is now handled by a modern web stack:
+Visualization is handled by a modern web stack with REAL GFlowNet training:
 - React + TypeScript for the UI
-- D3.js + Three.js for beautiful visualizations
-- WebSocket for real-time updates
-- Oxygen.jl API for data export
+- Three.js (React Three Fiber) for 3D visualizations
+- Real-time polling for training updates
+- Oxygen.jl API with actual GFlowNet training integration
 
 To start the visualization dashboard:
-1. Start the GFlowNet server: `julia --project -e 'include("src/utils/visualization/api/gflownet_server.jl")'`
+1. Run the unified launcher: `julia examples/core_features/visualization/show_visualization.jl`
+
+Or manually:
+1. Start the real training server: `julia --project -e 'include("src/utils/visualization/api/unified_server.jl"); start_real_training_server()'`
 2. Start the web dashboard: `cd src/utils/visualization/web && npm run dev`
+3. Open http://localhost:3000
 """

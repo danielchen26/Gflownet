@@ -136,6 +136,18 @@ function add_cors_headers(handler)
 end
 
 # ============================================
+# Health Check Endpoint
+# ============================================
+
+@get "/health" function(req)
+    return json(Dict(
+        "status" => "ok",
+        "server" => "unified_server",
+        "real_training" => true
+    ))
+end
+
+# ============================================
 # API v2 Endpoints — Domain Info
 # ============================================
 
@@ -336,4 +348,9 @@ function start_real_training_server(; port::Int = 8080)
     @info "  GET  /api/v2/analysis/distribution - Get distribution data"
 
     serve(; port = port, middleware = [add_cors_headers])
+end
+
+# Auto-start when script is run directly
+if abspath(PROGRAM_FILE) == @__FILE__
+    start_real_training_server()
 end
