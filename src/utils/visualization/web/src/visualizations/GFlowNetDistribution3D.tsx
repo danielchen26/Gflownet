@@ -515,7 +515,7 @@ function RewardLandscape({ peaks, gridSize }: { peaks: RewardPeak[], gridSize: n
 // =============================================================================
 // POSTERIOR VISUALIZATION - Spheres showing endpoint distribution
 // =============================================================================
-function PosteriorVisualization({ trajectories, gridSize }: { trajectories: TrajectoryData[], gridSize: number }) {
+function PosteriorVisualization({ trajectories, gridSize, showLabels }: { trajectories: TrajectoryData[], gridSize: number, showLabels: boolean }) {
   const sphereData = useMemo(() => {
     const endpoints = new Map<string, { count: number; totalReward: number; position: [number, number] }>()
 
@@ -576,17 +576,23 @@ function PosteriorVisualization({ trajectories, gridSize }: { trajectories: Traj
               />
             </mesh>
 
-            {sphere.probability > 0.05 && (
-              <Html position={[0, sphereRadius * 0.6, 0]} distanceFactor={10}>
-                <div className="text-xs bg-dark-bg/95 px-2 py-1.5 rounded-md whitespace-nowrap pointer-events-none border border-purple-500/50 shadow-lg shadow-purple-500/20">
-                  <div className="text-purple-300 font-semibold">
-                    P = {(sphere.probability * 100).toFixed(0)}%
+            {showLabels && sphere.probability > 0.05 && (
+              <Html
+                position={[0, sphereRadius * 0.6 + 0.3, 0]}
+                distanceFactor={8}
+                occlude="blending"
+                zIndexRange={[100 - i, 0]}
+                style={{
+                  transition: 'opacity 0.2s',
+                  pointerEvents: 'none'
+                }}
+              >
+                <div className="text-[10px] bg-dark-bg/90 px-1.5 py-1 rounded whitespace-nowrap border border-purple-500/40 shadow-md backdrop-blur-sm">
+                  <div className="text-purple-300 font-bold text-center">
+                    {(sphere.probability * 100).toFixed(0)}%
                   </div>
-                  <div className="text-[10px] text-purple-200/70">
-                    Avg R: {sphere.avgReward.toFixed(1)}
-                  </div>
-                  <div className="text-[9px] text-muted-foreground">
-                    [{sphere.position[0]}, {sphere.position[1]}]
+                  <div className="text-[8px] text-purple-200/60 text-center">
+                    R:{sphere.avgReward.toFixed(0)} [{sphere.position[0]},{sphere.position[1]}]
                   </div>
                 </div>
               </Html>
@@ -678,9 +684,10 @@ function SceneLoadingPlaceholder() {
 // =============================================================================
 // MAIN 3D SCENE
 // =============================================================================
-function Scene({ viewMode, densityMode }: {
+function Scene({ viewMode, densityMode, showLabels }: {
   viewMode: 'density' | 'posterior' | 'combined'
   densityMode: 'bars' | 'surface'
+  showLabels: boolean
 }) {
   const { data } = useQuery({
     queryKey: ['distribution-data'],
@@ -730,7 +737,7 @@ function Scene({ viewMode, densityMode }: {
 
       {/* Posterior visualization */}
       {(viewMode === 'posterior' || viewMode === 'combined') && (
-        <PosteriorVisualization trajectories={trajectories} gridSize={gridSize} />
+        <PosteriorVisualization trajectories={trajectories} gridSize={gridSize} showLabels={showLabels} />
       )}
     </group>
   )
@@ -742,6 +749,7 @@ function Scene({ viewMode, densityMode }: {
 export function GFlowNetDistribution3D() {
   const [viewMode, setViewMode] = useState<'density' | 'posterior' | 'combined'>('combined')
   const [densityMode, setDensityMode] = useState<'bars' | 'surface'>('surface')
+  const [showLabels, setShowLabels] = useState(true)
 
   const { data: stats } = useQuery({
     queryKey: ['distribution-stats'],
@@ -827,6 +835,36 @@ export function GFlowNetDistribution3D() {
                 <span className="text-sm">Discrete Bars</span>
               </motion.button>
             </div>
+          </div>
+        )}
+
+        {/* Show Labels Toggle - only visible in posterior or combined mode */}
+        {(viewMode === 'posterior' || viewMode === 'combined') && (
+          <div className="glass-dark rounded-lg p-4">
+            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+              <Target className="w-4 h-4 text-purple-400" />
+              Sphere Labels
+            </h3>
+            <motion.button
+              onClick={() => setShowLabels(!showLabels)}
+              className={`w-full p-3 rounded-lg flex items-center gap-3 transition-colors ${
+                showLabels
+                  ? 'bg-purple-500/20 border border-purple-500/50 text-purple-400'
+                  : 'glass-dark hover:bg-dark-panel text-muted-foreground'
+              }`}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
+                showLabels ? 'border-purple-400 bg-purple-400' : 'border-muted-foreground'
+              }`}>
+                {showLabels && <span className="text-[10px] text-dark-bg font-bold">✓</span>}
+              </div>
+              <div className="text-left">
+                <span className="text-sm block">{showLabels ? 'Labels Visible' : 'Labels Hidden'}</span>
+                <span className="text-[10px] text-muted-foreground">Toggle P% labels on spheres</span>
+              </div>
+            </motion.button>
           </div>
         )}
 
@@ -1077,7 +1115,7 @@ export function GFlowNetDistribution3D() {
           <pointLight position={[-10, 10, -10]} intensity={0.8} color="#00ff88" />
           <directionalLight position={[0, 20, 10]} intensity={0.4} />
 
-          <Scene viewMode={viewMode} densityMode={densityMode} />
+          <Scene viewMode={viewMode} densityMode={densityMode} showLabels={showLabels} />
 
           <OrbitControls
             enablePan={true}
