@@ -53,15 +53,15 @@ parameters = ComponentArray(
 
 ### 4. Multiple Models vs Multi-Start Model
 
-**Decision**: Support multiple independent models rather than single multi-start model.
+**Decision**: Support both approaches - independent models and multi-start models.
 
 **Context**: When dealing with multiple possible initial states, there are two approaches:
-1. Train separate models for each initial state (current approach)
-2. Train one model that handles multiple initial states (future enhancement)
+1. Train separate models for each initial state (simple approach)
+2. Train one model that handles multiple initial states (✅ now implemented)
 
-**Current Approach**:
+**Approach 1: Independent Models**:
 ```julia
-# Train independent models
+# Train independent models (simple, good for distinct problems)
 model_A = create_gflownet(initial_state = StateA, ...)
 model_B = create_gflownet(initial_state = StateB, ...)
 
@@ -69,24 +69,25 @@ model_B = create_gflownet(initial_state = StateB, ...)
 trajectory = sample_trajectory(model_A)  # or model_B
 ```
 
-**Alternative (Not Implemented)**:
+**Approach 2: Multi-Start Model (✅ Implemented)**:
 ```julia
 # Single model with multiple starts
-model = create_multi_start_gflownet([StateA, StateB, StateC], ...)
-# Model learns P(s₀) ∝ Z(s₀)
+# Model learns per-initial-state partition functions Z(s₀)
+# Initial state sampling based on Z values
 ```
 
-**Rationale for Current Approach**:
-- **Simplicity**: No need for Z(s₀) learning infrastructure
-- **Control**: Explicit user control over initial state distribution
-- **Sufficient**: Solves multi-start problems effectively
-- **Stability**: Each model trains independently without interference
+**When to Use Each Approach**:
 
-**When Multiple Models Work Well**:
+*Use Independent Models When*:
 - Different initial states represent distinct sub-problems
 - You know the desired sampling distribution
 - Initial states don't share downstream structure
 - Implementation simplicity is priority
+
+*Use Multi-Start Model When*:
+- Initial states share structure that can be learned jointly
+- You want the model to learn optimal initial state distribution
+- Per-state partition functions provide useful information
 
 **When Multi-Start Would Be Better**:
 - Need to discover optimal initial state distribution

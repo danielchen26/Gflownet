@@ -234,16 +234,16 @@ Currently not fully implemented due to missing flow functions.
 ## Implementation Status
 
 ### Fully Implemented
-- ✅ Trajectory Balance (with optional backward policy)
-- ✅ Sub-Trajectory Balance variants
+- ✅ Trajectory Balance (with optional backward policy and learnable Z)
+- ✅ Detailed Balance (with joint backward policy representation)
+- ✅ Flow Matching (complete implementation)
+- ✅ Sub-Trajectory Balance (O(T²) learning signals)
+- ✅ Direct Flow Objective (neural network flow estimation)
 
-### Partially Implemented  
-- ⚠️ Flow Consistency (missing flow functions)
-
-### Not Implemented
-- ❌ General Trajectory Balance
-- ❌ Detailed Balance (requires flow functions)
-- ❌ Flow Matching (requires flow functions)
+### Flow Computation
+- ✅ Recursive flow computation with memoization
+- ✅ Edge flows and partition function
+- ✅ Zygote-compatible caching
 
 ## Examples by Domain
 
