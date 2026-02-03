@@ -17,6 +17,7 @@
 # IDE files
 .vscode/
 .idea/
+.cursor/
 
 # Temporary files
 *.tmp

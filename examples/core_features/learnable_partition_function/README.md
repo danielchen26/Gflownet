@@ -139,26 +139,25 @@ While designed with multi-start in mind, LEARNABLE_ESTIMATION provides benefits 
 3. **Future-Proofing**: Easy transition to multi-start when needed
 4. **Diagnostic Tool**: Learned Z provides insights into model behavior
 
-### Connection to Multi-Start (Future Work)
+### Connection to Multi-Start (Implemented!)
 
-For true multi-start GFlowNets, the architecture would extend to:
+Multi-Start GFlowNets are now fully implemented in `src/core/multi_start.jl`:
 
 ```julia
-# Future multi-start implementation
-struct MultiStartGFlowNet
-    initial_states::Vector{State}
-    log_Z_values::Vector{Float64}  # One per initial state
-    # OR
-    flow_network::FlowEstimator    # F(s) for all states, where F(s₀) = Z(s₀)
+# Actual implementation in GFlowNet.jl
+struct MultiStartGFlowNetModel
+    initial_states::Vector{<:AbstractState}
+    log_partition_functions::Vector{Float64}  # One Z per initial state
+    # ... forward/backward policies, flow estimator
 end
+
+# Initial state selection based on learned Z values
+# P(s₀ⁱ) = Z(s₀ⁱ) / Σⱼ Z(s₀ʲ)
 ```
 
-This would require:
-- Flow functions F(s) that satisfy F(s₀) = Z(s₀)
-- Joint learning of initial distribution P(s₀) ∝ Z(s₀)
-- More complex training objectives
+See `examples/core_features/multi_start/` for a complete demonstration.
 
-Our current LEARNABLE_ESTIMATION is a stepping stone toward this more general framework.
+LEARNABLE_ESTIMATION provides the foundation for multi-start by enabling Z to be learned during training.
 
 ## Files in This Example
 

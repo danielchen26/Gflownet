@@ -51,20 +51,22 @@ Where:
 
 ### Connection to Multi-Start GFlowNets
 
-While the current implementation handles single initial states, LEARNABLE_ESTIMATION is designed with multi-start in mind:
+LEARNABLE_ESTIMATION is the foundation for multi-start GFlowNets, now fully implemented in `src/core/multi_start.jl`:
 
-1. **Single-Start (Current)**
+1. **Single-Start**
    ```julia
    # One initial state, one Z value
    log_Z = learnable_parameter
    ```
 
-2. **Multi-Start (Future)**
+2. **Multi-Start (Implemented!)**
    ```julia
    # Multiple initial states, each with its own Z
    log_Z_values = [Z(s₀¹), Z(s₀²), ...]
-   P(s₀ⁱ) ∝ Z(s₀ⁱ)  # Initial distribution
+   P(s₀ⁱ) = Z(s₀ⁱ) / Σⱼ Z(s₀ʲ)  # Initial state distribution
    ```
+
+See `examples/core_features/multi_start/` for demonstration.
 
 ### Why This Matters
 
@@ -113,13 +115,16 @@ learned_Z = exp(model.parameters.log_Z)
 3. **Gradient Flow**: Z receives gradients like any other parameter
 4. **Optional Feature**: Falls back to Z=1 when not using LEARNABLE_ESTIMATION
 
+## Implemented Extensions
+
+1. ✅ **Multi-Start**: Multiple initial states with separate Z values (`src/core/multi_start.jl`)
+2. ✅ **Flow Networks**: F(s) estimation via DIRECT_FLOW_OBJECTIVE
+
 ## Future Extensions
 
-1. **Flow Networks**: Implement F(s) where F(s₀) = Z(s₀)
-2. **Multi-Start**: Support multiple initial states with separate Z values
-3. **Adaptive Learning**: Different learning rates for Z vs policy parameters
-4. **Theoretical Analysis**: Prove convergence guarantees
+1. **Adaptive Learning**: Different learning rates for Z vs policy parameters
+2. **Theoretical Analysis**: Prove convergence guarantees
 
 ## Conclusion
 
-LEARNABLE_ESTIMATION successfully bridges the gap between simple fixed-Z models and future multi-start GFlowNets, while providing immediate benefits for exploration and theoretical correctness.
+LEARNABLE_ESTIMATION successfully bridges the gap between simple fixed-Z models and multi-start GFlowNets, while providing immediate benefits for exploration and theoretical correctness.

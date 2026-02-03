@@ -93,16 +93,13 @@ end
 function update!(monitor::ZConvergenceMonitor, current_z::Float64)
     monitor.iteration += 1
     push!(monitor.history, current_z)
-    
-    improved = false
-    
+
     if !isnothing(monitor.true_z)
         error = abs(current_z - monitor.true_z) / abs(monitor.true_z)
         
         if error < monitor.best_error
             monitor.best_error = error
             monitor.iterations_without_improvement = 0
-            improved = true
         else
             monitor.iterations_without_improvement += 1
         end
