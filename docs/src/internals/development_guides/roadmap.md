@@ -3,21 +3,29 @@
 ## Vision
 GFlowNet.jl aims to be the premier production-ready implementation of Generative Flow Networks, combining Julia's performance with modern ML engineering practices to enable both research and industrial applications.
 
-## Current Status (January 2025)
+## Current Status (February 2025)
 
 ### ✅ Completed Features
 - **Core Mathematical Engine**: Full implementation of flow networks
-- **Training Objectives**: TB, DB, STB, DIRECT_FLOW_OBJECTIVE
-- **Flow Computation**: Recursive flows with memoization
+- **Training Objectives**: TB, DB, FM, STB, DIRECT_FLOW_OBJECTIVE (all 5 objectives)
+- **Flow Computation**: Recursive flows with memoization, Zygote-compatible
 - **Backward Policy**: Joint representation with validation
 - **Learnable Partition Function**: Trainable Z parameter
-- **Web Visualization**: Interactive 3D training monitor
+- **Multi-Start GFlowNets**: Multiple initial states with per-state partition functions
+- **Epsilon-Uniform Exploration**: Standard ε-mixing for mode discovery (ε=0.05 default)
+- **Web Visualization**: Real-time 3D training monitor with actual GFlowNet training
+  - Interactive problem setup with reward peak configuration
+  - Live training metrics and loss curves
+  - 3D distribution visualization with posterior spheres
+  - Flow field visualization with policy arrows
+  - Endpoint distribution panel with peak discovery tracking
 - **Domain Examples**: Grid world, supply chain, molecules, causal discovery
+- **Training Code Reorganization**: Clean separation of training/ and core/ modules
 
 ### 🚧 In Progress
+- GPU acceleration for trajectory sampling
 - Performance optimization for large-scale problems
 - Documentation improvements
-- Community building
 
 ## Development Phases
 
@@ -299,5 +307,5 @@ GFlowNet.jl aims to be the premier production-ready implementation of Generative
 GFlowNet.jl is on track to become the definitive implementation of Generative Flow Networks. With focused development on performance, domains, and user experience, we aim to enable both cutting-edge research and real-world applications. Join us in building the future of generative modeling!
 
 ---
-*Last updated: January 2025*
-*Next review: March 2025*
+*Last updated: February 2025*
+*Next review: April 2025*
