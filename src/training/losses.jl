@@ -237,11 +237,19 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         return mean(finite_losses)
         
     elseif config.objective == SUB_TRAJECTORY_BALANCE
+        # Validate that flow estimator exists (REQUIRED for SubTB)
+        if isnothing(model.flow_estimator)
+            throw(ArgumentError(
+                "SUB_TRAJECTORY_BALANCE requires a flow estimator. " *
+                "Create model with: include_flow_estimator=true"
+            ))
+        end
+
         # Get sub-trajectory length from config
         sub_length = config.sub_trajectory_length
-        
-        # Compute sub-trajectory balance loss
-        return sub_trajectory_balance_loss_batch(model, trajectories; sub_length=sub_length)
+
+        # Compute sub-trajectory balance loss with params for differentiability
+        return sub_trajectory_balance_loss_batch(model, trajectories, params; sub_length=sub_length)
         
     elseif config.objective == DIRECT_FLOW_OBJECTIVE
         # Filter valid trajectories

@@ -46,8 +46,27 @@ end
 # Sub-Trajectory Balance - Mathematical Foundation
 # =============================================================================
 
+# Import necessary functions for on-demand computation
+using ..GFlowNet: state_to_features, get_applicable_actions, apply_action, is_terminal_state
+
 """
-    sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory;
+    logsumexp_stb(x)
+
+Numerically stable log-sum-exp for SubTB computation.
+"""
+function logsumexp_stb(x::AbstractVector)
+    if isempty(x)
+        return -Inf
+    end
+    max_x = maximum(x)
+    if isinf(max_x)
+        return max_x
+    end
+    return max_x + log(sum(exp.(x .- max_x)))
+end
+
+"""
+    sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory, params;
                                sub_length::Int=5)::Float64
 
 Compute sub-trajectory balance loss for a trajectory by considering all sub-trajectories.
@@ -61,12 +80,16 @@ For a sub-trajectory from state s_i to s_j:
 This provides more frequent learning signals compared to full trajectory balance.
 
 # Arguments
-- `model::GFlowNetModel`: Complete GFlowNet model (domain-agnostic)
+- `model::GFlowNetModel`: Complete GFlowNet model with flow_estimator (REQUIRED)
 - `trajectory::Trajectory`: Full trajectory to extract sub-trajectories from
+- `params`: Model parameters for differentiable computation
 - `sub_length::Int`: Maximum length of sub-trajectories to consider
 
 # Returns
 - `Float64`: Average sub-trajectory balance loss
+
+# Requirements
+- Model must have flow_estimator: !isnothing(model.flow_estimator)
 
 # Mathematical Properties
 - Provides local credit assignment
@@ -74,92 +97,253 @@ This provides more frequent learning signals compared to full trajectory balance
 - Reduces variance in long trajectories
 - Domain-agnostic: works with any state/action types implementing the GFlowNet interface
 """
+function sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory, params;
+                                   sub_length::Int=5)::Float64
+    # Validate that flow estimator exists (REQUIRED for SubTB)
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError(
+            "SUB_TRAJECTORY_BALANCE requires a flow estimator. " *
+            "Create model with: include_flow_estimator=true"
+        ))
+    end
+
+    n_states = length(trajectory.states)
+    if n_states < 2
+        return 0.0
+    end
+
+    # Pre-compute valid sub-trajectory indices OUTSIDE gradient (non-differentiable)
+    # This avoids mutations inside the gradient computation
+    valid_pairs = Zygote.@ignore begin
+        pairs = Tuple{Int,Int}[]
+        for start_idx in 1:n_states-1
+            for end_idx in start_idx+1:min(start_idx+sub_length, n_states)
+                if end_idx - start_idx >= 1  # At least 2 states
+                    push!(pairs, (start_idx, end_idx))
+                end
+            end
+        end
+        pairs
+    end
+
+    n_pairs = Zygote.@ignore length(valid_pairs)
+    if n_pairs == 0
+        return 0.0
+    end
+
+    # Compute sum of losses directly (Zygote-safe)
+    # Replace Inf/NaN with 0 using a conditional
+    total_loss = sum(
+        begin
+            loss = _compute_sub_trajectory_loss_differentiable(
+                model,
+                trajectory.states[start_idx:end_idx],
+                trajectory,
+                start_idx,
+                params
+            )
+            # Replace invalid losses with 0 (Zygote-safe conditional)
+            ifelse(isnan(loss) || isinf(loss), 0.0, loss)
+        end
+        for (start_idx, end_idx) in valid_pairs
+    )
+
+    # Count valid losses outside gradient
+    n_valid = Zygote.@ignore begin
+        count = 0
+        for (start_idx, end_idx) in valid_pairs
+            loss = _compute_sub_trajectory_loss_differentiable(model, trajectory.states[start_idx:end_idx], trajectory, start_idx, params)
+            if !isnan(loss) && !isinf(loss)
+                count += 1
+            end
+        end
+        count
+    end
+
+    return n_valid > 0 ? total_loss / n_valid : 0.0
+end
+
+# Legacy version for backward compatibility (non-differentiable)
 function sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory;
                                    sub_length::Int=5)::Float64
-    
+    @warn "Using legacy non-differentiable SubTB. For training, use sub_trajectory_balance_loss(model, traj, params; ...)"
+
     if length(trajectory.states) < 2
         return 0.0
     end
-    
+
     losses = Float64[]
-    
-    # Consider all possible sub-trajectories up to sub_length
+
     for start_idx in 1:length(trajectory.states)-1
         for end_idx in start_idx+1:min(start_idx+sub_length, length(trajectory.states))
-            # Extract sub-trajectory
             sub_states = trajectory.states[start_idx:end_idx]
-            
+
             if length(sub_states) < 2
                 continue
             end
-            
-            # Compute sub-trajectory loss
-            loss = _compute_sub_trajectory_loss(model, sub_states, trajectory, start_idx)
+
+            loss = _compute_sub_trajectory_loss_legacy(model, sub_states, trajectory, start_idx)
             if !isnan(loss) && !isinf(loss)
                 push!(losses, loss)
             end
         end
     end
-    
-    # Return average loss
+
     return isempty(losses) ? 0.0 : mean(losses)
 end
 
 """
-    _compute_sub_trajectory_loss(model::GFlowNetModel, sub_states::Vector{<:AbstractState},
-                                full_trajectory::Trajectory, start_idx::Int)::Float64
+    _compute_sub_trajectory_loss_differentiable(model, sub_states, full_trajectory, start_idx, params)
 
-Compute loss for a single sub-trajectory.
+Compute DIFFERENTIABLE loss for a single sub-trajectory.
+Uses on-demand forward probability computation and differentiable flow estimator.
 """
-function _compute_sub_trajectory_loss(model::GFlowNetModel, sub_states::Vector{<:AbstractState},
-                                    full_trajectory::Trajectory, start_idx::Int)::Float64
-    
-    # Compute log forward probability along sub-trajectory
+function _compute_sub_trajectory_loss_differentiable(
+    model::GFlowNetModel,
+    sub_states::Vector{<:AbstractState},
+    full_trajectory::Trajectory,
+    start_idx::Int,
+    params
+)::Float64
+
+    # Compute log forward probability along sub-trajectory using on-demand computation
     log_forward_prob = 0.0
-    
+
     for i in 1:length(sub_states)-1
         source_state = sub_states[i]
         target_state = sub_states[i+1]
-        
-        # Get the action that was taken (from full trajectory)
+
+        # Get state features and compute logits (DIFFERENTIABLE)
+        features = state_to_features(source_state)
+        logits, _ = model.forward_policy.model(features, params.forward, model.states.forward)
+
+        # Get applicable actions (discrete logic - non-differentiable)
+        applicable_actions = Zygote.@ignore get_applicable_actions(source_state, model.all_actions)
+        applicable_indices = Zygote.@ignore [idx for (idx, a) in enumerate(model.all_actions) if a in applicable_actions]
+
+        if isempty(applicable_indices)
+            return Inf
+        end
+
+        # Find which action leads to target_state (discrete logic - non-differentiable)
+        target_action_idx = Zygote.@ignore begin
+            for (idx, action) in enumerate(model.all_actions)
+                if action in applicable_actions && apply_action(action, source_state) == target_state
+                    return idx
+                end
+            end
+            return nothing
+        end
+
+        if isnothing(target_action_idx)
+            return Inf
+        end
+
+        # Compute softmax log-probabilities (DIFFERENTIABLE)
+        applicable_logits = logits[applicable_indices]
+        log_probs = applicable_logits .- logsumexp_stb(applicable_logits)
+
+        # Find position of target action in applicable actions
+        action_pos = Zygote.@ignore findfirst(==(target_action_idx), applicable_indices)
+
+        if isnothing(action_pos)
+            return Inf
+        end
+
+        log_forward_prob += log_probs[action_pos]
+    end
+
+    # Compute flow estimates using flow estimator (DIFFERENTIABLE!)
+    start_features = state_to_features(sub_states[1])
+    end_features = state_to_features(sub_states[end])
+
+    # Reshape features for Lux (expects [features, batch])
+    start_features_mat = reshape(convert(Array{Float32}, start_features), :, 1)
+    end_features_mat = reshape(convert(Array{Float32}, end_features), :, 1)
+
+    start_flow_vec, _ = model.flow_estimator.model(start_features_mat, params.flow, model.states.flow)
+    end_flow_vec, _ = model.flow_estimator.model(end_features_mat, params.flow, model.states.flow)
+
+    # Ensure positive flows (using softplus-like transformation)
+    log_start_flow = log(max(start_flow_vec[1], 1e-8))
+    log_end_flow = log(max(end_flow_vec[1], 1e-8))
+
+    # SubTB loss: (log F(s_i) + log P_F(τ[i:j]) - log F(s_j))²
+    error = log_start_flow + log_forward_prob - log_end_flow
+    return error^2
+end
+
+"""
+    _compute_sub_trajectory_loss_legacy(model, sub_states, full_trajectory, start_idx)
+
+Legacy non-differentiable version for backward compatibility.
+"""
+function _compute_sub_trajectory_loss_legacy(model::GFlowNetModel, sub_states::Vector{<:AbstractState},
+                                    full_trajectory::Trajectory, start_idx::Int)::Float64
+
+    log_forward_prob = 0.0
+
+    for i in 1:length(sub_states)-1
+        source_state = sub_states[i]
+        target_state = sub_states[i+1]
+
         action_idx = start_idx + i - 1
         if action_idx <= length(full_trajectory.actions)
-            action = full_trajectory.actions[action_idx]
-            
-            # Compute forward transition probability
             prob = forward_transition_probability(model, source_state, target_state)
             if prob <= 0
-                return Inf  # Invalid transition
+                return Inf
             end
-            
             log_forward_prob += log(prob)
         end
     end
-    
-    # Get flows at start and end of sub-trajectory
+
     start_flow = Zygote.@ignore flow(model, sub_states[1])
     end_flow = Zygote.@ignore flow(model, sub_states[end])
-    
-    # Avoid numerical issues
+
     if start_flow <= 0 || end_flow <= 0
         return 0.0
     end
-    
-    # Sub-trajectory balance: log(P_F) + log(F_start) = log(F_end)
+
     log_start_flow = log(start_flow)
     log_end_flow = log(end_flow)
-    
-    # Squared error loss
+
     error = log_forward_prob + log_start_flow - log_end_flow
     return error^2
 end
 
 """
-    sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory};
+    sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory}, params;
                                      sub_length::Int=5)::Float64
 
 Compute average sub-trajectory balance loss over a batch of trajectories.
+DIFFERENTIABLE version that requires params.
 """
+function sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory}, params;
+                                         sub_length::Int=5)::Float64
+    if isempty(trajectories)
+        return 0.0
+    end
+
+    # Validate flow estimator
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError("SUB_TRAJECTORY_BALANCE requires include_flow_estimator=true"))
+    end
+
+    # Compute losses using comprehension (Zygote-safe)
+    losses = [sub_trajectory_balance_loss(model, traj, params; sub_length=sub_length) for traj in trajectories]
+
+    # Filter NaN/Inf outside gradient computation
+    valid_indices = Zygote.@ignore [i for (i, l) in enumerate(losses) if !isnan(l) && !isinf(l)]
+
+    if isempty(valid_indices)
+        return 0.0
+    end
+
+    # Use indices to compute mean (Zygote-safe)
+    return sum(losses[i] for i in valid_indices) / length(valid_indices)
+end
+
+# Legacy batch version for backward compatibility
 function sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory};
                                          sub_length::Int=5)::Float64
     

@@ -242,6 +242,7 @@ function create_grid_world_gflownet(;
     hidden_dim::Int=64,
     learning_rate::Float64=0.01,
     include_backward::Bool=false,
+    include_flow_estimator::Bool=false,
     partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION,
     rng::AbstractRNG=Random.default_rng()
 )
@@ -272,6 +273,7 @@ function create_grid_world_gflownet(;
         hidden_dim = hidden_dim,
         learning_rate = learning_rate,
         include_backward = include_backward,
+        include_flow_estimator = include_flow_estimator,
         partition_function_method = partition_function_method,
         rng = rng
     )
