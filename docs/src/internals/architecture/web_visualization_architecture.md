@@ -299,32 +299,23 @@ GET  /api/analysis/distribution # Distribution statistics
 
 ## Integration Points
 
-### Connecting to Real GFlowNet
+### Real GFlowNet Integration
 
-Replace `simple_server.jl` with `gflownet_server.jl`:
+The visualization system uses `unified_server.jl` which provides real GFlowNet training:
 
 ```julia
-# Real GFlowNet Integration
-function create_gflownet_server(model::GFlowNetModel, env::GFlowEnvironment)
-    # Hook into training callbacks
-    @post "/api/training/step" function()
-        metrics = train_step!(model, env)
-        return json(metrics)
-    end
-    
-    # Sample real trajectories
-    @get "/api/trajectories/sample" function()
-        trajectory = sample_trajectory(model, env)
-        return json(serialize_trajectory(trajectory))
-    end
-    
-    # Compute actual flow field
-    @get "/api/analysis/flow-field" function()
-        flow_field = compute_policy_flow(model, env)
-        return json(flow_field)
-    end
-end
+# Start the real training visualization server
+include("src/utils/visualization/api/unified_server.jl")
+start_real_training_server(port=8080)
 ```
+
+The server provides v2 API endpoints:
+- `POST /api/v2/training/start` - Start training with configuration
+- `GET /api/v2/training/state` - Current training state, metrics, errors
+- `GET /api/v2/training/history` - Full training history
+- `GET /api/v2/trajectories` - Recent trajectories for visualization
+- `GET /api/v2/analysis/flow` - Flow field data
+- `GET /api/v2/analysis/distribution` - Distribution comparison data
 
 ### Domain Adaptation
 
@@ -365,13 +356,18 @@ end
 
 ## Development Workflow
 
-### Setup
+### Quick Start (Recommended)
 ```bash
-# Backend
-cd src/utils/visualization/api
-julia --project=. simple_server.jl
+# Use the unified launcher that starts both servers
+julia examples/core_features/visualization/show_visualization.jl
+```
 
-# Frontend
+### Manual Setup
+```bash
+# Backend - start the real training server
+julia --project=. -e 'include("src/utils/visualization/api/unified_server.jl"); start_real_training_server()'
+
+# Frontend - in another terminal
 cd src/utils/visualization/web
 npm install
 npm run dev
@@ -380,19 +376,18 @@ npm run dev
 ### Testing
 ```bash
 # Frontend tests
+cd src/utils/visualization/web
 npm test
 
 # Backend tests
-julia --project=. test/visualization_api_tests.jl
+julia --project=. test/visualization/test_real_training_viz.jl
 ```
 
 ### Building for Production
 ```bash
 # Frontend build
+cd src/utils/visualization/web
 npm run build
-
-# Serve with Julia
-julia --project=. serve_production.jl
 ```
 
 ## Future Enhancements

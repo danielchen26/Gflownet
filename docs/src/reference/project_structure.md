@@ -175,8 +175,7 @@ src/utils/
 │   │   ├── public/
 │   │   └── package.json
 │   └── api/            # Julia REST API backend
-│       ├── simple_server.jl      # Mock server
-│       └── gflownet_server.jl    # Real integration
+│       └── unified_server.jl     # Real GFlowNet training server
 └── logging/            # Training logging utilities
 ```
 
