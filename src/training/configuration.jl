@@ -117,9 +117,17 @@ min_θ 𝔼[L(θ, τ)] where L is the chosen objective and τ are trajectories.
 - `parameter_regularization::Float64`: L2 regularization on parameters
 - `gradient_clip_norm::Float64`: Maximum gradient norm for stability
 
-# Advanced Parameters
+# Exploration Parameters (Critical for Mode Discovery!)
 - `temperature::Float64`: Temperature T in softmax: P ∝ exp(logits/T)
-- `exploration_noise::Float64`: Noise level for exploration during training
+- `epsilon::Float64`: ε-uniform exploration rate (default 0.05, standard GFlowNet practice)
+- `epsilon_decay::Bool`: Whether to linearly anneal epsilon to 0 over training
+
+# ε-Uniform Exploration (Standard Practice)
+During trajectory sampling:
+    P(a|s) = (1 - ε) × P_F(a|s) + ε × Uniform(valid_actions)
+
+This is essential for mode discovery in GFlowNet (Malkin et al. 2022, Shen et al. ICML 2023).
+Without it, TB training gets stuck in local minima and fails to discover all reward modes.
 
 # Training Control
 - `validation_frequency::Int`: Steps between validation evaluations
@@ -146,6 +154,8 @@ struct TrainingConfig
     # Temperature and exploration
     temperature::Float64
     exploration_noise::Float64
+    epsilon::Float64          # ε-uniform exploration rate (standard: 0.05)
+    epsilon_decay::Bool       # Whether to anneal epsilon to 0 over training
 
     # Monitoring and control
     validation_frequency::Int
@@ -169,6 +179,8 @@ struct TrainingConfig
         gradient_clip_norm::Float64=1.0,
         temperature::Float64=1.0,
         exploration_noise::Float64=0.0,
+        epsilon::Float64=0.05,
+        epsilon_decay::Bool=true,
         validation_frequency::Int=100,
         checkpoint_frequency::Int=500,
         early_stopping_patience::Int=200,
@@ -195,6 +207,9 @@ struct TrainingConfig
         if entropy_weight < 0 || parameter_regularization < 0
             throw(ArgumentError("regularization weights must be non-negative"))
         end
+        if !(0.0 <= epsilon <= 1.0)
+            throw(ArgumentError("epsilon must be in [0.0, 1.0]"))
+        end
         if validation_frequency <= 0 || checkpoint_frequency <= 0
             throw(ArgumentError("monitoring frequencies must be positive"))
         end
@@ -208,7 +223,7 @@ struct TrainingConfig
         new(objective, partition_function_method, optimization_method,
             n_iterations, batch_size, learning_rate,
             entropy_weight, parameter_regularization, gradient_clip_norm,
-            temperature, exploration_noise,
+            temperature, exploration_noise, epsilon, epsilon_decay,
             validation_frequency, checkpoint_frequency, early_stopping_patience, early_stopping_threshold,
             verbose, sub_trajectory_length)
     end
@@ -517,7 +532,7 @@ function Base.show(io::IO, opt_method::OptimizationMethod)
 end
 
 function Base.show(io::IO, config::TrainingConfig)
-    print(io, "TrainingConfig($(config.objective), lr=$(config.learning_rate), batch=$(config.batch_size), iter=$(config.n_iterations))")
+    print(io, "TrainingConfig($(config.objective), lr=$(config.learning_rate), batch=$(config.batch_size), iter=$(config.n_iterations), ε=$(config.epsilon))")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", config::TrainingConfig)
@@ -528,6 +543,7 @@ function Base.show(io::IO, ::MIME"text/plain", config::TrainingConfig)
     println(io, "  Batch size: $(config.batch_size)")
     println(io, "  Learning rate: $(config.learning_rate)")
     println(io, "  Temperature: $(config.temperature)")
+    println(io, "  Epsilon (ε-uniform): $(config.epsilon)$(config.epsilon_decay ? " (annealed)" : "")")
     if config.entropy_weight > 0
         println(io, "  Entropy weight: $(config.entropy_weight)")
     end

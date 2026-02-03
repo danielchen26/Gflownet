@@ -203,7 +203,15 @@ function sample_action_multi_start(model::MultiStartGFlowNetModel, state::Abstra
     max_logit = maximum(applicable_logits)
     exp_logits = exp.(applicable_logits .- max_logit)
     probs = exp_logits ./ sum(exp_logits)
-    
+
+    # ε-Uniform Exploration Mixing (Standard GFlowNet practice)
+    # P(a|s) = (1-ε) × P_F(a|s) + ε × Uniform(applicable_actions)
+    if config.epsilon > 0.0
+        n_actions = length(probs)
+        uniform_prob = 1.0 / n_actions
+        probs = (1.0 - config.epsilon) .* probs .+ config.epsilon * uniform_prob
+    end
+
     # Sample action
     if config.strategy == GREEDY_SAMPLING
         action_idx = argmax(probs)
@@ -215,7 +223,7 @@ function sample_action_multi_start(model::MultiStartGFlowNetModel, state::Abstra
             action_idx = length(probs)
         end
     end
-    
+
     return applicable_actions[action_idx]
 end
 

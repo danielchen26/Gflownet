@@ -87,6 +87,17 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - **Performance**: Memoization, frustum culling, incremental updates
    - **Bug Fixes**: Navigation issues, 3D alignment, proper Y-up coordinate system
 
+12. **ε-Uniform Exploration for Mode Discovery** ✅ (February 2025)
+   - **Problem Solved**: TB training mode collapse (ratio 80:1 instead of expected 1.25:1)
+   - **Solution**: Implemented standard ε-uniform exploration mixing from literature
+   - **Formula**: `P(a|s) = (1-ε) × P_F(a|s) + ε × Uniform(applicable_actions)`
+   - **Features**:
+     - Added `epsilon` field to `SamplingConfig` and `TrainingConfig`
+     - Linear epsilon decay (annealing) support
+     - Default ε=0.05 matching Malkin et al. (2022) and ICML 2023 papers
+   - **Verification**: Balanced grid achieves 5.6% error from theoretical ratio
+   - **Documentation**: See `docs/src/internals/implementation_notes/epsilon_exploration.md`
+
 ## Project Roadmap and Vision
 
 GFlowNet.jl has a comprehensive development roadmap focused on making it the premier production-ready implementation of Generative Flow Networks. See [docs/src/internals/development_guides/roadmap.md](docs/src/internals/development_guides/roadmap.md) for detailed development phases, timelines, and success metrics.

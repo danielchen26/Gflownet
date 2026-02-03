@@ -108,11 +108,13 @@ function create_session(config::Dict)::TrainingSession
     objective = parse_objective(get(config, "objective", "TRAJECTORY_BALANCE"))
 
     # FLOW_MATCHING requires flow_estimator — create model with it if needed
+    # Use temperature > 1 to encourage exploration and discover multiple modes
     training_config = TrainingConfig(
         objective       = objective,
         n_iterations    = get(config, "n_episodes", 500),
-        batch_size      = get(config, "batch_size", 8),
+        batch_size      = get(config, "batch_size", 16),
         learning_rate   = get(config, "learning_rate", 0.001),
+        temperature     = get(config, "temperature", 2.0),  # Higher temp for better exploration
         verbose         = false   # We handle logging ourselves
     )
 
@@ -125,7 +127,7 @@ function create_session(config::Dict)::TrainingSession
         false, false,                           # is_training, is_paused
         0, training_config.n_iterations,        # current_iteration, total_iterations
         Float64[], Float64[], Float64[],        # losses, gradient_norms, rewards
-        Trajectory[], 50,                       # trajectory_buffer, max_buffer_size
+        Trajectory[], 200,                      # trajectory_buffer, max_buffer_size (larger for better distribution)
         nothing, 0,                             # last_error, error_count
         nothing, Float64[]                      # start_time, iteration_times
     )
@@ -153,8 +155,23 @@ function step!(session::TrainingSession)::Dict
     t0 = time()
 
     try
-        # ---- Sample trajectories from the REAL learned policy ----
-        trajectories = [sample_trajectory(model) for _ in 1:config.batch_size]
+        # ---- Compute current epsilon with annealing ----
+        # Linearly anneal from config.epsilon to 0 over training
+        current_epsilon = if config.epsilon_decay
+            config.epsilon * (1.0 - session.current_iteration / session.total_iterations)
+        else
+            config.epsilon
+        end
+
+        # ---- Sample trajectories with ε-uniform exploration ----
+        # This is the CRITICAL exploration mechanism for mode discovery (Malkin et al. 2022)
+        sampling_config = GFlowNet.SamplingConfig(
+            strategy = config.temperature != 1.0 ? GFlowNet.TEMPERATURE_SAMPLING : GFlowNet.STOCHASTIC_SAMPLING,
+            temperature = config.temperature,
+            epsilon = current_epsilon,
+            max_trajectory_length = 100
+        )
+        trajectories = [sample_trajectory(model; config=sampling_config) for _ in 1:config.batch_size]
 
         # ---- Real gradient descent step ----
         # Actual signature: train_step!(model, trajectories, config) -> (loss, grad_norm)

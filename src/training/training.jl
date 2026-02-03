@@ -76,14 +76,33 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
         println("     - Iterations: $(config.n_iterations)")
         println("     - Batch size: $(config.batch_size)")
         println("     - Learning rate: $(config.learning_rate)")
+        println("     - Temperature: $(config.temperature)")
+        println("     - Epsilon (ε-uniform): $(config.epsilon)$(config.epsilon_decay ? " (annealed)" : "")")
     end
 
     for iteration in 1:config.n_iterations
         start_time = time()
 
         try
-            # Sample trajectories
-            trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:config.batch_size]
+            # Compute current epsilon (annealed if epsilon_decay is true)
+            # Anneal linearly from epsilon to 0 over training
+            current_epsilon = if config.epsilon_decay
+                config.epsilon * (1.0 - (iteration - 1) / config.n_iterations)
+            else
+                config.epsilon
+            end
+
+            # Create sampling config with ε-uniform exploration
+            # This is the CRITICAL exploration mechanism for mode discovery
+            sampling_config = GFlowNet.SamplingConfig(
+                strategy = config.temperature != 1.0 ? GFlowNet.TEMPERATURE_SAMPLING : GFlowNet.STOCHASTIC_SAMPLING,
+                temperature = config.temperature,
+                epsilon = current_epsilon,
+                max_trajectory_length = 100
+            )
+
+            # Sample trajectories with ε-uniform exploration
+            trajectories = [GFlowNet.sample_trajectory(model; config=sampling_config) for _ in 1:config.batch_size]
 
             # Compute loss and gradients using official Lux pattern
             loss_val, gradient_norm = train_step!(model, trajectories, config)

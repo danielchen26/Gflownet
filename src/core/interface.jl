@@ -369,6 +369,15 @@ function sample_action_from_policy(model::GFlowNetModel, state::AbstractState,
     exp_logits = exp.(applicable_logits .- max_logit)
     probs = exp_logits ./ sum(exp_logits)
 
+    # ε-Uniform Exploration Mixing (Standard GFlowNet practice)
+    # P(a|s) = (1-ε) × P_F(a|s) + ε × Uniform(applicable_actions)
+    # Reference: Malkin et al. (2022), Shen et al. (ICML 2023)
+    if config.epsilon > 0.0
+        n_actions = length(probs)
+        uniform_prob = 1.0 / n_actions
+        probs = (1.0 - config.epsilon) .* probs .+ config.epsilon * uniform_prob
+    end
+
     # Sample action based on strategy
     if config.strategy == GREEDY_SAMPLING
         action_idx = argmax(probs)

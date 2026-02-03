@@ -361,3 +361,56 @@ function logsumexp(x::AbstractVector)
     end
     return max_x + log(sum(exp.(x .- max_x)))
 end
+
+"""
+    compute_policy_entropy_loss(model, trajectories, params)
+
+Compute negative policy entropy loss for entropy regularization.
+
+The entropy loss encourages exploration by penalizing low-entropy (deterministic) policies.
+Returns negative entropy so that adding it to the loss increases exploration.
+
+Mathematical foundation:
+L_entropy = -H(π) = Σ_s Σ_a P_F(a|s) log P_F(a|s)
+"""
+function compute_policy_entropy_loss(model::GFlowNetModel, trajectories::Vector{Trajectory}, params)
+    total_entropy = 0.0
+    n_states = 0
+
+    for traj in trajectories
+        for i in 1:(length(traj.states) - 1)  # Skip terminal states
+            state = traj.states[i]
+
+            # Skip if terminal (no applicable actions)
+            if is_terminal_state(state)
+                continue
+            end
+
+            # Get applicable actions
+            applicable_actions = Zygote.@ignore get_applicable_actions(state, model.all_actions)
+            if isempty(applicable_actions)
+                continue
+            end
+
+            # Get action probabilities
+            probs = forward_action_probabilities(
+                model.forward_policy, state, model.all_actions,
+                params.forward, model.states.forward
+            )
+
+            # Compute entropy: -Σ p log(p+ε)
+            entropy = 0.0
+            for p in probs
+                if p > 1e-10
+                    entropy -= p * log(p)
+                end
+            end
+
+            total_entropy += entropy
+            n_states += 1
+        end
+    end
+
+    # Return negative average entropy (minimize this to maximize entropy)
+    return n_states > 0 ? -(total_entropy / n_states) : 0.0
+end
