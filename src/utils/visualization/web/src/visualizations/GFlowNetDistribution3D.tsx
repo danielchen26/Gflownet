@@ -371,66 +371,68 @@ function TrajectoryPaths({ trajectories, gridSize }: { trajectories: TrajectoryD
 }
 
 // =============================================================================
-// REWARD PEAK MARKER - Diamond crystal with glow (replaces cylinder)
+// REWARD PEAK MARKER - Arrow pointing down (location pin style)
 // =============================================================================
 function RewardPeakMarker({ peak, gridSize }: { peak: RewardPeak, gridSize: number }) {
   const worldX = stateToWorld(peak.position[0], gridSize)
   const worldZ = stateToWorld(peak.position[1], gridSize)
 
-  // Create diamond geometry (octahedron)
-  const diamondGeometry = useMemo(() => {
-    const geo = new THREE.OctahedronGeometry(0.35, 0)
-    return geo
-  }, [])
-
   return (
     <group position={[worldX, 0, worldZ]}>
-      {/* Ground ring indicator */}
+      {/* Ground ring indicator - target circle */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.4, 0.55, 32]} />
+        <ringGeometry args={[0.3, 0.45, 32]} />
         <meshBasicMaterial
           color="#00ff88"
           transparent
-          opacity={0.6}
+          opacity={0.7}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      {/* Inner glow circle */}
-      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[0.4, 32]} />
+      {/* Inner target dot */}
+      <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.15, 16]} />
         <meshBasicMaterial
           color="#00ff88"
           transparent
-          opacity={0.15}
-          side={THREE.DoubleSide}
+          opacity={0.9}
         />
       </mesh>
 
-      {/* Diamond marker */}
-      <mesh position={[0, 0.6, 0]} geometry={diamondGeometry}>
+      {/* Arrow stem (thin cylinder going up) */}
+      <mesh position={[0, 0.7, 0]}>
+        <cylinderGeometry args={[0.04, 0.04, 0.8, 8]} />
+        <meshStandardMaterial
+          color="#00ff88"
+          emissive="#00ff88"
+          emissiveIntensity={0.3}
+        />
+      </mesh>
+
+      {/* Arrow head (cone pointing DOWN) */}
+      <mesh position={[0, 0.25, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.2, 0.5, 16]} />
         <meshStandardMaterial
           color="#00ff88"
           emissive="#00ff88"
           emissiveIntensity={0.5}
-          transparent
-          opacity={0.9}
-          metalness={0.3}
-          roughness={0.2}
+          metalness={0.2}
+          roughness={0.3}
         />
       </mesh>
 
       {/* Point light for glow effect */}
       <pointLight
-        position={[0, 0.6, 0]}
+        position={[0, 0.5, 0]}
         color="#00ff88"
-        intensity={peak.intensity / 8}
-        distance={4}
+        intensity={peak.intensity / 10}
+        distance={3}
         decay={2}
       />
 
       {/* Label */}
-      <Html position={[0, 1.2, 0]} distanceFactor={10}>
+      <Html position={[0, 1.4, 0]} distanceFactor={10}>
         <div className="text-xs bg-dark-bg/95 px-2.5 py-1.5 rounded-md whitespace-nowrap pointer-events-none border border-emerald-500/50 shadow-lg shadow-emerald-500/20">
           <div className="text-emerald-400 font-semibold flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />

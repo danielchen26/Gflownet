@@ -324,15 +324,11 @@ function StateVisitation({ stats, gridSize }: { stats: StateStats; gridSize: num
 }
 
 // =============================================================================
-// REWARD PEAK MARKER - Diamond crystal with glow (consistent with Distribution3D)
+// REWARD PEAK MARKER - Downward-pointing arrow (location pin style)
 // =============================================================================
 function RewardPeakMarker({ peak, gridSize }: { peak: FlowFieldData['reward_peaks'][0], gridSize: number }) {
   const worldX = stateToWorld(peak.position[0], gridSize)
   const worldZ = stateToWorld(peak.position[1], gridSize)
-
-  const diamondGeometry = useMemo(() => {
-    return new THREE.OctahedronGeometry(0.35, 0)
-  }, [])
 
   return (
     <group position={[worldX, 0, worldZ]}>
@@ -358,8 +354,23 @@ function RewardPeakMarker({ peak, gridSize }: { peak: FlowFieldData['reward_peak
         />
       </mesh>
 
-      {/* Diamond marker */}
-      <mesh position={[0, 0.6, 0]} geometry={diamondGeometry}>
+      {/* Arrow stem (thin cylinder going up) */}
+      <mesh position={[0, 0.7, 0]}>
+        <cylinderGeometry args={[0.04, 0.04, 0.8, 8]} />
+        <meshStandardMaterial
+          color="#00ff88"
+          emissive="#00ff88"
+          emissiveIntensity={0.5}
+          transparent
+          opacity={0.9}
+          metalness={0.3}
+          roughness={0.2}
+        />
+      </mesh>
+
+      {/* Arrow head (cone pointing DOWN toward the target) */}
+      <mesh position={[0, 0.25, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.2, 0.5, 16]} />
         <meshStandardMaterial
           color="#00ff88"
           emissive="#00ff88"
@@ -381,7 +392,7 @@ function RewardPeakMarker({ peak, gridSize }: { peak: FlowFieldData['reward_peak
       />
 
       {/* Label */}
-      <Html position={[0, 1.2, 0]} distanceFactor={10}>
+      <Html position={[0, 1.3, 0]} distanceFactor={10}>
         <div className="text-xs bg-dark-bg/95 px-2.5 py-1.5 rounded-md whitespace-nowrap pointer-events-none border border-emerald-500/50 shadow-lg shadow-emerald-500/20">
           <div className="text-emerald-400 font-semibold flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
