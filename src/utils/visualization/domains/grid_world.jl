@@ -223,13 +223,40 @@ function compute_distribution_data(adapter::GridWorldAdapter, model::GFlowNetMod
     target_sum = sum(target)
     target = target_sum > 0 ? target ./ target_sum : target
 
+    # Build terminal_distribution as dictionary with string keys "x,y" => count
+    # This is the format expected by the frontend for the Endpoint Distribution panel
+    terminal_distribution = Dict{String, Int}()
+    for x in 1:grid_size, y in 1:grid_size
+        if counts[x, y] > 0
+            terminal_distribution["$x,$y"] = counts[x, y]
+        end
+    end
+
+    # Count unique endpoints
+    unique_endpoints = sum(counts .> 0)
+
+    # Build reward_peaks array in the format expected by frontend
+    reward_peaks = [
+        Dict(
+            "position"  => [x, y],
+            "intensity" => r,
+            "name"      => "Peak $(Char('A' + i - 1))"
+        )
+        for (i, ((x, y), r)) in enumerate(adapter.reward_positions)
+    ]
+
     return Dict(
-        "supported"     => true,
-        "grid_size"     => grid_size,
-        "empirical"     => probs,
-        "target"        => target,
-        "counts"        => counts,
-        "total_samples" => total
+        "supported"            => true,
+        "grid_size"            => grid_size,
+        "empirical"            => probs,
+        "target"               => target,
+        "counts"               => counts,
+        "total_samples"        => total,
+        # Additional fields for frontend Endpoint Distribution panel
+        "terminal_distribution"=> terminal_distribution,
+        "total_trajectories"   => total,
+        "unique_endpoints"     => unique_endpoints,
+        "reward_peaks"         => reward_peaks
     )
 end
 
