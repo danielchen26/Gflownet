@@ -240,6 +240,10 @@ trajectories_learnable = [sample_trajectory(model_learnable) for _ in 1:n_sample
 rewards_simple = [GFlowNet.reward(traj.states[end]) for traj in trajectories_simple]
 rewards_learnable = [GFlowNet.reward(traj.states[end]) for traj in trajectories_learnable]
 
+# Pre-calculate max reward percentages (avoiding arrow functions in string interpolation)
+max_reward_simple_pct = count(r -> r == 20.0, rewards_simple)
+max_reward_learnable_pct = count(r -> r == 20.0, rewards_learnable)
+
 # Monte Carlo estimate of true Z
 mc_estimate_simple = mean(rewards_simple)
 mc_estimate_learnable = mean(rewards_learnable)
@@ -247,11 +251,11 @@ mc_estimate_learnable = mean(rewards_learnable)
 println("\n📈 Performance Comparison:")
 println("  SIMPLE_ESTIMATION:")
 println("    Mean reward: $(round(mean(rewards_simple), digits=2))")
-println("    Max reward reached: $(count(r -> r == 20.0, rewards_simple))%")
+println("    Max reward reached: $max_reward_simple_pct%")
 println("    MC estimate of Z: $(round(mc_estimate_simple, digits=2))")
 println("  LEARNABLE_ESTIMATION:")
 println("    Mean reward: $(round(mean(rewards_learnable), digits=2))")
-println("    Max reward reached: $(count(r -> r == 20.0, rewards_learnable))%")
+println("    Max reward reached: $max_reward_learnable_pct%")
 println("    Learned Z: $(round(exp(model_learnable.parameters.log_Z), digits=2))")
 println("    MC estimate of Z: $(round(mc_estimate_learnable, digits=2))")
 
@@ -367,10 +371,9 @@ for (name, init_log_z) in init_values
         partition_function_method=LEARNABLE_ESTIMATION
     )
     
-    # Set initial value
+    # Set initial value - only include components that exist
     model.parameters = GFlowNet.ComponentArrays.ComponentArray(
         forward=model.parameters.forward,
-        flow=model.parameters.flow,
         log_Z=init_log_z
     )
     model.log_partition_function = init_log_z
@@ -421,10 +424,9 @@ test_model = create_grid_world_gflownet(
     partition_function_method=LEARNABLE_ESTIMATION
 )
 
-# Set to converged value
+# Set to converged value - only include components that exist
 test_model.parameters = GFlowNet.ComponentArrays.ComponentArray(
     forward=test_model.parameters.forward,
-    flow=test_model.parameters.flow,
     log_Z=log(40.0)  # Theoretical value
 )
 
@@ -493,8 +495,8 @@ hline!(p4, [theoretical_z], label="True Z", ls=:dash, color=:black, lw=2)
 # Plot 5: Performance metrics
 p5 = begin
     categories = ["Mean Reward", "Max Reward %", "Z Accuracy"]
-    simple_vals = [mean(rewards_simple), count(r -> r == 20.0, rewards_simple), 50]
-    learnable_vals = [mean(rewards_learnable), count(r -> r == 20.0, rewards_learnable), 95]
+    simple_vals = [mean(rewards_simple), max_reward_simple_pct, 50]
+    learnable_vals = [mean(rewards_learnable), max_reward_learnable_pct, 95]
     
     bar([simple_vals learnable_vals], 
         label=["SIMPLE" "LEARNABLE"],
@@ -575,8 +577,8 @@ push!(html_parts, """
         
         <div class="key-finding">
             <h3>🎯 Executive Summary</h3>
-            <p>LEARNABLE_ESTIMATION successfully learns the partition function Z with <span class="success"><0.1% error</span> under ideal conditions, 
-            achieving <span class="success">$(count(r -> r == 20.0, rewards_learnable))% vs $(count(r -> r == 20.0, rewards_simple))%</span> max reward attainment 
+            <p>LEARNABLE_ESTIMATION successfully learns the partition function Z with <span class="success">&lt;0.1% error</span> under ideal conditions, 
+            achieving <span class="success">$max_reward_learnable_pct% vs $max_reward_simple_pct%</span> max reward attainment 
             compared to SIMPLE_ESTIMATION.</p>
         </div>
         
@@ -593,11 +595,11 @@ push!(html_parts, """
                     <div class="metric-label">LEARNABLE Mean Reward</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">$(count(r -> r == 20.0, rewards_simple))%</div>
+                    <div class="metric-value">$max_reward_simple_pct%</div>
                     <div class="metric-label">SIMPLE Max Reward Rate</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">$(count(r -> r == 20.0, rewards_learnable))%</div>
+                    <div class="metric-value">$max_reward_learnable_pct%</div>
                     <div class="metric-label">LEARNABLE Max Reward Rate</div>
                 </div>
             </div>
@@ -613,14 +615,14 @@ push!(html_parts, """
                 <tr>
                     <td>SIMPLE_ESTIMATION</td>
                     <td>$(round(mean(rewards_simple), digits=2))</td>
-                    <td>$(count(r -> r == 20.0, rewards_simple))%</td>
+                    <td>$max_reward_simple_pct%</td>
                     <td>1.0 (fixed)</td>
                     <td>$(round(mc_estimate_simple, digits=2))</td>
                 </tr>
                 <tr style="background-color: #e8f5e9;">
                     <td><strong>LEARNABLE_ESTIMATION</strong></td>
                     <td><strong>$(round(mean(rewards_learnable), digits=2))</strong></td>
-                    <td><strong>$(count(r -> r == 20.0, rewards_learnable))%</strong></td>
+                    <td><strong>$max_reward_learnable_pct%</strong></td>
                     <td><strong>$(round(exp(model_learnable.parameters.log_Z), digits=2))</strong></td>
                     <td><strong>$(round(mc_estimate_learnable, digits=2))</strong></td>
                 </tr>
@@ -650,7 +652,7 @@ push!(html_parts, """
                     <th>Convergence</th>
                     <th>Status</th>
                 </tr>
-"""
+""")
 
 for r_val in sort(collect(keys(perfect_results)))
     result = perfect_results[r_val]
@@ -702,7 +704,7 @@ push!(html_parts, """
                     <th>Iterations</th>
                     <th>Final Error (%)</th>
                 </tr>
-"""
+""")
 
 for (name, monitor) in init_results
     summary = get_summary(monitor)
@@ -785,7 +787,7 @@ push!(html_parts, """
                 <h3>💡 Main Findings</h3>
                 <ol>
                     <li><span class="highlight">20% performance improvement</span> in complex environments</li>
-                    <li><span class="highlight"><0.1% error achievable</span> with optimal settings</li>
+                    <li><span class="highlight">&lt;0.1% error achievable</span> with optimal settings</li>
                     <li><span class="highlight">Robust convergence</span> from various initializations</li>
                     <li><span class="highlight">Scales well</span> across different reward magnitudes</li>
                     <li><span class="highlight">Mathematically verified</span> trajectory balance satisfaction</li>
@@ -825,9 +827,9 @@ println("✓ Saved detailed HTML report")
 # Summary
 # =============================================================================
 
-println("\n\n" * "=" * 60)
+println("\n\n" * "=" ^ 60)
 println("✅ COMPREHENSIVE DEMONSTRATION COMPLETE!")
-println("=" * 60)
+println("=" ^ 60)
 
 # Calculate demo runtime
 demo_time = round(time() - demo_start_time, digits=1)
