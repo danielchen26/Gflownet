@@ -5,7 +5,7 @@ using Zygote
 using Statistics
 
 using ..GFlowNet: GFlowNetModel, Trajectory, TrainingConfig, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
 using ..GFlowNet: AbstractState, AbstractAction
 using ..GFlowNet: state_to_features, is_terminal_state, reward, is_applicable, apply_action
 using ..GFlowNet: get_applicable_actions, is_valid_trajectory
@@ -49,8 +49,17 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
             return Inf
         end
 
-        return mean(finite_losses)
-        
+        base_loss = mean(finite_losses)
+
+        # Add entropy regularization if configured (AISTATS 2024: GFlowNets as Entropy-Regularized RL)
+        # This encourages exploration and prevents mode collapse
+        if config.entropy_weight > 0.0
+            entropy_loss = compute_policy_entropy_loss(model, valid_trajectories, params)
+            return base_loss + config.entropy_weight * entropy_loss
+        end
+
+        return base_loss
+
     elseif config.objective == DETAILED_BALANCE
         # For detailed balance, we need pairs of states
         # Extract state pairs from trajectories (done outside gradient computation)
@@ -154,13 +163,24 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         
         # Filter out infinite losses
         finite_losses = filter(!isinf, losses)
-        
+
         if isempty(finite_losses)
             return Inf
         end
-        
-        return mean(finite_losses)
-        
+
+        base_loss = mean(finite_losses)
+
+        # Add entropy regularization if configured
+        if config.entropy_weight > 0.0
+            valid_trajs = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
+            if !isempty(valid_trajs)
+                entropy_loss = compute_policy_entropy_loss(model, valid_trajs, params)
+                return base_loss + config.entropy_weight * entropy_loss
+            end
+        end
+
+        return base_loss
+
     elseif config.objective == FLOW_MATCHING
         # For flow matching, we need non-terminal states from trajectories
         # Extract all non-terminal states
@@ -229,13 +249,24 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         
         # Filter out infinite losses
         finite_losses = filter(!isinf, losses)
-        
+
         if isempty(finite_losses)
             return Inf
         end
-        
-        return mean(finite_losses)
-        
+
+        base_loss = mean(finite_losses)
+
+        # Add entropy regularization if configured
+        if config.entropy_weight > 0.0
+            valid_trajs = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
+            if !isempty(valid_trajs)
+                entropy_loss = compute_policy_entropy_loss(model, valid_trajs, params)
+                return base_loss + config.entropy_weight * entropy_loss
+            end
+        end
+
+        return base_loss
+
     elseif config.objective == SUB_TRAJECTORY_BALANCE
         # Validate that flow estimator exists (REQUIRED for SubTB)
         if isnothing(model.flow_estimator)
@@ -254,14 +285,60 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
     elseif config.objective == DIRECT_FLOW_OBJECTIVE
         # Filter valid trajectories
         valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
-        
+
         if isempty(valid_trajectories)
             return 0.0
         end
-        
+
         # Compute direct flow loss
         return direct_flow_loss_batch(model, valid_trajectories)
-        
+
+    elseif config.objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
+        # TLM (ICLR 2025): Optimizing Backward Policies in GFlowNets via Trajectory Likelihood Maximization
+        #
+        # Key insight: Max-entropy backward policy is P_B(s|s') ∝ n(s)/n(s') where n(s) = #paths to s
+        # Training backward policy via -log P_B(s|s') implicitly encodes path counts
+        # This directly solves the extreme path asymmetry problem (e.g., 70:1)
+        #
+        # Loss: L_TLM = L_forward + λ * L_backward
+        # where L_forward is standard TB loss and L_backward = -Σ log P_B(s_{i-1}|s_i)
+
+        # Filter valid trajectories
+        valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
+
+        if isempty(valid_trajectories)
+            return 0.0
+        end
+
+        # Compute forward loss (standard TB loss)
+        forward_losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
+        finite_forward = filter(!isinf, forward_losses)
+        forward_loss = isempty(finite_forward) ? Inf : mean(finite_forward)
+
+        # Compute backward likelihood loss if backward policy exists
+        backward_loss = if !isnothing(model.backward_policy) && haskey(params, :backward)
+            compute_tlm_backward_loss(model, valid_trajectories, params)
+        else
+            0.0
+        end
+
+        # Combine losses with TLM backward weight
+        total_loss = forward_loss + config.tlm_backward_weight * backward_loss
+
+        # Add entropy regularization if configured (for forward policy)
+        if config.entropy_weight > 0.0
+            entropy_loss = compute_policy_entropy_loss(model, valid_trajectories, params)
+            total_loss += config.entropy_weight * entropy_loss
+        end
+
+        # Add backward policy entropy if configured (encourages uniform backward exploration)
+        if config.tlm_entropy_coeff > 0.0 && !isnothing(model.backward_policy)
+            backward_entropy_loss = compute_backward_policy_entropy_loss(model, valid_trajectories, params)
+            total_loss += config.tlm_entropy_coeff * backward_entropy_loss
+        end
+
+        return total_loss
+
     else
         throw(ArgumentError("Unsupported training objective: $(config.objective)"))
     end
@@ -420,5 +497,239 @@ function compute_policy_entropy_loss(model::GFlowNetModel, trajectories::Vector{
     end
 
     # Return negative average entropy (minimize this to maximize entropy)
+    return n_states > 0 ? -(total_entropy / n_states) : 0.0
+end
+
+# =============================================================================
+# Importance-Weighted Loss for Off-Policy Learning (Phase 4)
+# =============================================================================
+
+"""
+    compute_weighted_trajectory_loss(model, trajectories, weights, params, config)
+
+Compute importance-weighted trajectory loss for off-policy learning.
+
+This is essential when using experience replay, as trajectories from
+the replay buffer were sampled under a different (older) policy.
+
+Mathematical Foundation (JMLR 2023: GFlowNet Foundations):
+    L_weighted = (1/Σw) × Σᵢ wᵢ × L(τᵢ)
+
+where wᵢ are importance sampling weights that correct for the
+distribution mismatch between behavior policy and current policy.
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model
+- `trajectories::Vector{Trajectory}`: Trajectories to compute loss for
+- `weights::Vector{Float64}`: Importance weights for each trajectory
+- `params`: Current model parameters
+- `config::TrainingConfig`: Training configuration
+
+# Returns
+Weighted loss value (Float64)
+"""
+function compute_weighted_trajectory_loss(model::GFlowNetModel,
+                                         trajectories::Vector{Trajectory},
+                                         weights::Vector{Float64},
+                                         params, config::TrainingConfig)
+    if isempty(trajectories)
+        return 0.0
+    end
+
+    # Ensure weights match trajectories
+    if length(weights) != length(trajectories)
+        throw(ArgumentError("weights length ($(length(weights))) must match trajectories length ($(length(trajectories)))"))
+    end
+
+    # Filter valid trajectories with their weights
+    valid_data = Zygote.@ignore begin
+        [(traj, w) for (traj, w) in zip(trajectories, weights) if is_valid_trajectory(traj)]
+    end
+
+    if isempty(valid_data)
+        return 0.0
+    end
+
+    valid_trajectories = [d[1] for d in valid_data]
+    valid_weights = [d[2] for d in valid_data]
+
+    # Compute individual losses (same as compute_trajectory_loss but for TB only currently)
+    if config.objective == TRAJECTORY_BALANCE
+        losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
+
+        # Apply importance weights
+        weighted_losses = losses .* valid_weights
+
+        # Filter out infinite losses
+        finite_mask = .!isinf.(weighted_losses)
+        if !any(finite_mask)
+            return Inf
+        end
+
+        # Normalize by sum of weights for valid samples
+        base_loss = sum(weighted_losses[finite_mask]) / sum(valid_weights[finite_mask])
+
+        # Add entropy regularization if configured
+        if config.entropy_weight > 0.0
+            entropy_loss = compute_policy_entropy_loss(model, valid_trajectories, params)
+            return base_loss + config.entropy_weight * entropy_loss
+        end
+
+        return base_loss
+    else
+        # For other objectives, fall back to unweighted loss for now
+        # (Full weighted support can be added as needed)
+        return compute_trajectory_loss(model, trajectories, params, config)
+    end
+end
+
+# =============================================================================
+# TLM (Trajectory Likelihood Maximization) Loss Functions - ICLR 2025
+# =============================================================================
+
+"""
+    compute_tlm_backward_loss(model, trajectories, params)
+
+Compute the backward likelihood loss for TLM training.
+
+# Mathematical Foundation (ICLR 2025)
+The TLM backward loss maximizes the likelihood of backward transitions:
+    L_backward = -(1/N) Σ_{τ} Σ_{i=1}^{T-1} log P_B(s_{i-1}|s_i)
+
+This trains the backward policy to learn the path count structure:
+- States with many paths leading to them get higher backward probability
+- Max-entropy backward policy: P_B(s|s') = n(s)/n(s') where n(s) = #paths
+- This implicitly compensates for path asymmetry
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model with backward policy
+- `trajectories::Vector{Trajectory}`: Trajectories to compute loss for
+- `params`: Model parameters including backward policy params
+
+# Returns
+Average negative log-likelihood of backward transitions (lower is better convergence)
+"""
+function compute_tlm_backward_loss(model::GFlowNetModel, trajectories::Vector{Trajectory}, params)
+    total_log_prob = 0.0
+    n_transitions = 0
+
+    for traj in trajectories
+        # Iterate through trajectory transitions
+        for i in 2:length(traj.states)
+            source_state = traj.states[i-1]  # s_{i-1}
+            target_state = traj.states[i]     # s_i
+
+            # Skip if target is terminal (no backward transition from terminal)
+            if Zygote.@ignore is_terminal_state(source_state)
+                continue
+            end
+
+            # Compute P_B(s_{i-1}|s_i) - probability of going backward from s_i to s_{i-1}
+            backward_prob = compute_backward_probability(
+                model.backward_policy, target_state, source_state,
+                params.backward, model.states.backward,
+                model.all_actions
+            )
+
+            # Clamp to avoid log(0)
+            safe_prob = max(backward_prob, 1e-8)
+            total_log_prob += log(safe_prob)
+            n_transitions += 1
+        end
+    end
+
+    if n_transitions == 0
+        return 0.0
+    end
+
+    # Return negative average log-likelihood (minimize this to maximize likelihood)
+    return -total_log_prob / n_transitions
+end
+
+"""
+    compute_backward_policy_entropy_loss(model, trajectories, params)
+
+Compute negative entropy loss for the backward policy.
+
+# Mathematical Foundation
+Encourages the backward policy to be exploratory:
+    L_backward_entropy = -H(P_B) = Σ_s' Σ_s P_B(s|s') log P_B(s|s')
+
+A higher entropy backward policy helps discover diverse backward paths,
+which is important for learning the correct path count structure.
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model with backward policy
+- `trajectories::Vector{Trajectory}`: Trajectories to compute entropy over
+- `params`: Model parameters
+
+# Returns
+Negative average backward policy entropy (minimize to maximize entropy)
+"""
+function compute_backward_policy_entropy_loss(model::GFlowNetModel, trajectories::Vector{Trajectory}, params)
+    total_entropy = 0.0
+    n_states = 0
+
+    for traj in trajectories
+        # Consider each non-initial state as a potential backward source
+        for i in 2:length(traj.states)
+            target_state = traj.states[i]
+
+            # Skip terminal states
+            if Zygote.@ignore is_terminal_state(target_state)
+                continue
+            end
+
+            # Get potential parent states (states that could transition to target)
+            parent_states = Zygote.@ignore begin
+                parents = eltype(traj.states)[]
+                for state in traj.states[1:i-1]
+                    if !is_terminal_state(state)
+                        applicable = get_applicable_actions(state, model.all_actions)
+                        for action in applicable
+                            if apply_action(action, state) == target_state
+                                push!(parents, state)
+                                break
+                            end
+                        end
+                    end
+                end
+                unique(parents)
+            end
+
+            if isempty(parent_states)
+                continue
+            end
+
+            # Compute backward probabilities for all parents
+            probs = [
+                compute_backward_probability(
+                    model.backward_policy, target_state, parent,
+                    params.backward, model.states.backward,
+                    model.all_actions
+                )
+                for parent in parent_states
+            ]
+
+            # Normalize probabilities
+            prob_sum = sum(probs)
+            if prob_sum > 1e-8
+                normalized_probs = probs ./ prob_sum
+
+                # Compute entropy: -Σ p log(p+ε)
+                entropy = 0.0
+                for p in normalized_probs
+                    if p > 1e-10
+                        entropy -= p * log(p)
+                    end
+                end
+
+                total_entropy += entropy
+                n_states += 1
+            end
+        end
+    end
+
+    # Return negative average entropy (minimize to maximize entropy)
     return n_states > 0 ? -(total_entropy / n_states) : 0.0
 end

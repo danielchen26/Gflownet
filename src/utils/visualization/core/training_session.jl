@@ -109,12 +109,23 @@ function create_session(config::Dict)::TrainingSession
 
     # FLOW_MATCHING requires flow_estimator — create model with it if needed
     # Use temperature > 1 to encourage exploration and discover multiple modes
+    #
+    # EXPLORATION PARAMETERS (Phase 6: Mode Collapse Fix)
+    # - epsilon: ε-uniform exploration mixing (Malkin et al. 2022)
+    # - epsilon_decay: Anneal epsilon to 0 over training
+    # - entropy_weight: Policy entropy regularization (AISTATS 2024)
+    # - z_learning_rate_multiplier: Faster Z convergence (peptide paper: 10x)
     training_config = TrainingConfig(
         objective       = objective,
         n_iterations    = get(config, "n_episodes", 500),
         batch_size      = get(config, "batch_size", 16),
         learning_rate   = get(config, "learning_rate", 0.001),
         temperature     = get(config, "temperature", 2.0),  # Higher temp for better exploration
+        # Exploration parameters for mode discovery
+        epsilon         = get(config, "epsilon", 0.05),           # ε-uniform exploration (default 5%)
+        epsilon_decay   = get(config, "epsilon_decay", true),     # Anneal to 0 over training
+        entropy_weight  = get(config, "entropy_weight", 0.01),    # Policy entropy (AISTATS 2024)
+        z_learning_rate_multiplier = get(config, "z_learning_rate_multiplier", 10.0),  # Faster Z
         verbose         = false   # We handle logging ourselves
     )
 

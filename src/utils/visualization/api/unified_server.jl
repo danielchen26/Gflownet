@@ -242,6 +242,14 @@ end
     universal_metrics = isempty(recent) ? Dict() : compute_gflownet_metrics(session.model, recent)
     domain_metrics    = isempty(recent) ? Dict() : compute_domain_metrics(session.adapter, session.model, recent)
 
+    # Compute current epsilon (annealed if epsilon_decay is true)
+    # This shows users the current exploration level in real-time
+    current_epsilon = if session.config.epsilon_decay
+        session.config.epsilon * (1.0 - session.current_iteration / max(session.total_iterations, 1))
+    else
+        session.config.epsilon
+    end
+
     return json(Dict(
         "has_session"          => true,
         "is_training"          => session.is_training,
@@ -254,6 +262,11 @@ end
         "latest_loss"          => isempty(session.losses) ? nothing : session.losses[end],
         "latest_reward"        => isempty(session.rewards) ? nothing : session.rewards[end],
         "latest_gradient_norm" => isempty(session.gradient_norms) ? nothing : session.gradient_norms[end],
+        # Exploration parameters (Phase 6: Mode Collapse Fix)
+        "current_epsilon"      => current_epsilon,      # Current ε after annealing
+        "entropy_weight"       => session.config.entropy_weight,  # Policy entropy weight
+        "epsilon_decay"        => session.config.epsilon_decay,   # Whether annealing is enabled
+        "z_learning_rate_multiplier" => session.config.z_learning_rate_multiplier,  # Z learning rate
         # Computed metrics
         "metrics"              => universal_metrics,
         "domain_metrics"       => domain_metrics,

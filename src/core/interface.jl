@@ -414,8 +414,205 @@ function is_applicable end
 function apply_action end
 
 # =============================================================================
+# Backward Trajectory Sampling - TLM Support (ICLR 2025)
+# =============================================================================
+
+"""
+    sample_backward_trajectory(model::GFlowNetModel, terminal_state::AbstractState;
+                               config::SamplingConfig = SamplingConfig())
+
+Sample a trajectory backwards from a terminal state to the initial state using the backward policy.
+
+# Mathematical Foundation (TLM - ICLR 2025)
+The backward policy P_B(s|s') is trained to implicitly encode path counts:
+    P_B(s|s') ≈ n(s) / n(s')
+where n(s) = number of paths from initial state to s.
+
+By sampling backwards from terminal states (which are sampled ∝ R), we:
+1. Bypass the 70:1 forward path asymmetry
+2. Generate diverse trajectories that would be rarely sampled forward
+3. Use these for training to improve mode coverage
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model (must have backward_policy)
+- `terminal_state::AbstractState`: Terminal state to sample backward from
+- `config::SamplingConfig`: Sampling configuration
+
+# Returns
+`Trajectory` with states/actions from initial to terminal (forward direction)
+"""
+function sample_backward_trajectory(model::GFlowNetModel, terminal_state::AbstractState;
+                                    config = SamplingConfig())
+
+    if isnothing(model.backward_policy)
+        throw(ArgumentError("Backward trajectory sampling requires backward_policy. Use include_backward=true in create_gflownet"))
+    end
+
+    # Build trajectory in reverse (from terminal to initial)
+    backward_states = [terminal_state]
+    backward_actions = AbstractAction[]
+
+    current_state = terminal_state
+    steps = 0
+    max_steps = config.max_trajectory_length
+
+    while current_state != model.initial_state && steps < max_steps
+        steps += 1
+
+        # Find all parent states that can transition to current_state
+        parent_candidates = find_parent_states(model, current_state)
+
+        if isempty(parent_candidates)
+            # Cannot find parents - may be at initial state or disconnected
+            break
+        end
+
+        # Sample parent state using backward policy
+        parent_state, action = sample_parent_from_backward_policy(
+            model, current_state, parent_candidates; config=config
+        )
+
+        # Add to backward trajectory
+        pushfirst!(backward_states, parent_state)
+        pushfirst!(backward_actions, action)
+
+        current_state = parent_state
+    end
+
+    # The trajectory is now in forward direction (initial → terminal)
+    return Trajectory(backward_states, backward_actions)
+end
+
+"""
+    find_parent_states(model::GFlowNetModel, target_state::AbstractState)
+
+Find all states that can transition to target_state.
+
+Returns vector of (parent_state, action) tuples.
+"""
+function find_parent_states(model::GFlowNetModel, target_state::AbstractState)
+    # This is a simple implementation that works for grid worlds
+    # For more complex domains, this would need domain-specific implementation
+
+    parents = Tuple{AbstractState, AbstractAction}[]
+
+    # Try each action from potential parent states
+    # For grid world: parent is one step behind in the direction of the action
+    for action in model.all_actions
+        # Try to find a parent state where applying action gives target
+        parent = find_parent_for_action(target_state, action)
+        if !isnothing(parent)
+            # Verify the transition is valid
+            if is_applicable(action, parent) && apply_action(action, parent) == target_state
+                push!(parents, (parent, action))
+            end
+        end
+    end
+
+    return parents
+end
+
+"""
+    find_parent_for_action(target_state, action)
+
+For a given target state and action, find the parent state that would produce target via action.
+Domain-specific implementation.
+"""
+function find_parent_for_action(target_state::AbstractState, action::AbstractAction)
+    # Default implementation - requires domain override
+    # For grid world, this is handled by specialized methods
+    return nothing
+end
+
+"""
+    sample_parent_from_backward_policy(model, target_state, parent_candidates; config)
+
+Sample a parent state using the backward policy P_B(parent|target).
+"""
+function sample_parent_from_backward_policy(model::GFlowNetModel, target_state::AbstractState,
+                                            parent_candidates::Vector{<:Tuple}; config = SamplingConfig())
+
+    if isempty(parent_candidates)
+        error("No parent candidates for backward sampling")
+    end
+
+    if length(parent_candidates) == 1
+        return parent_candidates[1]
+    end
+
+    # Compute backward probabilities for each parent
+    probs = Float64[]
+    for (parent, action) in parent_candidates
+        prob = compute_backward_probability(
+            model.backward_policy, target_state, parent,
+            model.parameters.backward, model.states.backward,
+            model.all_actions
+        )
+        push!(probs, max(prob, 1e-8))
+    end
+
+    # Normalize
+    prob_sum = sum(probs)
+    if prob_sum > 1e-8
+        probs ./= prob_sum
+    else
+        probs = fill(1.0 / length(probs), length(probs))
+    end
+
+    # Apply epsilon exploration if configured
+    if config.epsilon > 0.0
+        uniform_prob = 1.0 / length(probs)
+        probs = (1.0 - config.epsilon) .* probs .+ config.epsilon * uniform_prob
+    end
+
+    # Sample
+    cumulative = cumsum(probs)
+    r = rand()
+    idx = findfirst(p -> p >= r, cumulative)
+    if isnothing(idx)
+        idx = length(probs)
+    end
+
+    return parent_candidates[idx]
+end
+
+"""
+    sample_backward_trajectories_from_terminals(model::GFlowNetModel, terminal_states::Vector,
+                                                n_samples::Int; config = SamplingConfig())
+
+Sample backward trajectories from given terminal states.
+Terminal states should be sampled proportionally to their rewards.
+
+# Arguments
+- `model`: GFlowNet model with backward policy
+- `terminal_states`: Vector of terminal states to sample from
+- `n_samples`: Number of backward trajectories to generate
+- `config`: Sampling configuration
+
+# Returns
+Vector of Trajectory objects
+"""
+function sample_backward_trajectories_from_terminals(model::GFlowNetModel,
+                                                     terminal_states::Vector,
+                                                     n_samples::Int;
+                                                     config = SamplingConfig())
+
+    trajectories = Trajectory[]
+
+    for _ in 1:n_samples
+        # Randomly select a terminal state
+        terminal = terminal_states[rand(1:length(terminal_states))]
+        traj = sample_backward_trajectory(model, terminal; config=config)
+        push!(trajectories, traj)
+    end
+
+    return trajectories
+end
+
+# =============================================================================
 # Exports
 # =============================================================================
 
 export create_gflownet, create_forward_policy, create_backward_policy, create_flow_estimator
 export sample_trajectory, sample_action_from_policy
+export sample_backward_trajectory, sample_backward_trajectories_from_terminals

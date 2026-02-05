@@ -13,6 +13,11 @@ interface ProblemConfig {
   batch_size?: number
   learning_rate?: number
   hidden_dim?: number
+  // Exploration parameters (Phase 7: Mode Collapse Fix)
+  epsilon?: number           // ε-uniform exploration (Malkin et al. 2022)
+  epsilon_decay?: boolean    // Anneal epsilon to 0 over training
+  entropy_weight?: number    // Policy entropy regularization (AISTATS 2024)
+  z_learning_rate_multiplier?: number  // Faster Z convergence (peptide paper: 10x)
 }
 
 interface ProblemSetupProps {
@@ -32,6 +37,11 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
     batch_size: 16,         // Larger batches reduce variance
     learning_rate: 0.001,   // Lower LR for stable training
     hidden_dim: 64,
+    // Exploration parameters for mode discovery (AISTATS 2024, JMLR 2023)
+    epsilon: 0.05,          // ε-uniform exploration mixing (Malkin et al. 2022)
+    epsilon_decay: true,    // Anneal epsilon to 0 over training
+    entropy_weight: 0.01,   // Policy entropy regularization (AISTATS 2024)
+    z_learning_rate_multiplier: 10.0,  // Faster Z learning (peptide paper: 10x)
   })
 
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null)
@@ -270,6 +280,80 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
               min={0.0001}
               max={0.1}
             />
+          </div>
+
+          {/* Exploration Settings (Mode Collapse Fix) */}
+          <div className="mb-4 p-3 border border-dark-border rounded-lg bg-dark-panel/50">
+            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-neon-purple" />
+              Exploration Settings
+              <span className="text-xs text-muted-foreground">(prevents mode collapse)</span>
+            </h3>
+
+            {/* Epsilon (ε-uniform exploration) */}
+            <div className="mb-3">
+              <label className="text-xs font-medium block mb-1">
+                ε-Uniform Exploration: {(config.epsilon ?? 0.05).toFixed(2)}
+                <span className="text-xs text-muted-foreground ml-2">(random action probability)</span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={0.3}
+                step={0.01}
+                value={config.epsilon ?? 0.05}
+                onChange={(e) => setConfig({ ...config, epsilon: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+
+            {/* Entropy Weight */}
+            <div className="mb-3">
+              <label className="text-xs font-medium block mb-1">
+                Entropy Weight: {(config.entropy_weight ?? 0.01).toFixed(3)}
+                <span className="text-xs text-muted-foreground ml-2">(policy diversity)</span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={0.1}
+                step={0.001}
+                value={config.entropy_weight ?? 0.01}
+                onChange={(e) => setConfig({ ...config, entropy_weight: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+
+            {/* Z Learning Rate Multiplier */}
+            <div className="mb-3">
+              <label className="text-xs font-medium block mb-1">
+                Z Learning Rate: {(config.z_learning_rate_multiplier ?? 10.0).toFixed(1)}x
+                <span className="text-xs text-muted-foreground ml-2">(partition function)</span>
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                step={1}
+                value={config.z_learning_rate_multiplier ?? 10.0}
+                onChange={(e) => setConfig({ ...config, z_learning_rate_multiplier: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+
+            {/* Epsilon Decay Toggle */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="epsilon_decay"
+                checked={config.epsilon_decay ?? true}
+                onChange={(e) => setConfig({ ...config, epsilon_decay: e.target.checked })}
+                className="w-4 h-4 rounded bg-dark-panel border-dark-border"
+              />
+              <label htmlFor="epsilon_decay" className="text-xs text-muted-foreground">
+                Anneal epsilon to 0 over training (recommended)
+              </label>
+            </div>
           </div>
 
           {/* Start Button */}

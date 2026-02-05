@@ -33,7 +33,12 @@ function App() {
         learning_rate: config.learning_rate || 0.01,
         objective: config.training_objective,
         hidden_dim: config.hidden_dim || 64,
-        reward_peaks: reward_peaks
+        reward_peaks: reward_peaks,
+        // Exploration parameters for mode discovery (Phase 7: Mode Collapse Fix)
+        epsilon: config.epsilon ?? 0.05,           // ε-uniform exploration
+        epsilon_decay: config.epsilon_decay ?? true, // Anneal to 0
+        entropy_weight: config.entropy_weight ?? 0.01, // Policy entropy
+        z_learning_rate_multiplier: config.z_learning_rate_multiplier ?? 10.0, // Faster Z
       })
       console.log('App: Training started successfully:', result)
       setProblemConfig(config)
