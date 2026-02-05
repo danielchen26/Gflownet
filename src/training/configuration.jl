@@ -172,9 +172,9 @@ struct TrainingConfig
 
     # Advanced configuration
     sub_trajectory_length::Int
-    # NOTE: z_learning_rate_multiplier is defined but NOT YET IMPLEMENTED
-    # It exists for API compatibility with literature (peptide generation paper recommends 10x)
-    # but requires optimizer refactoring to work properly. Use default for now.
+    # z_learning_rate_multiplier: Scales the log_Z gradient for faster partition function convergence
+    # Reference: Peptide generation paper (bioRxiv 2026) recommends 10x for better results
+    # Implementation: gradient scaling before optimizer update (lr_effective = lr × multiplier)
     z_learning_rate_multiplier::Float64
 
     # Experience Replay (JMLR 2023: GFlowNet Foundations - Off-policy learning)

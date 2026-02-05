@@ -87,7 +87,7 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
         println("     - Epsilon (ε-uniform): $(config.epsilon)$(config.epsilon_decay ? " (annealed)" : "")")
         println("     - Entropy weight: $(config.entropy_weight)")
         if config.z_learning_rate_multiplier != 1.0
-            println("     - Z learning rate multiplier: $(config.z_learning_rate_multiplier)x (NOTE: not yet implemented)")
+            println("     - Z learning rate multiplier: $(config.z_learning_rate_multiplier)x")
         end
         if config.use_replay_buffer
             println("     - Replay buffer: $(config.replay_buffer_size) capacity, $(Int(config.replay_ratio * 100))% replay")
@@ -274,28 +274,79 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
         return Inf, 0.0
     end
 
-    # Compute gradient norm
+    # Compute gradient norm (before scaling)
     gradient_norm = compute_gradient_norm(grads[1])
 
-    # Update parameters using Optimisers.jl
-    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, grads[1])
+    # Apply z_learning_rate_multiplier by scaling the log_Z gradient
+    # This effectively gives Z a higher learning rate: lr_Z = lr * multiplier
+    # Reference: Peptide generation paper (bioRxiv 2026) recommends 10x for faster Z convergence
+    scaled_grads = if haskey(grads[1], :log_Z) && config.z_learning_rate_multiplier != 1.0
+        scale_z_gradient(grads[1], config.z_learning_rate_multiplier)
+    else
+        grads[1]
+    end
 
-    # NOTE: z_learning_rate_multiplier is not yet implemented
-    # The parameter exists in TrainingConfig but separate Z optimization requires
-    # refactoring to use component-wise optimizers (e.g., Optimisers.OptimiserChain).
-    # For now, the standard optimizer is used for all parameters including log_Z.
-    # The core exploration fixes (entropy, epsilon) are more critical for mode collapse.
+    # Update parameters using Optimisers.jl
+    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, scaled_grads)
 
     # Update model state (mutation after gradient computation is safe)
     model.optimizer = optimizer_state
     model.parameters = parameters
-    
+
     # Synchronize log_partition_function field with parameter if using LEARNABLE_ESTIMATION
     if haskey(parameters, :log_Z)
         model.log_partition_function = parameters.log_Z
     end
 
     return loss_val, gradient_norm
+end
+
+"""
+    scale_z_gradient(grads, multiplier::Float64)
+
+Scale the log_Z gradient by the given multiplier.
+This effectively increases the learning rate for the partition function Z.
+
+# Mathematical Foundation
+By scaling ∇log_Z by multiplier M before the optimizer update:
+    log_Z_new = log_Z - lr × M × ∇log_Z
+
+This is equivalent to using learning rate (lr × M) for Z while keeping
+the standard learning rate lr for all other parameters.
+
+# Arguments
+- `grads`: Gradient structure from Zygote (ComponentVector or NamedTuple)
+- `multiplier::Float64`: Learning rate multiplier for Z (e.g., 10.0)
+
+# Returns
+New gradient structure with scaled log_Z gradient
+"""
+function scale_z_gradient(grads, multiplier::Float64)
+    if !haskey(grads, :log_Z)
+        return grads
+    end
+
+    # For ComponentArrays (the actual type from Zygote with our parameters),
+    # we need to create a copy and modify in place
+    if grads isa ComponentArrays.ComponentVector
+        # Create a copy to avoid mutation
+        scaled_grads = copy(grads)
+        scaled_grads.log_Z = grads.log_Z * multiplier
+        return scaled_grads
+    elseif grads isa NamedTuple
+        # For NamedTuple, use merge
+        scaled_log_Z = grads.log_Z * multiplier
+        return merge(grads, (log_Z = scaled_log_Z,))
+    else
+        # Fallback: try direct property access
+        try
+            scaled_grads = copy(grads)
+            scaled_grads.log_Z = grads.log_Z * multiplier
+            return scaled_grads
+        catch
+            return grads
+        end
+    end
 end
 
 """
@@ -332,13 +383,18 @@ function train_step_weighted!(model::GFlowNetModel, trajectories::Vector{Traject
         return Inf, 0.0
     end
 
-    # Compute gradient norm
+    # Compute gradient norm (before scaling)
     gradient_norm = compute_gradient_norm(grads[1])
 
-    # Update parameters using Optimisers.jl
-    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, grads[1])
+    # Apply z_learning_rate_multiplier by scaling the log_Z gradient
+    scaled_grads = if haskey(grads[1], :log_Z) && config.z_learning_rate_multiplier != 1.0
+        scale_z_gradient(grads[1], config.z_learning_rate_multiplier)
+    else
+        grads[1]
+    end
 
-    # NOTE: z_learning_rate_multiplier not yet implemented (see train_step! for details)
+    # Update parameters using Optimisers.jl
+    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, scaled_grads)
 
     # Update model state
     model.optimizer = optimizer_state
