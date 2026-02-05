@@ -87,7 +87,7 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
         println("     - Epsilon (ε-uniform): $(config.epsilon)$(config.epsilon_decay ? " (annealed)" : "")")
         println("     - Entropy weight: $(config.entropy_weight)")
         if config.z_learning_rate_multiplier != 1.0
-            println("     - Z learning rate multiplier: $(config.z_learning_rate_multiplier)x")
+            println("     - Z learning rate multiplier: $(config.z_learning_rate_multiplier)x (NOTE: not yet implemented)")
         end
         if config.use_replay_buffer
             println("     - Replay buffer: $(config.replay_buffer_size) capacity, $(Int(config.replay_ratio * 100))% replay")
@@ -151,8 +151,11 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
                         Trajectory[]
                     end
                 catch e
-                    # Backward sampling may fail if parent finding isn't implemented
-                    # Fall back to forward-only trajectories
+                    # Backward sampling may fail if parent finding isn't implemented for the domain
+                    # Log warning to help with debugging (not silent failure)
+                    if verbose && iteration == 1
+                        @warn "TLM backward sampling failed (will use forward-only): $e"
+                    end
                     Trajectory[]
                 end
 
@@ -179,7 +182,8 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
 
                 # Combine fresh and replay with weights
                 # Fresh samples have weight 1.0 (on-policy), replay samples have importance weights
-                fresh_subset = fresh_trajectories[1:min(n_fresh, length(fresh_trajectories))]
+                # Handle edge case where n_fresh=0 (replay_ratio=1.0)
+                fresh_subset = n_fresh > 0 ? fresh_trajectories[1:min(n_fresh, length(fresh_trajectories))] : Trajectory[]
                 combined_trajs = vcat(fresh_subset, replay_trajs)
                 combined_weights = vcat(ones(length(fresh_subset)), replay_weights)
 
@@ -276,10 +280,11 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
     # Update parameters using Optimisers.jl
     optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, grads[1])
 
-    # NOTE: Z learning rate scaling (z_learning_rate_multiplier) is currently disabled
-    # due to compatibility issues with nested gradient NamedTuples.
+    # NOTE: z_learning_rate_multiplier is not yet implemented
+    # The parameter exists in TrainingConfig but separate Z optimization requires
+    # refactoring to use component-wise optimizers (e.g., Optimisers.OptimiserChain).
+    # For now, the standard optimizer is used for all parameters including log_Z.
     # The core exploration fixes (entropy, epsilon) are more critical for mode collapse.
-    # TODO: Implement proper Z scaling using separate optimizer for log_Z parameter
 
     # Update model state (mutation after gradient computation is safe)
     model.optimizer = optimizer_state
@@ -333,7 +338,7 @@ function train_step_weighted!(model::GFlowNetModel, trajectories::Vector{Traject
     # Update parameters using Optimisers.jl
     optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, grads[1])
 
-    # NOTE: Z learning rate scaling disabled (see train_step! for details)
+    # NOTE: z_learning_rate_multiplier not yet implemented (see train_step! for details)
 
     # Update model state
     model.optimizer = optimizer_state

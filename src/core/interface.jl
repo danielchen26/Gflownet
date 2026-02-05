@@ -448,9 +448,10 @@ function sample_backward_trajectory(model::GFlowNetModel, terminal_state::Abstra
         throw(ArgumentError("Backward trajectory sampling requires backward_policy. Use include_backward=true in create_gflownet"))
     end
 
-    # Build trajectory in reverse (from terminal to initial)
-    backward_states = [terminal_state]
-    backward_actions = AbstractAction[]
+    # Build trajectory in reverse order (terminal → initial), then reverse at end
+    # Using push! + reverse! is O(n) vs pushfirst! which is O(n²)
+    reverse_states = [terminal_state]
+    reverse_actions = AbstractAction[]
 
     current_state = terminal_state
     steps = 0
@@ -472,15 +473,18 @@ function sample_backward_trajectory(model::GFlowNetModel, terminal_state::Abstra
             model, current_state, parent_candidates; config=config
         )
 
-        # Add to backward trajectory
-        pushfirst!(backward_states, parent_state)
-        pushfirst!(backward_actions, action)
+        # Add to trajectory (in reverse order)
+        push!(reverse_states, parent_state)
+        push!(reverse_actions, action)
 
         current_state = parent_state
     end
 
-    # The trajectory is now in forward direction (initial → terminal)
-    return Trajectory(backward_states, backward_actions)
+    # Reverse to get forward direction (initial → terminal)
+    reverse!(reverse_states)
+    reverse!(reverse_actions)
+
+    return Trajectory(reverse_states, reverse_actions)
 end
 
 """

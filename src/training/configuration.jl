@@ -115,9 +115,11 @@ min_θ 𝔼[L(θ, τ)] where L is the chosen objective and τ are trajectories.
 
 # Regularization Parameters
 - `entropy_weight::Float64`: Entropy regularization coefficient (default 0.01)
-    - 0.0 = no entropy regularization (original TB)
+    - **Breaking change**: Default changed from 0.0 to 0.01 for better mode discovery
+    - 0.0 = no entropy regularization (original TB behavior)
     - 0.01-0.1 = recommended range for exploration (AISTATS 2024)
     - Adds -λH(π) to loss, encouraging diverse policies and preventing mode collapse
+    - Set to 0.0 explicitly if you need exact backward compatibility
 - `parameter_regularization::Float64`: L2 regularization on parameters
 - `gradient_clip_norm::Float64`: Maximum gradient norm for stability
 
@@ -170,7 +172,10 @@ struct TrainingConfig
 
     # Advanced configuration
     sub_trajectory_length::Int
-    z_learning_rate_multiplier::Float64  # Multiplier for Z learning rate (default 10.0 per literature)
+    # NOTE: z_learning_rate_multiplier is defined but NOT YET IMPLEMENTED
+    # It exists for API compatibility with literature (peptide generation paper recommends 10x)
+    # but requires optimizer refactoring to work properly. Use default for now.
+    z_learning_rate_multiplier::Float64
 
     # Experience Replay (JMLR 2023: GFlowNet Foundations - Off-policy learning)
     use_replay_buffer::Bool              # Whether to use experience replay
