@@ -69,6 +69,7 @@ include("core/multi_start.jl")
 # =============================================================================
 # Training Infrastructure
 # =============================================================================
+include("training/replay_buffer.jl")  # Experience replay for off-policy learning
 include("training/objectives.jl")
 include("training/utils.jl")
 include("training/losses.jl")
@@ -184,6 +185,7 @@ export SamplingConfig
 
 # Trajectory sampling
 export sample_trajectory, sample_trajectory_batch, sample_backward_trajectory
+export sample_backward_trajectories_from_terminals, find_parent_for_action
 export sample_action_with_strategy
 
 
@@ -217,7 +219,7 @@ export compute_gradients, clip_gradients!
 
 # Training configuration
 export TrainingConfig, TrainingState, TrainingMetrics, TrainingHistory
-export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES
+export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
 export PartitionFunctionMethod, OptimizationMethod
 export SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, LEARNABLE_ESTIMATION, ADAPTIVE_ESTIMATION
 export ADAM, RMSPROP, SGD, ADAMW

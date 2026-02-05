@@ -418,7 +418,115 @@ end
 
 # Removed duplicate create_default_sampling_config - using the one from core/sampling.jl
 
+# =============================================================================
+# Backward Sampling Support - TLM (ICLR 2025)
+# =============================================================================
+
+"""
+    GFlowNet.find_parent_for_action(target_state::GridState, action::MoveRight)
+
+Find parent state for MoveRight action.
+If target is at (x, y), parent was at (x-1, y) before moving right.
+"""
+function GFlowNet.find_parent_for_action(target_state::GridState, action::MoveRight)
+    if target_state.is_terminal
+        return nothing  # Can't be parent of terminal from MoveRight
+    end
+    if target_state.x <= 1
+        return nothing  # Can't have moved right to reach x=1
+    end
+    return GridState(target_state.x - 1, target_state.y, false)
+end
+
+"""
+    GFlowNet.find_parent_for_action(target_state::GridState, action::MoveUp)
+
+Find parent state for MoveUp action.
+If target is at (x, y), parent was at (x, y-1) before moving up.
+"""
+function GFlowNet.find_parent_for_action(target_state::GridState, action::MoveUp)
+    if target_state.is_terminal
+        return nothing  # Can't be parent of terminal from MoveUp
+    end
+    if target_state.y <= 1
+        return nothing  # Can't have moved up to reach y=1
+    end
+    return GridState(target_state.x, target_state.y - 1, false)
+end
+
+"""
+    GFlowNet.find_parent_for_action(target_state::GridState, action::MoveLeft)
+
+Find parent state for MoveLeft action.
+If target is at (x, y), parent was at (x+1, y) before moving left.
+"""
+function GFlowNet.find_parent_for_action(target_state::GridState, action::MoveLeft)
+    if target_state.is_terminal
+        return nothing
+    end
+    grid_size = GRID_CONFIG[].grid_size
+    if target_state.x >= grid_size
+        return nothing  # Can't have moved left to reach max x
+    end
+    return GridState(target_state.x + 1, target_state.y, false)
+end
+
+"""
+    GFlowNet.find_parent_for_action(target_state::GridState, action::MoveDown)
+
+Find parent state for MoveDown action.
+If target is at (x, y), parent was at (x, y+1) before moving down.
+"""
+function GFlowNet.find_parent_for_action(target_state::GridState, action::MoveDown)
+    if target_state.is_terminal
+        return nothing
+    end
+    grid_size = GRID_CONFIG[].grid_size
+    if target_state.y >= grid_size
+        return nothing  # Can't have moved down to reach max y
+    end
+    return GridState(target_state.x, target_state.y + 1, false)
+end
+
+"""
+    GFlowNet.find_parent_for_action(target_state::GridState, action::Terminate)
+
+Find parent state for Terminate action.
+If target is terminal at (x, y), parent was non-terminal at same position.
+"""
+function GFlowNet.find_parent_for_action(target_state::GridState, action::Terminate)
+    if !target_state.is_terminal
+        return nothing  # Terminate only leads to terminal states
+    end
+    return GridState(target_state.x, target_state.y, false)
+end
+
+"""
+    get_terminal_states_for_backward_sampling(grid_size::Int, reward_positions::Dict)
+
+Get list of terminal states for backward sampling, each weighted by reward.
+
+# Returns
+Vector of terminal states, repeated proportionally to their rewards for weighted sampling.
+"""
+function get_terminal_states_for_backward_sampling(grid_size::Int, reward_positions::Dict)
+    # Get reward scale for normalization
+    max_reward = maximum(values(reward_positions))
+
+    terminals = GridState[]
+    for ((x, y), r) in reward_positions
+        # Add terminal states proportionally to reward (integer approximation)
+        n_copies = max(1, round(Int, 10 * r / max_reward))  # Scale to get reasonable counts
+        for _ in 1:n_copies
+            push!(terminals, GridState(x, y, true))
+        end
+    end
+
+    return terminals
+end
+
 # Export the main functions
 export GridState, GridAction, MoveRight, MoveUp, MoveLeft, MoveDown, Terminate
 export create_grid_world_gflownet, create_grid_world, analyze_grid_world_results
 export count_reachable_states, analyze_state_space
+export get_terminal_states_for_backward_sampling

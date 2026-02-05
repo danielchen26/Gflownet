@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Activity, Zap, TrendingUp, Clock, Layers, Award } from 'lucide-react'
+import { Activity, Zap, TrendingUp, Clock, Layers, Award, Shuffle } from 'lucide-react'
 import { api } from '../services/api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useEffect, useState } from 'react'
@@ -188,6 +188,14 @@ export function RealtimeMetrics() {
       value: metrics?.latest_gradient_norm?.toFixed(2) || '0.00',
       icon: Zap,
       color: 'from-gradient-orange-from to-gradient-orange-to',
+    },
+    // Exploration metric (Phase 7: Mode Collapse Fix)
+    {
+      label: 'Current Epsilon',
+      value: metrics?.current_epsilon?.toFixed(3) || '0.000',
+      icon: Shuffle,
+      color: 'from-yellow-400 to-yellow-600',
+      trend: metrics?.epsilon_decay ? 'down' : 'stable',  // Decreasing if annealing
     },
   ]
   
