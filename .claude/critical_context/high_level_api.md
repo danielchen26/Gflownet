@@ -100,6 +100,53 @@ config = GFlowNet.TrainingConfig(
 training_history = GFlowNet.train_gflownet(model, config; verbose=true)
 ```
 
+## Training Parameters
+
+### z_learning_rate_multiplier
+
+The `z_learning_rate_multiplier` parameter accelerates partition function (Z) convergence by applying a higher learning rate specifically to the `log_Z` parameter.
+
+**Purpose**: Based on literature (peptide generation paper), Z often converges slower than policy networks. A higher multiplier (e.g., 2.0-5.0) can speed up convergence.
+
+```julia
+config = TrainingConfig(
+    objective = TRAJECTORY_BALANCE,
+    z_learning_rate_multiplier = 2.0,  # Z learns 2x faster
+    learning_rate = 0.01
+)
+```
+
+**Note**: This is a convergence optimization, NOT a mode discovery mechanism.
+
+### Parameter Validation Requirements
+
+All parameters in `TrainingConfig` must have:
+1. **Working implementation**: Never expose parameters without functionality
+2. **Validation**: Check ranges and types at construction time
+3. **Documentation**: Clear docstrings explaining purpose and valid values
+
+### Advertising Unimplemented Features
+
+**❌ NEVER** expose parameters if functionality isn't implemented:
+
+```julia
+# ❌ WRONG - Parameter exists but does nothing
+struct TrainingConfig
+    fancy_feature::Bool = false  # TODO: implement later
+end
+
+# ✅ CORRECT - Only expose working features
+# If adding for API compatibility, clearly document:
+struct TrainingConfig
+    fancy_feature::Bool = false  # EXPERIMENTAL: Not yet implemented
+end
+```
+
+When adding experimental parameters, always:
+- Mark as "EXPERIMENTAL" or "NOT YET IMPLEMENTED" in docstring
+- Explain WHY it's not implemented
+- Consider throwing a warning if someone enables it
+
 ## Model Creation
 
 Use the highest-level API for model creation:

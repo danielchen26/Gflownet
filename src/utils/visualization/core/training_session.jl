@@ -3,7 +3,7 @@
 
 using GFlowNet: GFlowNetModel, TrainingConfig, Trajectory, TrainingObjective
 using GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING
-using GFlowNet: SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE
+using GFlowNet: SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
 using GFlowNet: sample_trajectory, reward
 using Statistics: mean
 using UUIDs: uuid4
@@ -40,6 +40,9 @@ mutable struct TrainingSession
     trajectory_buffer::Vector{Trajectory}
     max_buffer_size::Int
 
+    # Experience replay buffer (JMLR 2023)
+    replay_buffer::Union{Nothing, GFlowNet.ReplayBuffer}
+
     # Error tracking
     last_error::Union{String, Nothing}
     error_count::Int
@@ -72,11 +75,12 @@ obj = parse_objective("TRAJECTORY_BALANCE")
 """
 function parse_objective(name::String)::TrainingObjective
     mapping = Dict(
-        "TRAJECTORY_BALANCE"      => TRAJECTORY_BALANCE,
-        "DETAILED_BALANCE"        => DETAILED_BALANCE,
-        "FLOW_MATCHING"           => FLOW_MATCHING,
-        "SUB_TRAJECTORY_BALANCE"  => SUB_TRAJECTORY_BALANCE,
-        "DIRECT_FLOW_OBJECTIVE"   => DIRECT_FLOW_OBJECTIVE,
+        "TRAJECTORY_BALANCE"               => TRAJECTORY_BALANCE,
+        "DETAILED_BALANCE"                 => DETAILED_BALANCE,
+        "FLOW_MATCHING"                    => FLOW_MATCHING,
+        "SUB_TRAJECTORY_BALANCE"           => SUB_TRAJECTORY_BALANCE,
+        "DIRECT_FLOW_OBJECTIVE"            => DIRECT_FLOW_OBJECTIVE,
+        "TRAJECTORY_LIKELIHOOD_MAXIMIZATION" => TRAJECTORY_LIKELIHOOD_MAXIMIZATION,
     )
     upper = uppercase(strip(name))
     haskey(mapping, upper) || error("Unknown objective: $name. Valid: $(join(keys(mapping), ", "))")
@@ -115,19 +119,41 @@ function create_session(config::Dict)::TrainingSession
     # - epsilon_decay: Anneal epsilon to 0 over training
     # - entropy_weight: Policy entropy regularization (AISTATS 2024)
     # - z_learning_rate_multiplier: Faster Z convergence (peptide paper: 10x)
+    # EXPERIENCE REPLAY (JMLR 2023)
+    # - use_replay_buffer, replay_ratio, replay_priority_alpha
+    # TLM (ICLR 2025)
+    # - tlm_backward_weight, tlm_entropy_coeff
+    # JSON doesn't distinguish Int vs Float, so explicitly convert all numeric params
+    # Defaults tuned for 8×8 grid (3432:1 path asymmetry)
+    # CRITICAL: temperature=1.0, not 2.0! Temperature 2.0 causes random early termination.
     training_config = TrainingConfig(
         objective       = objective,
-        n_iterations    = get(config, "n_episodes", 500),
-        batch_size      = get(config, "batch_size", 16),
-        learning_rate   = get(config, "learning_rate", 0.001),
-        temperature     = get(config, "temperature", 2.0),  # Higher temp for better exploration
-        # Exploration parameters for mode discovery
-        epsilon         = get(config, "epsilon", 0.05),           # ε-uniform exploration (default 5%)
-        epsilon_decay   = get(config, "epsilon_decay", true),     # Anneal to 0 over training
-        entropy_weight  = get(config, "entropy_weight", 0.01),    # Policy entropy (AISTATS 2024)
-        z_learning_rate_multiplier = get(config, "z_learning_rate_multiplier", 10.0),  # Faster Z
-        verbose         = false   # We handle logging ourselves
+        n_iterations    = Int(get(config, "n_episodes", 1000)),
+        batch_size      = Int(get(config, "batch_size", 32)),
+        learning_rate   = Float64(get(config, "learning_rate", 0.005)),
+        temperature     = Float64(get(config, "temperature", 1.0)),
+        # Exploration scaled for 8×8 path asymmetry (3432:1)
+        epsilon         = Float64(get(config, "epsilon", 0.15)),
+        epsilon_decay   = Bool(get(config, "epsilon_decay", true)),
+        entropy_weight  = Float64(get(config, "entropy_weight", 0.02)),
+        z_learning_rate_multiplier = Float64(get(config, "z_learning_rate_multiplier", 10.0)),
+        # Experience Replay (JMLR 2023)
+        use_replay_buffer     = Bool(get(config, "use_replay_buffer", false)),
+        replay_buffer_size    = Int(get(config, "replay_buffer_size", 10000)),
+        replay_ratio          = Float64(get(config, "replay_ratio", 0.5)),
+        replay_priority_alpha = Float64(get(config, "replay_priority_alpha", 0.6)),
+        # TLM parameters (ICLR 2025)
+        tlm_backward_weight   = Float64(get(config, "tlm_backward_weight", 1.0)),
+        tlm_entropy_coeff     = Float64(get(config, "tlm_entropy_coeff", 0.01)),
+        verbose         = false
     )
+
+    # Initialize replay buffer if configured (JMLR 2023: Off-policy learning)
+    replay_buf = if training_config.use_replay_buffer
+        GFlowNet.ReplayBuffer(training_config.replay_buffer_size; alpha=training_config.replay_priority_alpha)
+    else
+        nothing
+    end
 
     return TrainingSession(
         string(uuid4()),
@@ -139,6 +165,7 @@ function create_session(config::Dict)::TrainingSession
         0, training_config.n_iterations,        # current_iteration, total_iterations
         Float64[], Float64[], Float64[],        # losses, gradient_norms, rewards
         Trajectory[], 200,                      # trajectory_buffer, max_buffer_size (larger for better distribution)
+        replay_buf,                             # replay_buffer (JMLR 2023)
         nothing, 0,                             # last_error, error_count
         nothing, Float64[]                      # start_time, iteration_times
     )
@@ -166,38 +193,100 @@ function step!(session::TrainingSession)::Dict
     t0 = time()
 
     try
-        # ---- Compute current epsilon with annealing ----
-        # Linearly anneal from config.epsilon to 0 over training
+        # ---- 1. Compute current epsilon with annealing ----
         current_epsilon = if config.epsilon_decay
             config.epsilon * (1.0 - session.current_iteration / session.total_iterations)
         else
             config.epsilon
         end
 
-        # ---- Sample trajectories with ε-uniform exploration ----
-        # This is the CRITICAL exploration mechanism for mode discovery (Malkin et al. 2022)
+        # ---- 2. Sample fresh trajectories with ε-uniform exploration ----
         sampling_config = GFlowNet.SamplingConfig(
-            strategy = config.temperature != 1.0 ? GFlowNet.TEMPERATURE_SAMPLING : GFlowNet.STOCHASTIC_SAMPLING,
+            strategy = config.temperature > 1.0 ? GFlowNet.TEMPERATURE_SAMPLING : GFlowNet.STOCHASTIC_SAMPLING,
             temperature = config.temperature,
             epsilon = current_epsilon,
             max_trajectory_length = 100
         )
-        trajectories = [sample_trajectory(model; config=sampling_config) for _ in 1:config.batch_size]
+        fresh_trajectories = [sample_trajectory(model; config=sampling_config) for _ in 1:config.batch_size]
 
-        # ---- Real gradient descent step ----
-        # Actual signature: train_step!(model, trajectories, config) -> (loss, grad_norm)
-        loss_val, grad_norm = GFlowNet.train_step!(model, trajectories, config)
+        # ---- 3. TLM backward sampling (ICLR 2025) ----
+        # Bypasses forward path asymmetry by sampling from terminal states backward
+        if config.objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION && !isnothing(model.backward_policy)
+            backward_trajectories = try
+                terminal_states = [traj.states[end] for traj in fresh_trajectories
+                                   if !isempty(traj.states) && GFlowNet.is_terminal_state(traj.states[end])]
+                if !isempty(terminal_states)
+                    n_backward = min(config.batch_size ÷ 2, length(terminal_states))
+                    GFlowNet.sample_backward_trajectories_from_terminals(
+                        model, terminal_states, n_backward; config=sampling_config
+                    )
+                else
+                    Trajectory[]
+                end
+            catch e
+                if session.current_iteration == 0
+                    @warn "TLM backward sampling failed (forward-only): $e"
+                end
+                Trajectory[]
+            end
+            if !isempty(backward_trajectories)
+                fresh_trajectories = vcat(fresh_trajectories, backward_trajectories)
+            end
+        end
+
+        # ---- 4. Replay buffer mixing (JMLR 2023) ----
+        replay_buffer = session.replay_buffer
+        training_data = if !isnothing(replay_buffer) && length(replay_buffer) >= config.batch_size
+            # Add fresh trajectories to buffer with reward-based priority
+            # Higher reward → higher priority → more likely to be replayed
+            # This helps retain high-reward modes (critical for mode collapse prevention)
+            for traj in fresh_trajectories
+                traj_reward = reward(traj.states[end])
+                priority = GFlowNet.compute_trajectory_priority(traj_reward)
+                GFlowNet.add!(replay_buffer, traj, priority)
+            end
+
+            # Compute fresh vs replay split
+            n_replay = round(Int, config.batch_size * config.replay_ratio)
+            n_fresh = config.batch_size - n_replay
+
+            # Sample from replay buffer with importance weights
+            replay_trajs, replay_weights, _ = GFlowNet.sample_with_weights(replay_buffer, n_replay)
+
+            # Combine fresh + replay
+            fresh_subset = n_fresh > 0 ? fresh_trajectories[1:min(n_fresh, length(fresh_trajectories))] : Trajectory[]
+            combined_trajs = vcat(fresh_subset, replay_trajs)
+            combined_weights = vcat(ones(length(fresh_subset)), replay_weights)
+
+            (trajectories=combined_trajs, weights=combined_weights, use_weights=true)
+        else
+            # No replay or buffer not full yet — just add to buffer and use fresh
+            if !isnothing(replay_buffer)
+                for traj in fresh_trajectories
+                    traj_reward = reward(traj.states[end])
+                    GFlowNet.add!(replay_buffer, traj, GFlowNet.compute_trajectory_priority(traj_reward))
+                end
+            end
+            (trajectories=fresh_trajectories, weights=ones(length(fresh_trajectories)), use_weights=false)
+        end
+
+        # ---- 5. Gradient descent step (weighted if replay active) ----
+        loss_val, grad_norm = if training_data.use_weights
+            GFlowNet.train_step_weighted!(model, training_data.trajectories, training_data.weights, config)
+        else
+            GFlowNet.train_step!(model, training_data.trajectories, config)
+        end
 
         iteration_time = time() - t0
 
-        # Update session state
+        # ---- 6. Update session state and metrics ----
         session.current_iteration += 1
         push!(session.losses, loss_val)
         push!(session.gradient_norms, grad_norm)
         push!(session.iteration_times, iteration_time)
 
-        # Update trajectory buffer (ring buffer)
-        for traj in trajectories
+        # Update trajectory buffer (ring buffer for visualization)
+        for traj in fresh_trajectories
             push!(session.trajectory_buffer, traj)
             if length(session.trajectory_buffer) > session.max_buffer_size
                 popfirst!(session.trajectory_buffer)
@@ -205,7 +294,7 @@ function step!(session::TrainingSession)::Dict
         end
 
         # Compute rewards from terminal states
-        batch_rewards = Float64[reward(t.states[end]) for t in trajectories]
+        batch_rewards = Float64[reward(t.states[end]) for t in fresh_trajectories]
         push!(session.rewards, mean(batch_rewards))
 
         # Check if done

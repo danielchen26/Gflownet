@@ -39,9 +39,10 @@ where p_i is the priority of trajectory i.
 ```julia
 buffer = ReplayBuffer(10000; alpha=0.6)
 
-# Add trajectories with priority based on TD error
+# Add trajectories with priority based on terminal reward
 for traj in trajectories
-    priority = compute_trajectory_priority(model, traj)
+    traj_reward = reward(traj.states[end])
+    priority = compute_trajectory_priority(traj_reward)
     add!(buffer, traj, priority)
 end
 
@@ -210,16 +211,18 @@ end
 # =============================================================================
 
 """
-    compute_trajectory_priority(loss::Float64)
+    compute_trajectory_priority(value::Float64)
 
-Compute priority for a trajectory based on its loss.
+Compute priority for a trajectory based on a scalar value (reward or loss).
 
-Higher loss = higher priority (more surprising trajectories sampled more often).
+Higher value = higher priority = more likely to be replayed.
+Typically called with the trajectory's terminal reward so that
+high-reward trajectories are replayed more often (mode retention).
 
-Uses sqrt for stability: priority = sqrt(|loss|) + ε
+Uses sqrt for stability: priority = sqrt(|value|) + ε
 """
-function compute_trajectory_priority(loss::Float64)
-    return sqrt(abs(loss)) + 1e-6
+function compute_trajectory_priority(value::Float64)
+    return sqrt(abs(value)) + 1e-6
 end
 
 # =============================================================================

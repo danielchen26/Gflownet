@@ -33,61 +33,73 @@ export default {
         },
         border: 'rgb(var(--border) / <alpha-value>)',
         ring: 'rgb(var(--ring) / <alpha-value>)',
-        
-        // Dark theme colors
+
+        // Dark theme colors — CSS variable driven
         dark: {
-          bg: '#0A0A0B',
-          panel: '#1A1A1D',
-          border: '#2A2A2D',
+          bg: 'rgb(var(--dark-bg) / <alpha-value>)',
+          panel: 'rgb(var(--dark-panel) / <alpha-value>)',
+          border: 'rgb(var(--dark-border) / <alpha-value>)',
         },
-        // Neon accent colors
+        // Neon accent colors — CSS variable driven
         neon: {
-          purple: '#BD00FF',
-          blue: '#00D9FF',
-          pink: '#FF006E',
-          green: '#00FF88',
-          orange: '#FF8E53',
+          purple: 'rgb(var(--neon-purple) / <alpha-value>)',
+          blue: 'rgb(var(--neon-blue) / <alpha-value>)',
+          pink: 'rgb(var(--neon-pink) / <alpha-value>)',
+          green: 'rgb(var(--neon-green) / <alpha-value>)',
+          orange: 'rgb(var(--neon-orange) / <alpha-value>)',
+          cyan: 'rgb(var(--neon-cyan) / <alpha-value>)',
         },
-        // Gradient colors
+        // Gradient colors — CSS variable driven
         gradient: {
           purple: {
-            from: '#8B5CF6',
-            via: '#A78BFA',
-            to: '#D946EF',
+            from: 'rgb(var(--gradient-purple-from) / <alpha-value>)',
+            via: 'rgb(var(--gradient-purple-via) / <alpha-value>)',
+            to: 'rgb(var(--gradient-purple-to) / <alpha-value>)',
           },
           orange: {
-            from: '#FF6B35',
-            via: '#FF8E53',
-            to: '#FFA07A',
+            from: 'rgb(var(--gradient-orange-from) / <alpha-value>)',
+            via: 'rgb(var(--gradient-orange-via) / <alpha-value>)',
+            to: 'rgb(var(--gradient-orange-to) / <alpha-value>)',
           },
           blue: {
-            from: '#3B82F6',
-            via: '#60A5FA',
-            to: '#06B6D4',
+            from: 'rgb(var(--gradient-blue-from) / <alpha-value>)',
+            via: 'rgb(var(--gradient-blue-via) / <alpha-value>)',
+            to: 'rgb(var(--gradient-blue-to) / <alpha-value>)',
           },
           green: {
-            from: '#10B981',
-            via: '#34D399',
-            to: '#6EE7B7',
+            from: 'rgb(var(--gradient-green-from) / <alpha-value>)',
+            via: 'rgb(var(--gradient-green-via) / <alpha-value>)',
+            to: 'rgb(var(--gradient-green-to) / <alpha-value>)',
           },
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'monospace'],
+      },
+      borderRadius: {
+        none: '0',
+        sm: 'var(--radius-sm, 0.125rem)',
+        DEFAULT: 'var(--radius, 0.25rem)',
+        md: 'var(--radius-md, 0.375rem)',
+        lg: 'var(--radius-lg, 0.5rem)',
+        xl: 'var(--radius-xl, 0.75rem)',
+        '2xl': 'var(--radius-2xl, 1rem)',
+        '3xl': 'var(--radius-3xl, 1.5rem)',
+        full: '9999px',
       },
       animation: {
-        'glow': 'glow 2s ease-in-out infinite alternate',
-        'float': 'float 3s ease-in-out infinite',
+        'glow': 'glow var(--animation-speed, 2s) ease-in-out infinite alternate',
+        'float': 'float var(--animation-speed-slow, 3s) ease-in-out infinite',
         'pulse-neon': 'pulse-neon 1.5s ease-in-out infinite',
       },
       keyframes: {
         glow: {
-          '0%': { 
-            'box-shadow': '0 0 5px rgba(189, 0, 255, 0.5), 0 0 10px rgba(189, 0, 255, 0.5), 0 0 15px rgba(189, 0, 255, 0.5)' 
+          '0%': {
+            'box-shadow': '0 0 5px rgb(var(--neon-purple) / 0.5), 0 0 10px rgb(var(--neon-purple) / 0.5), 0 0 15px rgb(var(--neon-purple) / 0.5)'
           },
-          '100%': { 
-            'box-shadow': '0 0 10px rgba(189, 0, 255, 0.8), 0 0 20px rgba(189, 0, 255, 0.8), 0 0 30px rgba(189, 0, 255, 0.8)' 
+          '100%': {
+            'box-shadow': '0 0 10px rgb(var(--neon-purple) / 0.8), 0 0 20px rgb(var(--neon-purple) / 0.8), 0 0 30px rgb(var(--neon-purple) / 0.8)'
           },
         },
         float: {

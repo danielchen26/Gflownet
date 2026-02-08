@@ -86,6 +86,58 @@ When you see: `"Mutating arrays is not supported -- called push!(Vector{Int64}, 
 - Use parametric types for containers: `Vector{<:Trajectory}`, `Dict{S, Vector{A}}`
 - Prefer `ComponentArray` over `NamedTuple` for gradient-compatible parameters
 
+## Gradient Type Handling (ComponentArrays)
+
+### Zygote Returns ComponentVector, Not NamedTuple
+
+When using `ComponentArrays.jl` for parameters (which we do), Zygote returns gradients as `ComponentArrays.ComponentVector`, NOT `NamedTuple`.
+
+**Functions processing gradients MUST handle this:**
+```julia
+# ❌ WRONG - Assumes NamedTuple
+function scale_z_gradient(grads::NamedTuple)
+    grads.log_Z *= 2.0  # Will fail!
+end
+
+# ✅ CORRECT - Works with ComponentVector
+function scale_z_gradient(grads)
+    if haskey(grads, :log_Z)
+        grads.log_Z *= 2.0
+    end
+end
+```
+
+### Use Zygote.@ignore for Non-Differentiable Operations
+
+Wrap operations that shouldn't be differentiated (discrete checks, filtering):
+
+```julia
+# ✅ CORRECT - Prevent Zygote from tracing non-differentiable code
+valid_trajectories = Zygote.@ignore filter(is_valid, trajectories)
+action_count = Zygote.@ignore length(applicable_actions)
+```
+
+### Performance: Avoid pushfirst! in Loops
+
+`pushfirst!` in loops leads to O(n²) complexity due to array shifting:
+
+```julia
+# ❌ SLOW - O(n²) complexity
+trajectory = []
+for step in 1:n
+    pushfirst!(trajectory, current_state)  # Shifts entire array!
+end
+
+# ✅ FAST - O(n) complexity
+trajectory = []
+for step in 1:n
+    push!(trajectory, current_state)  # Append is O(1) amortized
+end
+reverse!(trajectory)  # Single O(n) operation at end
+```
+
+Alternative: Use `DataStructures.Deque` for O(1) operations at both ends.
+
 ## Numerical Stability
 
 ### Float32 Consistency
@@ -142,6 +194,31 @@ end
 ```julia
 if !isa(trajectories, Vector{<:Trajectory})
     error("trajectories must be Vector{<:Trajectory}, got $(typeof(trajectories))")
+end
+```
+
+### Avoid Silent Exception Handling
+
+Never silently swallow errors during critical operations:
+
+```julia
+# ❌ WRONG - Errors disappear silently
+function sample_backward_trajectory(model, terminal_state)
+    try
+        # ... sampling logic
+    catch e
+        return nothing  # Silent failure!
+    end
+end
+
+# ✅ CORRECT - Make failures visible
+function sample_backward_trajectory(model, terminal_state)
+    try
+        # ... sampling logic
+    catch e
+        @warn "Backward sampling failed" exception=e terminal_state
+        return nothing
+    end
 end
 ```
 

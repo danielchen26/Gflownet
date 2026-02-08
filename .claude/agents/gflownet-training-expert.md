@@ -289,6 +289,101 @@ function analyze_modes(model, n_samples=5000)
 end
 ```
 
+## Mode Collapse: Causes and Solutions
+
+Mode collapse is a critical issue where the GFlowNet focuses on a small subset of high-reward states instead of sampling proportionally to rewards across all modes.
+
+### Diagnosis
+```julia
+function detect_mode_collapse(model, n_samples=5000)
+    trajectories = [sample_trajectory(model) for _ in 1:n_samples]
+    terminal_states = [t.states[end] for t in trajectories]
+
+    state_counts = countmap(terminal_states)
+    sorted_counts = sort(collect(state_counts), by=x->x[2], rev=true)
+
+    top_mode_fraction = sorted_counts[1][2] / n_samples
+
+    if top_mode_fraction > 0.5
+        @warn "Mode collapse detected" top_mode_fraction
+        return true
+    end
+    return false
+end
+```
+
+### Comprehensive Solution Toolkit
+
+The following techniques address mode collapse, ordered by complexity:
+
+#### 1. ε-Uniform Exploration (Malkin et al. 2022)
+**Simplest solution.** Mix policy with uniform random actions:
+```julia
+config = TrainingConfig(
+    epsilon = 0.1,  # 10% random exploration
+    epsilon_decay = 0.995  # Anneal over training
+)
+```
+**Mechanism**: `P(a|s) = (1-ε) × P_F(a|s) + ε × Uniform(applicable_actions)`
+
+#### 2. Entropy Regularization (AISTATS 2024)
+Add entropy bonus to encourage diverse action selection:
+```julia
+config = TrainingConfig(
+    entropy_weight = 0.01  # Encourages spread over actions
+)
+```
+
+#### 3. Experience Replay Buffer (JMLR 2023)
+Store and replay high-reward trajectories to maintain mode coverage:
+```julia
+config = TrainingConfig(
+    use_replay_buffer = true,
+    replay_buffer_size = 10000,
+    replay_ratio = 0.3  # 30% replay, 70% online
+)
+```
+
+#### 4. TLM Backward Sampling (ICLR 2025)
+**Most sophisticated.** Train backward policy by sampling backwards from terminal states proportionally to rewards. This implicitly learns path counts and bypasses forward path asymmetry.
+
+**Key insight**: Rather than learning path counts explicitly, TLM trains P_B(s|s') such that backward sampling from R(x)-weighted terminals recovers the correct distribution.
+
+```julia
+config = TrainingConfig(
+    objective = DETAILED_BALANCE,
+    use_backward_sampling = true,
+    backward_sample_weight = 0.5  # Mix forward and backward
+)
+```
+
+#### 5. Reward Shaping
+For extreme reward asymmetry, consider reward transformations:
+```julia
+# Log-transform to reduce asymmetry
+shaped_reward(state) = log(1 + original_reward(state))
+
+# Or temperature scaling
+shaped_reward(state) = original_reward(state)^(1/temperature)
+```
+
+### z_learning_rate_multiplier
+
+**Purpose**: Accelerate partition function convergence.
+
+**Why it helps**: Z often converges slower than policy networks. A higher multiplier speeds up Z learning without affecting other parameters.
+
+**Literature**: Peptide generation paper showed 2-5x multipliers improve training stability.
+
+```julia
+config = TrainingConfig(
+    z_learning_rate_multiplier = 2.0,  # Z learns 2x faster
+    partition_function_method = LEARNABLE_ESTIMATION
+)
+```
+
+**Note**: This is a convergence optimization, NOT a mode discovery mechanism. Use with ε-exploration for best results.
+
 ## Advanced Training Strategies
 
 ### 1. Curriculum Learning

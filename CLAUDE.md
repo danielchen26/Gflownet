@@ -98,6 +98,21 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
    - **Verification**: Balanced grid achieves 5.6% error from theoretical ratio
    - **Documentation**: See `docs/src/internals/implementation_notes/epsilon_exploration.md`
 
+13. **TLM Backward Sampling Support** ✅ (February 2025)
+   - Backward policy training via reward-weighted terminal sampling
+   - ICLR 2025 method for implicit path count learning
+   - Integration with DETAILED_BALANCE objective
+
+14. **Experience Replay Buffer** ✅ (February 2025)
+   - Priority-weighted replay for high-reward trajectories
+   - Configurable replay ratio and buffer size
+   - JMLR 2023 technique for mode retention
+
+15. **z_learning_rate_multiplier** ✅ (February 2025)
+   - Separate learning rate for partition function
+   - Accelerates Z convergence (2-5x typical)
+   - Based on peptide generation literature
+
 ## Project Roadmap and Vision
 
 GFlowNet.jl has a comprehensive development roadmap focused on making it the premier production-ready implementation of Generative Flow Networks. See [docs/src/internals/development_guides/roadmap.md](docs/src/internals/development_guides/roadmap.md) for detailed development phases, timelines, and success metrics.
@@ -108,6 +123,20 @@ GFlowNet.jl has a comprehensive development roadmap focused on making it the pre
 3. **Advanced Domains**: Molecular design, protein engineering, industrial applications
 4. **Developer Experience**: AutoML integration, debugging tools, model zoo
 5. **Ecosystem Integration**: PyTorch/JAX bridges, cloud deployment, MLflow
+
+## Mode Collapse Solutions
+
+GFlowNet.jl provides a comprehensive toolkit for addressing mode collapse:
+
+| Technique | Complexity | Reference | Config Parameter |
+|-----------|------------|-----------|------------------|
+| ε-Exploration | Low | Malkin et al. 2022 | `epsilon` |
+| Entropy Regularization | Low | AISTATS 2024 | `entropy_weight` |
+| Experience Replay | Medium | JMLR 2023 | `use_replay_buffer` |
+| TLM Backward Sampling | High | ICLR 2025 | `use_backward_sampling` |
+| Reward Shaping | Domain-specific | - | Custom `reward()` |
+
+See `.claude/agents/gflownet-training-expert.md` for detailed implementation guidance.
 
 ## Agent Coordination System
 
@@ -656,40 +685,65 @@ Track common query patterns to optimize future routing:
 - **Real-time Updates**: Polling-based system (250ms for metrics, 500ms for charts)
 - **3D Rendering**: High-resolution (256x256) textures with reward-weighted Gaussian smoothing
 
+#### Theme System (February 2025)
+- **4 themes**: cyberpunk (default neon), cream (light warm beige), glass (dark glassmorphism with amber), midnight (teal technical)
+- **CSS Variable Architecture**: All theming driven by CSS variables in `globals.css` — fonts, colors, radius, glow, glass blur, shadows
+- **ThemeContext Provider**: `useThemeLayout()` hook provides responsive layout parameters (compact/spacious modes, font sizes, spacing, colors)
+- **Chart Colors**: `useChartColors()` hook returns hex strings per theme for Recharts compatibility
+- **Persistence**: localStorage key `gflownet-theme` — ThemeProvider validates stored value against valid options
+- **Root Font-Size Scaling**: Each theme sets its own root font-size (12.5px to 15.5px) to scale all rem-based Tailwind utilities
+
 #### Key Components
-1. **Training Monitor**: 
+1. **Training Monitor**:
    - Two-row layout without scrolling
    - Real-time trajectory sampling window
    - Live metrics with smooth transitions
    - Full-width training progress charts
-   
-2. **3D Distribution View**: 
+
+2. **3D Distribution View**:
    - Smooth density surface with natural hill appearance
    - Toggle between smooth surface and discrete bars
    - Sphere-based posterior probability display
    - Proper Y-up coordinate system with XZ ground plane
-   
+
 3. **Training Dashboard**:
    - Full training history display (no slicing)
    - Synchronized zoom with Recharts Brush
    - Loss components breakdown chart
-   - Removed unused exploration_rate parameter
-   
-4. **Problem Setup**: 
-   - Interactive configuration for reward peaks
-   - Training parameter adjustment
-   - Real-time preview of reward landscape
+   - Theme-aware chart colors via `useChartColors()` hook
+
+4. **Problem Setup**:
+   - Three-step wizard: Domain Selection, Configuration, Training Setup
+   - Comprehensive parameter UI with collapsible sections
+   - Training objective cards with visual selector
+   - Configuration summary with live preview
+
+5. **Supporting Components**:
+   - **ThemeSelector**: Dropdown for theme switching with persistence
+   - **DomainSelector**: UI for domain selection (Phase 1 multi-domain foundation)
+   - **DomainConfigPanel**: Configuration editor for domain-specific parameters
+   - **TrainingControls**: Pause/resume/status controls for active training
+   - **ErrorPanel**: Error display with clear functionality
+   - **InfoTooltip**: Reusable tooltip with training parameter explanations
 
 #### File Structure
 ```
 src/utils/visualization/
 ├── api/
-│   ├── simple_server.jl    # Mock API with simulated training
-│   └── gflownet_server.jl  # Real GFlowNet integration (template)
+│   └── unified_server.jl  # Oxygen.jl REST API with real GFlowNet training
+├── core/
+│   ├── adapters.jl        # Domain adapter interface (apply_reward_shaping, etc.)
+│   ├── training_session.jl # Training session management and step!()
+│   └── domain_registry.jl # Domain registration system (Phase 1)
+├── domains/
+│   └── grid_world.jl      # GridWorld adapter with reward shaping
 └── web/
     ├── src/
-    │   ├── components/     # React UI components
-    │   └── visualizations/ # 3D visualization components
+    │   ├── components/     # React UI components (setup, controls, panels)
+    │   ├── contexts/       # React contexts (ThemeContext)
+    │   ├── visualizations/ # 3D visualization components
+    │   ├── services/       # API client (api.ts)
+    │   └── styles/         # CSS (globals.css with theme variables)
     └── package.json
 
 examples/core_features/visualization/

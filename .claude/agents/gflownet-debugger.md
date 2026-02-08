@@ -214,6 +214,54 @@ model = create_grid_world_gflownet(
 )
 ```
 
+### Pattern 6: "MethodError with ComponentVector gradients"
+**Diagnosis**: Function assumes gradients are NamedTuple but Zygote returns ComponentVector
+**Fix**: Use duck-typing or explicit type handling:
+```julia
+# Wrong: Assumes NamedTuple
+function process_grads(grads::NamedTuple)
+
+# Right: Handle ComponentVector
+function process_grads(grads)
+    if grads isa ComponentVector
+        # ComponentVector access
+        grads.log_Z
+    else
+        # NamedTuple access
+        grads[:log_Z]
+    end
+end
+```
+
+### Pattern 7: "Silent failures in backward sampling"
+**Diagnosis**: Errors caught but not logged, making debugging impossible
+**Detection**: Look for `catch` blocks without `@warn` or `@error`
+```bash
+# Find silent catches
+grep -rn "catch" src/ | grep -v "@warn\|@error\|rethrow"
+```
+**Fix**: Always log before returning nothing:
+```julia
+catch e
+    @warn "Backward sampling failed" exception=e state
+    return nothing
+end
+```
+
+### Pattern 8: "TrainingConfig parameter has no effect"
+**Diagnosis**: Parameter exposed in config but implementation missing
+**Detection**:
+```bash
+# Check if parameter is used anywhere
+grep -rn "config.your_parameter" src/
+```
+**Fix**: Either implement the feature or mark as experimental with warning:
+```julia
+if config.experimental_feature
+    @warn "experimental_feature is not yet fully implemented"
+end
+```
+
 ## Debug Workflow
 
 1. **Reproduce the Issue**

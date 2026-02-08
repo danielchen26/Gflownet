@@ -639,6 +639,72 @@ end
 end
 ```
 
+### Phase 9: Test Quality Guidelines
+
+**Task 9.1: Test Accuracy - Reflect Expected Behavior**
+
+Tests must accurately verify the intended behavior, not just that code runs:
+
+```julia
+# ❌ BAD: Wrong assertion (Z multiplier should CHANGE movement, not stop it)
+@testset "z_learning_rate_multiplier" begin
+    # Train with multiplier
+    config = TrainingConfig(z_learning_rate_multiplier = 2.0)
+    train_gflownet(model, config)
+
+    # WRONG: Testing for zero change
+    @test abs(Z_after - Z_initial) < 1e-6
+end
+
+# ✅ GOOD: Correct assertion (multiplier should increase Z movement)
+@testset "z_learning_rate_multiplier" begin
+    # Train without multiplier
+    model1 = deepcopy(model)
+    config1 = TrainingConfig(z_learning_rate_multiplier = 1.0)
+    train_gflownet(model1, config1)
+    z_change_baseline = abs(Z_after1 - Z_initial1)
+
+    # Train with multiplier
+    model2 = deepcopy(model)
+    config2 = TrainingConfig(z_learning_rate_multiplier = 2.0)
+    train_gflownet(model2, config2)
+    z_change_boosted = abs(Z_after2 - Z_initial2)
+
+    # CORRECT: Multiplier increases Z movement
+    @test z_change_boosted > z_change_baseline
+end
+```
+
+**Task 9.2: Edge Case Testing**
+
+For every parameter, test boundary conditions:
+
+```julia
+@testset "Parameter Edge Cases" begin
+    @testset "epsilon at boundaries" begin
+        @test_nowarn TrainingConfig(epsilon = 0.0)  # No exploration
+        @test_nowarn TrainingConfig(epsilon = 1.0)  # Full random
+        @test_throws ArgumentError TrainingConfig(epsilon = -0.1)  # Invalid
+        @test_throws ArgumentError TrainingConfig(epsilon = 1.5)   # Invalid
+    end
+
+    @testset "Different parameter values" begin
+        for lr in [0.0001, 0.001, 0.01, 0.1]
+            @test_nowarn TrainingConfig(learning_rate = lr)
+        end
+    end
+end
+```
+
+**Task 9.3: New Feature Testing Requirements**
+
+Every new feature MUST include:
+- [ ] Basic functionality test (does it work?)
+- [ ] Edge case tests (boundary values, invalid inputs)
+- [ ] Integration test (works with full training loop)
+- [ ] Gradient test if differentiable (Zygote compatibility)
+- [ ] Comparison test if optimization (measurable improvement)
+
 ## Complete Testing Checklist
 
 Use TodoWrite to create this comprehensive testing checklist:
@@ -687,6 +753,12 @@ Performance:
 Regression Tests:
 - [ ] Add test for any bug fixes
 - [ ] Previous bugs don't reoccur
+
+Test Quality:
+- [ ] Tests reflect expected behavior accurately
+- [ ] Edge cases tested (boundary values, invalid inputs)
+- [ ] Comparison tests for optimizations (measurable improvement)
+- [ ] Gradient tests for differentiable features
 ```
 
 ## Test File Template
