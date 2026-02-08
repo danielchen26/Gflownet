@@ -42,6 +42,9 @@ end
 Check if gradients contain invalid values.
 """
 function any_invalid(gradients)
+    if gradients isa AbstractArray
+        return any(isnan, gradients) || any(isinf, gradients)
+    end
     for grad in values(gradients)
         if grad isa AbstractArray
             if any(isnan, grad) || any(isinf, grad)

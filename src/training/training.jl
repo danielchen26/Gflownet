@@ -167,9 +167,12 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
 
             # Mix fresh and replay samples if using replay buffer
             training_data = if !isnothing(replay_buffer) && length(replay_buffer) >= config.batch_size
-                # Add fresh trajectories to buffer with priority based on initial estimate
+                # Add fresh trajectories to buffer with reward-based priority
+                # Higher reward → higher priority → more likely to be replayed
+                # This helps retain high-reward modes (critical for mode collapse prevention)
                 for traj in fresh_trajectories
-                    priority = GFlowNet.compute_trajectory_priority(1.0)  # Initial priority
+                    traj_reward = GFlowNet.reward(traj.states[end])
+                    priority = GFlowNet.compute_trajectory_priority(traj_reward)
                     GFlowNet.add!(replay_buffer, traj, priority)
                 end
 
@@ -192,7 +195,8 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
                 # No replay buffer or not enough samples yet - just add to buffer and use fresh
                 if !isnothing(replay_buffer)
                     for traj in fresh_trajectories
-                        GFlowNet.add!(replay_buffer, traj, 1.0)
+                        traj_reward = GFlowNet.reward(traj.states[end])
+                        GFlowNet.add!(replay_buffer, traj, GFlowNet.compute_trajectory_priority(traj_reward))
                     end
                 end
                 (trajectories=fresh_trajectories, weights=ones(length(fresh_trajectories)), use_weights=false)

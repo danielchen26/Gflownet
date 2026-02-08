@@ -177,11 +177,15 @@ function compute_flow_field(adapter::GridWorldAdapter, model::GFlowNetModel)::Di
             1.0
         end
 
+        # Get reward at this position
+        reward_val = get(adapter.reward_positions, (x, y), 0.0)
+
         push!(flow_data, Dict(
-            "position"  => [x, y],
-            "velocity"  => velocity,
-            "magnitude" => norm(velocity),
-            "flow"      => flow_val
+            "position"   => [x, y],
+            "velocity"   => velocity,
+            "magnitude"  => norm(velocity),
+            "flow_value" => flow_val,
+            "reward"     => reward_val
         ))
     end
 
@@ -261,6 +265,51 @@ function compute_distribution_data(adapter::GridWorldAdapter, model::GFlowNetMod
 end
 
 # ============================================
+# Reward Shaping (Domain-Agnostic Interface)
+# ============================================
+
+"""
+    apply_reward_shaping(adapter::GridWorldAdapter, reward_positions::Dict{Tuple{Int,Int}, Float64})
+
+Grid World-specific reward shaping to compensate for structural path asymmetry.
+
+In a grid world with only Right/Up moves from (1,1), the number of unique paths
+to position (x,y) is given by `binomial(x+y-2, x-1)`. This creates extreme
+asymmetry: e.g., 70:1 for 5×5 grid, 3432:1 for 8×8 grid.
+
+Scales each reward inversely to its path count so that all modes
+receive equal total reward flow, making minority modes discoverable.
+
+Formula: `adjusted_R = R × (max_paths / path_count_for_position)`
+
+See: `docs/src/internals/implementation_notes/mode_collapse_test_results.md`
+"""
+function apply_reward_shaping(adapter::GridWorldAdapter, reward_positions::Dict{Tuple{Int,Int}, Float64})
+    if length(reward_positions) <= 1
+        return reward_positions
+    end
+
+    # Compute path counts using binomial coefficient
+    # paths to (x,y) from (1,1) with Right/Up moves = binomial(x+y-2, x-1)
+    path_counts = Dict{Tuple{Int,Int}, Int}()
+    for (pos, _) in reward_positions
+        x, y = pos
+        path_counts[pos] = binomial(x + y - 2, x - 1)
+    end
+    max_paths = maximum(values(path_counts))
+
+    # Scale rewards inversely to path counts
+    shaped = Dict{Tuple{Int,Int}, Float64}()
+    for (pos, r) in reward_positions
+        pc = path_counts[pos]
+        shaped[pos] = pc > 0 ? r * (max_paths / pc) : r
+    end
+
+    @info "Grid world reward shaping applied" shaped path_counts max_paths
+    return shaped
+end
+
+# ============================================
 # Helper Functions
 # ============================================
 
@@ -305,4 +354,120 @@ function compute_velocity_from_policy(probs, actions)
         end
     end
     return [vx, vy]
+end
+
+# ============================================
+# Domain Registry Interface (Phase 1)
+# ============================================
+
+"""Get unique domain identifier"""
+function get_domain_id(adapter::GridWorldAdapter)::String
+    return "grid_world"
+end
+
+"""Get human-readable domain description"""
+function get_domain_description(adapter::GridWorldAdapter)::String
+    return "2D grid navigation with configurable rewards and obstacles. Perfect for learning GFlowNet fundamentals."
+end
+
+"""Get JSON Schema for domain configuration"""
+function get_config_schema(adapter::GridWorldAdapter)::Dict
+    return Dict(
+        "type" => "object",
+        "properties" => Dict(
+            "grid_size" => Dict(
+                "type" => "integer",
+                "description" => "Size of the grid (NxN)",
+                "default" => 8,
+                "minimum" => 4,
+                "maximum" => 32
+            ),
+            "reward_peaks" => Dict(
+                "type" => "array",
+                "description" => "Positions and values of reward peaks",
+                "items" => Dict(
+                    "type" => "object",
+                    "properties" => Dict(
+                        "position" => Dict("type" => "array", "items" => Dict("type" => "integer")),
+                        "intensity" => Dict("type" => "number")
+                    )
+                )
+            ),
+            "obstacles" => Dict(
+                "type" => "array",
+                "description" => "Positions of obstacles",
+                "items" => Dict(
+                    "type" => "array",
+                    "items" => Dict("type" => "integer")
+                )
+            )
+        ),
+        "required" => ["grid_size"]
+    )
+end
+
+"""Validate domain configuration against schema"""
+function validate_config(adapter::GridWorldAdapter, config::Dict)::Tuple{Bool, Union{String, Nothing}}
+    # Check grid_size
+    if haskey(config, "grid_size")
+        gs = config["grid_size"]
+        if !isa(gs, Integer) || gs < 4 || gs > 32
+            return (false, "grid_size must be an integer between 4 and 32")
+        end
+    end
+
+    # Check reward_peaks if present
+    if haskey(config, "reward_peaks")
+        rp = config["reward_peaks"]
+        if !isa(rp, Vector)
+            return (false, "reward_peaks must be an array")
+        end
+        for (i, peak) in enumerate(rp)
+            if !haskey(peak, "position") || !haskey(peak, "intensity")
+                return (false, "reward_peaks[$i] must have position and intensity")
+            end
+        end
+    end
+
+    return (true, nothing)
+end
+
+"""Create GridWorldAdapter from configuration"""
+function create_from_config(::Type{GridWorldAdapter}, config::Dict)::GridWorldAdapter
+    grid_size = get(config, "grid_size", 8)
+
+    # Parse reward peaks
+    reward_positions = Dict{Tuple{Int,Int}, Float64}()
+    if haskey(config, "reward_peaks")
+        for peak in config["reward_peaks"]
+            pos = peak["position"]
+            intensity = peak["intensity"]
+            reward_positions[(pos[1], pos[2])] = Float64(intensity)
+        end
+    else
+        # Default: corner reward
+        reward_positions[(grid_size, grid_size)] = 10.0
+    end
+
+    return GridWorldAdapter(grid_size, reward_positions)
+end
+
+# Default constructor for metadata queries
+function GridWorldAdapter()
+    return GridWorldAdapter(8, Dict((8, 8) => 10.0))
+end
+
+"""Get domain tags for categorization"""
+function get_domain_tags(adapter::GridWorldAdapter)::Vector{String}
+    return ["navigation", "2d", "beginner"]
+end
+
+"""Check if domain is a built-in domain"""
+function is_builtin_domain(adapter::GridWorldAdapter)::Bool
+    return true
+end
+
+"""Check if domain is marked as popular"""
+function is_popular_domain(adapter::GridWorldAdapter)::Bool
+    return true
 end

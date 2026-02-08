@@ -2,51 +2,362 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =================================================================
+   ROOT FONT-SIZE PER THEME — the #1 layout driver.
+   All rem-based Tailwind utilities (text-sm, p-3, gap-2, etc.)
+   scale proportionally with this value. This cascades everywhere.
+   Sits outside @layer so it applies with maximum priority.
+   ================================================================= */
+:root                    { font-size: 14px; }
+:root[data-theme="cream"]    { font-size: 15.5px; }
+:root[data-theme="glass"]    { font-size: 14px; }
+:root[data-theme="midnight"] { font-size: 12.5px; }
+
 @layer base {
   :root {
     --background: 250 250 251;
     --foreground: 10 10 11;
-    
+
     --card: 255 255 255;
     --card-foreground: 10 10 11;
-    
+
     --primary: 139 92 246;
     --primary-foreground: 255 255 255;
-    
+
     --secondary: 255 107 53;
     --secondary-foreground: 255 255 255;
-    
+
     --accent: 0 217 255;
     --accent-foreground: 10 10 11;
-    
+
     --muted: 245 245 247;
     --muted-foreground: 107 114 128;
-    
+
     --border: 229 231 235;
     --ring: 139 92 246;
+
+    /* -- Typography ---------------------------------------- */
+    --font-sans: 'Inter';
+    --font-mono: 'JetBrains Mono';
+
+    /* -- Neon accent colors -------------------------------- */
+    --neon-purple: 189 0 255;
+    --neon-blue: 0 217 255;
+    --neon-pink: 255 0 110;
+    --neon-green: 0 255 136;
+    --neon-orange: 255 142 83;
+    --neon-cyan: 0 229 255;
+
+    /* -- Dark surfaces ------------------------------------- */
+    --dark-bg: 10 10 11;
+    --dark-panel: 26 26 29;
+    --dark-border: 42 42 45;
+
+    /* -- Gradients ----------------------------------------- */
+    --gradient-purple-from: 139 92 246;
+    --gradient-purple-via: 167 139 250;
+    --gradient-purple-to: 217 70 239;
+    --gradient-orange-from: 255 107 53;
+    --gradient-orange-via: 255 142 83;
+    --gradient-orange-to: 255 160 122;
+    --gradient-blue-from: 59 130 246;
+    --gradient-blue-via: 96 165 250;
+    --gradient-blue-to: 6 182 212;
+    --gradient-green-from: 16 185 129;
+    --gradient-green-via: 52 211 153;
+    --gradient-green-to: 110 231 183;
+
+    /* -- Border radius ------------------------------------- */
+    --radius-sm: 0.125rem;
+    --radius: 0.25rem;
+    --radius-md: 0.375rem;
+    --radius-lg: 0.5rem;
+    --radius-xl: 0.75rem;
+    --radius-2xl: 1rem;
+    --radius-3xl: 1.5rem;
+
+    /* -- Effects ------------------------------------------- */
+    --glass-blur: 16px;
+    --glass-opacity: 0.8;
+    --glow-spread: 10px;
+    --glow-opacity: 0.5;
+    --shadow-style: 0 4px 24px -4px rgb(0 0 0 / 0.3);
+    --animation-speed: 2s;
+    --animation-speed-slow: 3s;
+
+    /* -- Layout spacing ------------------------------------ */
+    --card-pad-x: 0.75rem;
+    --card-pad-y: 0.75rem;
+    --section-gap: 0.5rem;
+    --header-pad-y: 1rem;
   }
-  
+
   .dark {
     --background: 10 10 11;
     --foreground: 255 255 255;
-    
     --card: 26 26 29;
     --card-foreground: 255 255 255;
-    
     --primary: 189 0 255;
     --primary-foreground: 255 255 255;
-    
     --secondary: 255 107 53;
     --secondary-foreground: 255 255 255;
-    
     --accent: 0 217 255;
     --accent-foreground: 10 10 11;
-    
     --muted: 42 42 45;
     --muted-foreground: 161 161 170;
-    
     --border: 42 42 45;
     --ring: 189 0 255;
+  }
+
+  /* =================================================================
+     THEME 1: Cyberpunk (default)
+     Reference: image.png — Dark neon dashboard
+     Personality: Electric, sharp, glowing. Tech-noir aesthetic.
+     Font: Inter (geometric) + JetBrains Mono (dev-focused)
+     ================================================================= */
+  /* Default values in :root + .dark — no override needed */
+
+
+  /* =================================================================
+     THEME 2: Cream
+     Reference: image-v1.png — Light warm beige dashboard
+     Personality: Warm, airy, clean. Professional studio aesthetic.
+     Font: DM Sans (soft, readable) + IBM Plex Mono (clean)
+     White cards, soft shadows, warm coral accents, no glow.
+     ================================================================= */
+  [data-theme="cream"] {
+    /* Typography */
+    --font-sans: 'DM Sans';
+    --font-mono: 'IBM Plex Mono';
+
+    /* Base — override .dark to light values */
+    --background: 245 240 233;
+    --foreground: 50 46 42;
+    --card: 255 255 255;
+    --card-foreground: 50 46 42;
+    --primary: 212 117 100;
+    --primary-foreground: 255 255 255;
+    --secondary: 168 142 118;
+    --secondary-foreground: 255 255 255;
+    --accent: 92 163 134;
+    --accent-foreground: 255 255 255;
+    --muted: 237 231 224;
+    --muted-foreground: 148 142 136;
+    --border: 224 216 208;
+    --ring: 212 117 100;
+
+    /* Accent colors — muted, warm palette */
+    --neon-purple: 212 117 100;
+    --neon-blue: 138 155 168;
+    --neon-pink: 194 120 120;
+    --neon-green: 92 163 134;
+    --neon-orange: 196 155 110;
+    --neon-cyan: 120 163 160;
+
+    /* Surfaces — light cream & white */
+    --dark-bg: 245 240 233;
+    --dark-panel: 255 255 255;
+    --dark-border: 224 216 208;
+
+    /* Gradients — warm, muted */
+    --gradient-purple-from: 212 117 100;
+    --gradient-purple-via: 220 150 130;
+    --gradient-purple-to: 194 120 120;
+    --gradient-orange-from: 196 155 110;
+    --gradient-orange-via: 210 175 140;
+    --gradient-orange-to: 220 190 160;
+    --gradient-blue-from: 138 155 168;
+    --gradient-blue-via: 120 163 160;
+    --gradient-blue-to: 92 163 134;
+    --gradient-green-from: 92 163 134;
+    --gradient-green-via: 120 180 150;
+    --gradient-green-to: 145 195 170;
+
+    /* Border radius — large, rounded, friendly */
+    --radius-sm: 0.375rem;
+    --radius: 0.5rem;
+    --radius-md: 0.625rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    --radius-2xl: 1.25rem;
+    --radius-3xl: 1.5rem;
+
+    /* Effects — no glow, soft shadows only */
+    --glass-blur: 0px;
+    --glass-opacity: 1;
+    --glow-spread: 0px;
+    --glow-opacity: 0;
+    --shadow-style: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+    --animation-speed: 2s;
+    --animation-speed-slow: 3s;
+
+    /* Layout — spacious, airy, generous whitespace */
+    --card-pad-x: 1.5rem;
+    --card-pad-y: 1.25rem;
+    --section-gap: 1.25rem;
+    --header-pad-y: 1.25rem;
+  }
+
+
+  /* =================================================================
+     THEME 3: Glass
+     Reference: image-v2.png — Dark glassmorphism with amber/gold
+     Personality: Luxurious, premium, translucent. Fintech aesthetic.
+     Font: DM Sans (polished) + JetBrains Mono
+     Heavy backdrop blur, warm amber accents, transparent panels.
+     ================================================================= */
+  [data-theme="glass"] {
+    /* Typography */
+    --font-sans: 'DM Sans';
+    --font-mono: 'JetBrains Mono';
+
+    /* Base */
+    --background: 13 10 7;
+    --foreground: 255 248 240;
+    --card: 30 24 18;
+    --card-foreground: 255 248 240;
+    --primary: 245 158 11;
+    --primary-foreground: 13 10 7;
+    --secondary: 234 88 12;
+    --secondary-foreground: 255 255 255;
+    --accent: 249 115 22;
+    --accent-foreground: 13 10 7;
+    --muted: 40 32 24;
+    --muted-foreground: 180 165 145;
+    --border: 55 45 35;
+    --ring: 245 158 11;
+
+    /* Accent colors — amber, gold, warm orange */
+    --neon-purple: 245 158 11;
+    --neon-blue: 234 88 12;
+    --neon-pink: 220 56 56;
+    --neon-green: 234 179 8;
+    --neon-orange: 249 115 22;
+    --neon-cyan: 251 191 36;
+
+    /* Surfaces — very dark warm brown */
+    --dark-bg: 13 10 7;
+    --dark-panel: 26 21 16;
+    --dark-border: 55 45 35;
+
+    /* Gradients — warm amber to orange */
+    --gradient-purple-from: 245 158 11;
+    --gradient-purple-via: 249 115 22;
+    --gradient-purple-to: 234 88 12;
+    --gradient-orange-from: 220 56 56;
+    --gradient-orange-via: 234 88 12;
+    --gradient-orange-to: 249 115 22;
+    --gradient-blue-from: 251 191 36;
+    --gradient-blue-via: 245 158 11;
+    --gradient-blue-to: 234 88 12;
+    --gradient-green-from: 234 179 8;
+    --gradient-green-via: 251 191 36;
+    --gradient-green-to: 253 224 71;
+
+    /* Border radius — large, premium */
+    --radius-sm: 0.375rem;
+    --radius: 0.5rem;
+    --radius-md: 0.75rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.25rem;
+    --radius-2xl: 1.5rem;
+    --radius-3xl: 2rem;
+
+    /* Effects — heavy glass, warm glow */
+    --glass-blur: 24px;
+    --glass-opacity: 0.55;
+    --glow-spread: 12px;
+    --glow-opacity: 0.35;
+    --shadow-style: 0 8px 32px -4px rgb(245 158 11 / 0.12), 0 4px 16px -2px rgb(0 0 0 / 0.25);
+    --animation-speed: 2.5s;
+    --animation-speed-slow: 4s;
+
+    /* Layout — premium, moderate spacing */
+    --card-pad-x: 1rem;
+    --card-pad-y: 0.875rem;
+    --section-gap: 0.75rem;
+    --header-pad-y: 1.125rem;
+  }
+
+
+  /* =================================================================
+     THEME 4: Midnight
+     Reference: image-v3.png — Dark technical/industrial dashboard
+     Personality: Precise, data-dense, professional. Control-room aesthetic.
+     Font: Space Grotesk (wider, technical) + IBM Plex Mono (clean data)
+     Teal/cyan accents, minimal glow, sharp corners, dense data feel.
+     ================================================================= */
+  [data-theme="midnight"] {
+    /* Typography */
+    --font-sans: 'Space Grotesk';
+    --font-mono: 'IBM Plex Mono';
+
+    /* Base */
+    --background: 7 11 18;
+    --foreground: 230 237 243;
+    --card: 14 22 33;
+    --card-foreground: 230 237 243;
+    --primary: 20 184 166;
+    --primary-foreground: 7 11 18;
+    --secondary: 59 130 246;
+    --secondary-foreground: 255 255 255;
+    --accent: 6 182 212;
+    --accent-foreground: 7 11 18;
+    --muted: 22 33 48;
+    --muted-foreground: 130 145 165;
+    --border: 30 45 65;
+    --ring: 20 184 166;
+
+    /* Accent colors — teal, cyan, cool blues */
+    --neon-purple: 20 184 166;
+    --neon-blue: 6 182 212;
+    --neon-pink: 59 130 246;
+    --neon-green: 16 185 129;
+    --neon-orange: 245 158 11;
+    --neon-cyan: 34 211 238;
+
+    /* Surfaces — deep blue-black */
+    --dark-bg: 7 11 18;
+    --dark-panel: 14 22 33;
+    --dark-border: 30 45 65;
+
+    /* Gradients — cool teal to cyan */
+    --gradient-purple-from: 20 184 166;
+    --gradient-purple-via: 13 148 136;
+    --gradient-purple-to: 6 182 212;
+    --gradient-orange-from: 245 158 11;
+    --gradient-orange-via: 217 119 6;
+    --gradient-orange-to: 234 88 12;
+    --gradient-blue-from: 59 130 246;
+    --gradient-blue-via: 96 165 250;
+    --gradient-blue-to: 6 182 212;
+    --gradient-green-from: 16 185 129;
+    --gradient-green-via: 20 184 166;
+    --gradient-green-to: 34 211 238;
+
+    /* Border radius — sharp, technical */
+    --radius-sm: 0.0625rem;
+    --radius: 0.125rem;
+    --radius-md: 0.25rem;
+    --radius-lg: 0.375rem;
+    --radius-xl: 0.5rem;
+    --radius-2xl: 0.625rem;
+    --radius-3xl: 0.75rem;
+
+    /* Effects — minimal glow, tight shadows */
+    --glass-blur: 8px;
+    --glass-opacity: 0.92;
+    --glow-spread: 4px;
+    --glow-opacity: 0.15;
+    --shadow-style: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+    --animation-speed: 1.5s;
+    --animation-speed-slow: 2s;
+
+    /* Layout — data-dense, tight, compact */
+    --card-pad-x: 0.375rem;
+    --card-pad-y: 0.25rem;
+    --section-gap: 0.25rem;
+    --header-pad-y: 0.5rem;
   }
 }
 
@@ -55,7 +366,7 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
-  
+
   * {
     @apply border-border;
   }
@@ -67,60 +378,65 @@
     scrollbar-width: thin;
     scrollbar-color: theme('colors.muted.DEFAULT') transparent;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar-thumb {
     @apply bg-muted rounded-full;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground;
   }
 }
 
-/* Glassmorphism effect */
+/* Glassmorphism -- theme-aware blur and opacity */
 @layer utilities {
   .glass {
-    @apply backdrop-blur-lg bg-card/80 border border-border/50;
+    backdrop-filter: blur(var(--glass-blur));
+    background-color: rgb(var(--card) / var(--glass-opacity));
+    border: 1px solid rgb(var(--border) / 0.5);
   }
-  
+
   .glass-dark {
-    @apply backdrop-blur-lg bg-dark-panel/80 border border-dark-border/50;
+    backdrop-filter: blur(var(--glass-blur));
+    background-color: rgb(var(--dark-panel) / var(--glass-opacity));
+    border: 1px solid rgb(var(--dark-border) / 0.5);
+    box-shadow: var(--shadow-style);
   }
 }
 
-/* Neon glow effects */
+/* Neon glow effects -- theme-aware intensity */
 @layer utilities {
   .neon-glow-purple {
-    filter: drop-shadow(0 0 10px rgba(189, 0, 255, 0.5)) 
-            drop-shadow(0 0 20px rgba(189, 0, 255, 0.3)) 
-            drop-shadow(0 0 30px rgba(189, 0, 255, 0.2));
+    filter: drop-shadow(0 0 var(--glow-spread) rgb(var(--neon-purple) / var(--glow-opacity)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 2) rgb(var(--neon-purple) / calc(var(--glow-opacity) * 0.6)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 3) rgb(var(--neon-purple) / calc(var(--glow-opacity) * 0.4)));
   }
-  
+
   .neon-glow-blue {
-    filter: drop-shadow(0 0 10px rgba(0, 217, 255, 0.5)) 
-            drop-shadow(0 0 20px rgba(0, 217, 255, 0.3)) 
-            drop-shadow(0 0 30px rgba(0, 217, 255, 0.2));
+    filter: drop-shadow(0 0 var(--glow-spread) rgb(var(--neon-blue) / var(--glow-opacity)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 2) rgb(var(--neon-blue) / calc(var(--glow-opacity) * 0.6)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 3) rgb(var(--neon-blue) / calc(var(--glow-opacity) * 0.4)));
   }
-  
+
   .neon-glow-pink {
-    filter: drop-shadow(0 0 10px rgba(255, 0, 110, 0.5)) 
-            drop-shadow(0 0 20px rgba(255, 0, 110, 0.3)) 
-            drop-shadow(0 0 30px rgba(255, 0, 110, 0.2));
+    filter: drop-shadow(0 0 var(--glow-spread) rgb(var(--neon-pink) / var(--glow-opacity)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 2) rgb(var(--neon-pink) / calc(var(--glow-opacity) * 0.6)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 3) rgb(var(--neon-pink) / calc(var(--glow-opacity) * 0.4)));
   }
-  
+
   .neon-glow-green {
-    filter: drop-shadow(0 0 10px rgba(0, 255, 136, 0.5)) 
-            drop-shadow(0 0 20px rgba(0, 255, 136, 0.3)) 
-            drop-shadow(0 0 30px rgba(0, 255, 136, 0.2));
+    filter: drop-shadow(0 0 var(--glow-spread) rgb(var(--neon-green) / var(--glow-opacity)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 2) rgb(var(--neon-green) / calc(var(--glow-opacity) * 0.6)))
+            drop-shadow(0 0 calc(var(--glow-spread) * 3) rgb(var(--neon-green) / calc(var(--glow-opacity) * 0.4)));
   }
 }
 
@@ -129,8 +445,164 @@
   .gradient-text {
     @apply bg-gradient-to-r from-gradient-purple-from via-gradient-purple-via to-gradient-purple-to bg-clip-text text-transparent;
   }
-  
+
   .gradient-text-orange {
     @apply bg-gradient-to-r from-gradient-orange-from via-gradient-orange-via to-gradient-orange-to bg-clip-text text-transparent;
   }
+}
+
+/* =================================================================
+   CREAM THEME: Light-mode overrides
+   These rules sit OUTSIDE @layer so they have maximum specificity
+   to override Tailwind utilities like text-white, bg-white/*, etc.
+   In cream, "white" text must become dark, and "white" backgrounds
+   must become subtle foreground tints.
+   ================================================================= */
+:root[data-theme="cream"] .text-white,
+:root[data-theme="cream"] .group:hover .group-hover\:text-white,
+:root[data-theme="cream"] .hover\:text-white:hover {
+  color: rgb(var(--foreground));
+}
+
+:root[data-theme="cream"] .bg-white\/5,
+:root[data-theme="cream"] .hover\:bg-white\/5:hover {
+  background-color: rgb(var(--foreground) / 0.04);
+}
+
+:root[data-theme="cream"] .bg-white\/10 {
+  background-color: rgb(var(--foreground) / 0.06);
+}
+
+/* Cream scrollbar — warm tones */
+:root[data-theme="cream"] .scrollbar-thin {
+  scrollbar-color: rgb(210 200 190) transparent;
+}
+
+:root[data-theme="cream"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgb(210 200 190);
+}
+
+:root[data-theme="cream"] .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(180 170 160);
+}
+
+
+/* =================================================================
+   THEME-SPECIFIC LAYOUT & STRUCTURAL OVERRIDES
+   These override Tailwind utility classes for layout restructuring.
+   Outside @layer for maximum specificity.
+   ================================================================= */
+
+/* ─── CREAM: Spacious, solid cards, generous breathing room ─── */
+:root[data-theme="cream"] .glass-dark {
+  backdrop-filter: none;
+  background-color: rgb(255 255 255);
+  border: 1px solid rgb(224 216 208);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  padding: var(--card-pad-y) var(--card-pad-x);
+}
+
+:root[data-theme="cream"] .glass {
+  backdrop-filter: none;
+  background-color: rgb(255 255 255);
+  border: 1px solid rgb(224 216 208);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04);
+}
+
+/* Cream header: warm, clean, well-spaced */
+:root[data-theme="cream"] header {
+  background-color: rgb(255 255 255 / 0.95);
+  border-bottom-color: rgb(224 216 208);
+}
+
+:root[data-theme="cream"] nav {
+  background-color: rgb(255 255 255 / 0.9);
+  border-bottom-color: rgb(237 231 224);
+}
+
+/* Cream: select dropdowns & inputs */
+:root[data-theme="cream"] select,
+:root[data-theme="cream"] input[type="number"] {
+  background-color: rgb(245 240 233);
+  border-color: rgb(224 216 208);
+  color: rgb(50 46 42);
+}
+
+/* ─── GLASS: Heavy translucent panels with amber glow ─── */
+:root[data-theme="glass"] .glass-dark {
+  backdrop-filter: blur(24px) saturate(1.3);
+  background-color: rgb(26 21 16 / 0.55);
+  border: 1px solid rgb(245 158 11 / 0.15);
+  box-shadow:
+    0 8px 32px -4px rgb(245 158 11 / 0.08),
+    0 4px 16px -2px rgb(0 0 0 / 0.25),
+    inset 0 1px 0 0 rgb(245 158 11 / 0.06);
+}
+
+:root[data-theme="glass"] .glass-dark:hover {
+  border-color: rgb(245 158 11 / 0.25);
+}
+
+:root[data-theme="glass"] header {
+  background-color: rgb(13 10 7 / 0.7);
+  backdrop-filter: blur(20px) saturate(1.2);
+}
+
+:root[data-theme="glass"] nav {
+  background-color: rgb(13 10 7 / 0.5);
+  backdrop-filter: blur(16px);
+}
+
+/* Glass: select dropdowns & inputs */
+:root[data-theme="glass"] select,
+:root[data-theme="glass"] input[type="number"] {
+  background-color: rgb(26 21 16 / 0.8);
+  border-color: rgb(55 45 35);
+  color: rgb(255 248 240);
+}
+
+/* ─── MIDNIGHT: Ultra-dense, sharp, technical panels ─── */
+:root[data-theme="midnight"] .glass-dark {
+  backdrop-filter: blur(4px);
+  background-color: rgb(14 22 33 / 0.95);
+  border: 1px solid rgb(30 45 65);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  padding: var(--card-pad-y) var(--card-pad-x);
+}
+
+:root[data-theme="midnight"] header {
+  background-color: rgb(7 11 18 / 0.97);
+  border-bottom: 1px solid rgb(30 45 65);
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+:root[data-theme="midnight"] nav {
+  background-color: rgb(7 11 18 / 0.95);
+  border-bottom: 1px solid rgb(30 45 65 / 0.5);
+}
+
+/* Midnight: compact nav tabs */
+:root[data-theme="midnight"] nav button {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+/* Midnight: select dropdowns & inputs */
+:root[data-theme="midnight"] select,
+:root[data-theme="midnight"] input[type="number"] {
+  background-color: rgb(14 22 33);
+  border-color: rgb(30 45 65);
+  color: rgb(230 237 243);
+}
+
+/* Midnight: tighter range sliders */
+:root[data-theme="midnight"] input[type="range"] {
+  height: 2px;
+}
+
+/* Midnight: font weight for data density */
+:root[data-theme="midnight"] .font-mono {
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }

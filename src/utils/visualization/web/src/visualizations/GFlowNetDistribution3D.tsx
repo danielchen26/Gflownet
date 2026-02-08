@@ -75,28 +75,29 @@ function DensitySurface({ trajectories, gridSize }: { trajectories: TrajectoryDa
     const resolution = 64
     const visitCounts = Array(resolution).fill(null).map(() => Array(resolution).fill(0))
 
-    // Count visits with Gaussian smoothing
+    // Count ENDPOINTS only with Gaussian smoothing
+    // Each trajectory contributes one data point: where it terminated
     trajectories.forEach(traj => {
-      traj.states.forEach(state => {
-        // Map state [1, gridSize] to normalized [0, 1]
-        const normX = (state[0] - 1) / Math.max(1, gridSize - 1)
-        const normY = (state[1] - 1) / Math.max(1, gridSize - 1)
+      if (traj.states.length === 0) return
+      const endpoint = traj.states[traj.states.length - 1]
 
-        const centerX = normX * (resolution - 1)
-        const centerY = normY * (resolution - 1)
+      // Map state [1, gridSize] to normalized [0, 1]
+      const normX = (endpoint[0] - 1) / Math.max(1, gridSize - 1)
+      const normY = (endpoint[1] - 1) / Math.max(1, gridSize - 1)
 
-        // Apply Gaussian kernel
-        const sigma = resolution / 12
-        const rewardWeight = Math.max(0.1, traj.total_reward / 10)
+      const centerX = normX * (resolution - 1)
+      const centerY = normY * (resolution - 1)
 
-        for (let x = 0; x < resolution; x++) {
-          for (let y = 0; y < resolution; y++) {
-            const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2)
-            const weight = Math.exp(-(dist ** 2) / (2 * sigma ** 2)) * rewardWeight
-            visitCounts[x][y] += weight
-          }
+      // Apply Gaussian kernel — no reward weighting, pure count-based
+      const sigma = resolution / 12
+
+      for (let x = 0; x < resolution; x++) {
+        for (let y = 0; y < resolution; y++) {
+          const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2)
+          const weight = Math.exp(-(dist ** 2) / (2 * sigma ** 2))
+          visitCounts[x][y] += weight
         }
-      })
+      }
     })
 
     // Find max for normalization
@@ -188,14 +189,14 @@ function DensityBars({ trajectories, gridSize }: { trajectories: TrajectoryData[
     const visitCounts = Array(gridSize).fill(null).map(() => Array(gridSize).fill(0))
     let maxCount = 0
 
+    // Count ENDPOINTS only — where each trajectory terminated
     trajectories.forEach(traj => {
-      traj.states.forEach(state => {
-        // State [1, gridSize] to index [0, gridSize-1]
-        const cellX = Math.floor(Math.max(0, Math.min(gridSize - 1, state[0] - 1)))
-        const cellY = Math.floor(Math.max(0, Math.min(gridSize - 1, state[1] - 1)))
-        visitCounts[cellX][cellY]++
-        maxCount = Math.max(maxCount, visitCounts[cellX][cellY])
-      })
+      if (traj.states.length === 0) return
+      const endpoint = traj.states[traj.states.length - 1]
+      const cellX = Math.floor(Math.max(0, Math.min(gridSize - 1, endpoint[0] - 1)))
+      const cellY = Math.floor(Math.max(0, Math.min(gridSize - 1, endpoint[1] - 1)))
+      visitCounts[cellX][cellY]++
+      maxCount = Math.max(maxCount, visitCounts[cellX][cellY])
     })
 
     return { visitCounts, maxCount: maxCount || 1 }
@@ -258,13 +259,14 @@ function TrajectoryDensity({ trajectories, gridSize }: { trajectories: Trajector
     ctx.clearRect(0, 0, size, size)
 
     const visitCounts = new Map<string, number>()
+    // Count ENDPOINTS only
     trajectories.forEach(traj => {
-      traj.states.forEach(state => {
-        const cellX = Math.floor(Math.max(0, Math.min(gridSize - 1, state[0] - 1)))
-        const cellY = Math.floor(Math.max(0, Math.min(gridSize - 1, state[1] - 1)))
-        const key = `${cellX},${cellY}`
-        visitCounts.set(key, (visitCounts.get(key) || 0) + 1)
-      })
+      if (traj.states.length === 0) return
+      const endpoint = traj.states[traj.states.length - 1]
+      const cellX = Math.floor(Math.max(0, Math.min(gridSize - 1, endpoint[0] - 1)))
+      const cellY = Math.floor(Math.max(0, Math.min(gridSize - 1, endpoint[1] - 1)))
+      const key = `${cellX},${cellY}`
+      visitCounts.set(key, (visitCounts.get(key) || 0) + 1)
     })
 
     const maxVisits = Math.max(...visitCounts.values(), 1)

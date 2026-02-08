@@ -132,8 +132,6 @@ export compute_forward_logits
 
 # Backward policy P_B(s|s')
 export compute_backward_probability, is_valid_backward_transition
-# export backward_probability, sample_backward_state  # Old DAG-based functions
-# export compute_backward_logits  # Old DAG-based function
 
 # Flow estimator Z(s)
 export flow_estimate, compute_flow_logits

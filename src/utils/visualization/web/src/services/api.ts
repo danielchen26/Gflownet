@@ -30,7 +30,25 @@ export const trainingApi = {
     learning_rate: number
     objective: string
     hidden_dim?: number
+    temperature?: number
     reward_peaks: Array<{ position: number[], intensity: number }>
+    // Exploration parameters (Phase 7: Mode Collapse Fix)
+    epsilon?: number
+    epsilon_decay?: boolean
+    entropy_weight?: number
+    z_learning_rate_multiplier?: number
+    // Experience Replay Buffer (JMLR 2023: Off-Policy Learning)
+    use_replay_buffer?: boolean
+    replay_buffer_size?: number
+    replay_ratio?: number
+    replay_priority_alpha?: number
+    // TLM (ICLR 2025: Trajectory Likelihood Maximization)
+    tlm_backward_weight?: number
+    tlm_entropy_coeff?: number
+    // Reward Shaping (auto-compensate path asymmetry)
+    reward_shaping?: boolean
+    // Domain-specific config (Phase 1: Domain Registry)
+    domain_config?: Record<string, unknown>
   }) {
     const response = await axios.post(`${API_BASE_URL}/api/v2/training/start`, config)
     return response.data
@@ -65,6 +83,16 @@ export const trainingApi = {
    */
   async pause() {
     const response = await axios.post(`${API_BASE_URL}/api/v2/training/pause`)
+    return response.data
+  },
+
+  /**
+   * Extend training from current state (add more iterations without restarting)
+   */
+  async extend(additionalIterations: number) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/training/extend`, {
+      additional_iterations: additionalIterations,
+    })
     return response.data
   },
 }
@@ -122,10 +150,42 @@ export const analysisApi = {
 // Domain API
 export const domainApi = {
   /**
-   * Get domain configuration and capabilities
+   * Get domain configuration and capabilities (legacy)
    */
   async getInfo() {
     const response = await axios.get(`${API_BASE_URL}/api/v2/domain/info`)
+    return response.data
+  },
+
+  /**
+   * List all registered domains (Phase 1: Domain Registry)
+   */
+  async list() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/domains`)
+    return response.data
+  },
+
+  /**
+   * Get detailed info about a specific domain
+   */
+  async get(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/domains/${id}`)
+    return response.data
+  },
+
+  /**
+   * Get JSON Schema for a domain's configuration
+   */
+  async getSchema(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/domains/${id}/schema`)
+    return response.data
+  },
+
+  /**
+   * Validate configuration for a domain
+   */
+  async validate(id: string, config: Record<string, unknown>) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/domains/${id}/validate`, config)
     return response.data
   },
 }
@@ -146,10 +206,20 @@ export interface TrainingState {
   is_training: boolean
   is_paused: boolean
   loss: number
+  latest_loss?: number
   mean_reward: number
   gradient_norm: number
+  latest_gradient_norm?: number
   learning_rate: number
   last_error: string | null
+  error_count?: number
+  // Exploration metrics (Phase 7: Mode Collapse Fix)
+  current_epsilon?: number
+  epsilon_decay?: boolean
+  metrics?: {
+    mean_reward?: number
+    diversity_ratio?: number
+  }
 }
 
 export interface TrainingHistory {

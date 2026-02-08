@@ -64,10 +64,10 @@ interface StateStats {
   max_visits: number
   coverage: number
   flow_statistics: {
-    mean_flow: number
-    max_flow: number
-    convergence_ratio: number
-    policy_entropy: number
+    mean_log_Z: number
+    mean_reward: number
+    progress: number
+    mean_trajectory_length: number
   }
 }
 
@@ -131,6 +131,14 @@ function RewardHeatmap({ flowData }: { flowData: FlowFieldData }) {
 // =============================================================================
 function FlowArrows({ flowData }: { flowData: FlowFieldData }) {
   const arrows = useMemo(() => {
+    // Compute flow value range for normalization
+    const flowValues = flowData.data.map(p => p.flow_value)
+    const minFlow = Math.min(...flowValues)
+    const maxFlow = Math.max(...flowValues)
+    const flowRange = maxFlow - minFlow || 1
+    // Find max reward for normalization
+    const maxReward = Math.max(...flowData.data.map(p => p.reward), 1)
+
     return flowData.data
       .filter(point => point.magnitude > 0.01 || point.flow_value > 0.05)
       .map((point, i) => {
@@ -140,8 +148,11 @@ function FlowArrows({ flowData }: { flowData: FlowFieldData }) {
         const dir = new THREE.Vector2(point.velocity[0], point.velocity[1])
         const dirLength = dir.length()
 
-        const flowNorm = Math.max(0, Math.min(1, point.flow_value))
-        const rewardNorm = Math.max(0, Math.min(1, point.reward / 10))
+        // Normalize flow relative to data range (log scale for better visual spread)
+        const logFlow = Math.log1p(point.flow_value - minFlow)
+        const logRange = Math.log1p(flowRange)
+        const flowNorm = logRange > 0 ? logFlow / logRange : 0.5
+        const rewardNorm = Math.max(0, Math.min(1, point.reward / maxReward))
         const arrowLength = Math.max(0.15, Math.min(0.7, dirLength * 0.8 + flowNorm * 0.3))
 
         const color = new THREE.Color()
@@ -661,16 +672,16 @@ export function GFlowNetFlowField() {
             {stateStats.flow_statistics && (
               <div className="mt-3 pt-2 border-t border-dark-border space-y-2">
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Mean Flow:</span>
+                  <span className="text-muted-foreground">Mean log Z:</span>
                   <span className="text-neon-purple font-medium">
-                    {stateStats.flow_statistics.mean_flow.toFixed(3)}
+                    {stateStats.flow_statistics.mean_log_Z.toFixed(3)}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Convergence:</span>
+                  <span className="text-muted-foreground">Progress:</span>
                   <span className="flex items-center gap-1">
                     <span className="text-neon-green font-medium">
-                      {(stateStats.flow_statistics.convergence_ratio * 100).toFixed(1)}%
+                      {(stateStats.flow_statistics.progress * 100).toFixed(1)}%
                     </span>
                     <TrendingUp className="w-3 h-3 text-neon-green" />
                   </span>

@@ -388,6 +388,61 @@ for i in 1:n_iterations
 end
 ```
 
+### Phase 9: Exception Handling and Feature Completeness
+
+**Task 9.1: Check for Silent Exception Handling**
+```bash
+# Find try-catch blocks that might swallow errors
+grep -rn "catch\|return nothing" --include="*.jl" src/ examples/
+```
+
+**Checklist**:
+- [ ] All catch blocks log warnings/errors (use `@warn` or `@error`)
+- [ ] No silent `return nothing` after exceptions
+- [ ] Critical errors are re-thrown after logging
+- [ ] Failures are visible for debugging
+
+**Good vs Bad**:
+```julia
+# ❌ BAD: Silent failure
+catch e
+    return nothing
+end
+
+# ✅ GOOD: Visible failure
+catch e
+    @warn "Operation failed" exception=e
+    return nothing
+end
+```
+
+**Task 9.2: Verify Feature Implementation Completeness**
+
+Check that exposed parameters have working implementations:
+```bash
+# Find TrainingConfig or SamplingConfig definitions
+grep -rn "struct.*Config" --include="*.jl" src/
+```
+
+**Checklist**:
+- [ ] Every config parameter has implementation code using it
+- [ ] Experimental/unimplemented features are clearly marked
+- [ ] Parameters without implementation throw warnings when enabled
+- [ ] No "TODO: implement" without corresponding timeline
+
+**Task 9.3: Gradient Type Consistency**
+
+Ensure functions handle `ComponentVector` gradients correctly:
+```bash
+# Find gradient processing functions
+grep -rn "grads\|gradient" --include="*.jl" src/training/
+```
+
+**Checklist**:
+- [ ] Functions don't assume `NamedTuple` for gradients
+- [ ] Use `haskey()` or duck-typing for gradient access
+- [ ] Test gradient handling with actual Zygote output
+
 ## Complete Code Review Checklist
 
 Use TodoWrite to create this comprehensive checklist:
@@ -442,6 +497,16 @@ Performance:
 - [ ] No global variables
 - [ ] Caches cleared when parameters update
 - [ ] Reasonable memory allocation patterns
+
+Exception Handling:
+- [ ] No silent catch blocks (all log warnings)
+- [ ] Return nothing cases are logged
+- [ ] Critical errors visible for debugging
+
+Feature Completeness:
+- [ ] All config parameters have implementations
+- [ ] Experimental features clearly marked
+- [ ] Gradient functions handle ComponentVector
 ```
 
 ## Automated Checks

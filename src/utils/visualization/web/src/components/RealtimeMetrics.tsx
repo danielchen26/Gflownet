@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, Zap, TrendingUp, Clock, Layers, Award, Shuffle } from 'lucide-react'
 import { api } from '../services/api'
+import { useChartColors, useThemeLayout } from '../contexts/ThemeContext'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useEffect, useState } from 'react'
 
@@ -42,25 +43,25 @@ function AnimatedNumber({ value }: { value: number }) {
 }
 
 // Single metric display
-function MetricItem({ metric }: { metric: Metric }) {
+function MetricItem({ metric, layout }: { metric: Metric; layout: ReturnType<typeof useThemeLayout> }) {
   const Icon = metric.icon
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
       whileHover={{ scale: 1.02 }}
-      className="glass-dark rounded-lg p-3 border border-dark-border/50"
+      className={`glass-dark rounded-lg ${layout.cardPad} border border-dark-border/50`}
     >
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className={`p-2 rounded-lg bg-gradient-to-br ${metric.color}`}>
-            <Icon className="w-4 h-4 text-white" />
+        <div className={`flex items-center ${layout.compact ? 'space-x-2' : 'space-x-3'}`}>
+          <div className={`${layout.compact ? 'p-1' : layout.spacious ? 'p-2.5' : 'p-2'} rounded-lg bg-gradient-to-br ${metric.color}`}>
+            <Icon className={`${layout.compact ? 'w-3 h-3' : 'w-4 h-4'} text-white`} />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">{metric.label}</p>
-            <p className="text-lg font-semibold">
+            <p className={`${layout.labelSize} text-muted-foreground`}>{metric.label}</p>
+            <p className={`${layout.valueSize} font-semibold`}>
               {typeof metric.value === 'number' ? (
                 <AnimatedNumber value={metric.value} />
               ) : (
@@ -70,9 +71,9 @@ function MetricItem({ metric }: { metric: Metric }) {
           </div>
         </div>
         {metric.trend && (
-          <div className={`text-xs ${
-            metric.trend === 'up' ? 'text-neon-green' : 
-            metric.trend === 'down' ? 'text-neon-pink' : 
+          <div className={`${layout.tinySize} ${
+            metric.trend === 'up' ? 'text-neon-green' :
+            metric.trend === 'down' ? 'text-neon-pink' :
             'text-muted-foreground'
           }`}>
             {metric.trend === 'up' ? '↑' : metric.trend === 'down' ? '↓' : '→'}
@@ -84,18 +85,24 @@ function MetricItem({ metric }: { metric: Metric }) {
 }
 
 // Progress ring
-function ProgressRing({ progress, size = 60 }: { progress: number, size?: number }) {
+function ProgressRing({ progress, size = 60, gridColor, gradientStart, gradientEnd }: {
+  progress: number
+  size?: number
+  gridColor: string
+  gradientStart: string
+  gradientEnd: string
+}) {
   const radius = (size - 8) / 2
   const circumference = radius * 2 * Math.PI
   const offset = circumference - (progress / 100) * circumference
-  
+
   return (
     <svg width={size} height={size} className="transform -rotate-90">
       <circle
         cx={size / 2}
         cy={size / 2}
         r={radius}
-        stroke="#2A2A2D"
+        stroke={gridColor}
         strokeWidth="4"
         fill="none"
       />
@@ -113,8 +120,8 @@ function ProgressRing({ progress, size = 60 }: { progress: number, size?: number
       />
       <defs>
         <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#BD00FF" />
-          <stop offset="100%" stopColor="#00D9FF" />
+          <stop offset="0%" stopColor={gradientStart} />
+          <stop offset="100%" stopColor={gradientEnd} />
         </linearGradient>
       </defs>
     </svg>
@@ -122,6 +129,8 @@ function ProgressRing({ progress, size = 60 }: { progress: number, size?: number
 }
 
 export function RealtimeMetrics() {
+  const cc = useChartColors()
+  const layout = useThemeLayout()
   const [realtimeMetrics, setRealtimeMetrics] = useState({
     currentLoss: 0,
     currentReward: 0,
@@ -200,30 +209,36 @@ export function RealtimeMetrics() {
   ]
   
   return (
-    <div className="space-y-2">
+    <div className={layout.compact ? 'space-y-1' : layout.spacious ? 'space-y-4' : 'space-y-2'}>
       {/* Convergence Progress */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-dark rounded-lg p-3 text-center"
+        className={`glass-dark rounded-lg ${layout.cardPad} text-center`}
       >
-        <h3 className="text-xs font-medium text-muted-foreground mb-2">Training Progress</h3>
+        <h3 className={`${layout.headingSize} font-medium text-muted-foreground mb-2`}>Training Progress</h3>
         <div className="relative inline-block">
-          <ProgressRing progress={((metrics?.current_iteration || 0) / (metrics?.total_iterations || 1)) * 100} size={80} />
+          <ProgressRing
+            progress={((metrics?.current_iteration || 0) / (metrics?.total_iterations || 1)) * 100}
+            size={layout.ringSize}
+            gridColor={cc.grid}
+            gradientStart={cc.gradientStart}
+            gradientEnd={cc.gradientEnd}
+          />
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-lg font-bold gradient-text transform rotate-90">
+            <span className={`${layout.valueSize} font-bold gradient-text transform rotate-90`}>
               {(((metrics?.current_iteration || 0) / (metrics?.total_iterations || 1)) * 100).toFixed(0)}%
             </span>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground mt-2">
+        <p className={`${layout.tinySize} text-muted-foreground mt-2`}>
           {metrics?.current_iteration || 0} / {metrics?.total_iterations || 0} iterations
         </p>
       </motion.div>
-      
+
       {/* Metrics List */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-muted-foreground px-1">Live Metrics</h3>
+      <div className={layout.compact ? 'space-y-0.5' : layout.spacious ? 'space-y-3' : 'space-y-2'}>
+        <h3 className={`${layout.headingSize} font-medium text-muted-foreground px-1`}>Live Metrics</h3>
         <AnimatePresence mode="wait">
           {displayMetrics.map((metric, index) => (
             <motion.div
@@ -232,26 +247,26 @@ export function RealtimeMetrics() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 }}
             >
-              <MetricItem metric={metric} />
+              <MetricItem metric={metric} layout={layout} />
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
-      
+
       {/* Status Indicator */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="glass-dark rounded-lg p-4"
+        className={`glass-dark rounded-lg ${layout.cardPad}`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Clock className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Status</span>
+            <Clock className={`${layout.compact ? 'w-3 h-3' : 'w-4 h-4'} text-muted-foreground`} />
+            <span className={`${layout.labelSize} text-muted-foreground`}>Status</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className={`w-2 h-2 rounded-full ${metrics?.is_training ? 'bg-neon-green animate-pulse' : 'bg-gray-500'}`} />
-            <span className="text-sm">{metrics?.is_training ? 'Training Active' : 'Idle'}</span>
+            <span className={`${layout.labelSize}`}>{metrics?.is_training ? 'Training Active' : 'Idle'}</span>
           </div>
         </div>
       </motion.div>
