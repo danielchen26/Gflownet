@@ -1,0 +1,34 @@
+# Julia Files
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+.DS_Store
+/Manifest.toml
+/docs/Manifest.toml
+!/docs/Manifest.toml
+
+# Documentation build files
+/docbuild/
+/docs/build/
+
+# System files
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+.cursor/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Test artifacts
+/test_env/
+/results/
+
+# Web visualization build artifacts
+src/utils/visualization/web/dist/
+src/utils/visualization/web/node_modules/

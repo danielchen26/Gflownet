@@ -2,6 +2,7 @@
 # Implementation of Trajectory Balance, Detailed Balance, and Flow Matching
 
 using Zygote
+using Statistics: mean
 
 # =============================================================================
 # Balance Condition Types and Enumerations
@@ -39,6 +40,321 @@ Different ways to formulate the trajectory balance equation:
     STANDARD_TB
     GEOMETRIC_MEAN_TB
     ARITHMETIC_MEAN_TB
+end
+
+# =============================================================================
+# Sub-Trajectory Balance - Mathematical Foundation
+# =============================================================================
+
+# Import necessary functions for on-demand computation
+using ..GFlowNet: state_to_features, get_applicable_actions, apply_action, is_terminal_state
+
+"""
+    logsumexp_stb(x)
+
+Numerically stable log-sum-exp for SubTB computation.
+"""
+function logsumexp_stb(x::AbstractVector)
+    if isempty(x)
+        return -Inf
+    end
+    max_x = maximum(x)
+    if isinf(max_x)
+        return max_x
+    end
+    return max_x + log(sum(exp.(x .- max_x)))
+end
+
+"""
+    sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory, params;
+                               sub_length::Int=5)::Float64
+
+Compute sub-trajectory balance loss for a trajectory by considering all sub-trajectories.
+
+# Mathematical Foundation
+Sub-Trajectory Balance enforces flow conservation on partial trajectories:
+
+For a sub-trajectory from state s_i to s_j:
+∏_{k=i}^{j-1} P_F(s_{k+1}|s_k) * F(s_i) = F(s_j)
+
+This provides more frequent learning signals compared to full trajectory balance.
+
+# Arguments
+- `model::GFlowNetModel`: Complete GFlowNet model with flow_estimator (REQUIRED)
+- `trajectory::Trajectory`: Full trajectory to extract sub-trajectories from
+- `params`: Model parameters for differentiable computation
+- `sub_length::Int`: Maximum length of sub-trajectories to consider
+
+# Returns
+- `Float64`: Average sub-trajectory balance loss
+
+# Requirements
+- Model must have flow_estimator: !isnothing(model.flow_estimator)
+
+# Mathematical Properties
+- Provides local credit assignment
+- More stable gradients than full trajectory balance
+- Reduces variance in long trajectories
+- Domain-agnostic: works with any state/action types implementing the GFlowNet interface
+"""
+function sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory, params;
+                                   sub_length::Int=5)::Float64
+    # Validate that flow estimator exists (REQUIRED for SubTB)
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError(
+            "SUB_TRAJECTORY_BALANCE requires a flow estimator. " *
+            "Create model with: include_flow_estimator=true"
+        ))
+    end
+
+    n_states = length(trajectory.states)
+    if n_states < 2
+        return 0.0
+    end
+
+    # Pre-compute valid sub-trajectory indices OUTSIDE gradient (non-differentiable)
+    # This avoids mutations inside the gradient computation
+    valid_pairs = Zygote.@ignore begin
+        pairs = Tuple{Int,Int}[]
+        for start_idx in 1:n_states-1
+            for end_idx in start_idx+1:min(start_idx+sub_length, n_states)
+                if end_idx - start_idx >= 1  # At least 2 states
+                    push!(pairs, (start_idx, end_idx))
+                end
+            end
+        end
+        pairs
+    end
+
+    n_pairs = Zygote.@ignore length(valid_pairs)
+    if n_pairs == 0
+        return 0.0
+    end
+
+    # Compute sum of losses directly (Zygote-safe)
+    # Replace Inf/NaN with 0 using a conditional
+    total_loss = sum(
+        begin
+            loss = _compute_sub_trajectory_loss_differentiable(
+                model,
+                trajectory.states[start_idx:end_idx],
+                trajectory,
+                start_idx,
+                params
+            )
+            # Replace invalid losses with 0 (Zygote-safe conditional)
+            ifelse(isnan(loss) || isinf(loss), 0.0, loss)
+        end
+        for (start_idx, end_idx) in valid_pairs
+    )
+
+    # Count valid losses outside gradient
+    n_valid = Zygote.@ignore begin
+        count = 0
+        for (start_idx, end_idx) in valid_pairs
+            loss = _compute_sub_trajectory_loss_differentiable(model, trajectory.states[start_idx:end_idx], trajectory, start_idx, params)
+            if !isnan(loss) && !isinf(loss)
+                count += 1
+            end
+        end
+        count
+    end
+
+    return n_valid > 0 ? total_loss / n_valid : 0.0
+end
+
+# Legacy version for backward compatibility (non-differentiable)
+function sub_trajectory_balance_loss(model::GFlowNetModel, trajectory::Trajectory;
+                                   sub_length::Int=5)::Float64
+    @warn "Using legacy non-differentiable SubTB. For training, use sub_trajectory_balance_loss(model, traj, params; ...)"
+
+    if length(trajectory.states) < 2
+        return 0.0
+    end
+
+    losses = Float64[]
+
+    for start_idx in 1:length(trajectory.states)-1
+        for end_idx in start_idx+1:min(start_idx+sub_length, length(trajectory.states))
+            sub_states = trajectory.states[start_idx:end_idx]
+
+            if length(sub_states) < 2
+                continue
+            end
+
+            loss = _compute_sub_trajectory_loss_legacy(model, sub_states, trajectory, start_idx)
+            if !isnan(loss) && !isinf(loss)
+                push!(losses, loss)
+            end
+        end
+    end
+
+    return isempty(losses) ? 0.0 : mean(losses)
+end
+
+"""
+    _compute_sub_trajectory_loss_differentiable(model, sub_states, full_trajectory, start_idx, params)
+
+Compute DIFFERENTIABLE loss for a single sub-trajectory.
+Uses on-demand forward probability computation and differentiable flow estimator.
+"""
+function _compute_sub_trajectory_loss_differentiable(
+    model::GFlowNetModel,
+    sub_states::Vector{<:AbstractState},
+    full_trajectory::Trajectory,
+    start_idx::Int,
+    params
+)::Float64
+
+    # Compute log forward probability along sub-trajectory using on-demand computation
+    log_forward_prob = 0.0
+
+    for i in 1:length(sub_states)-1
+        source_state = sub_states[i]
+        target_state = sub_states[i+1]
+
+        # Get state features and compute logits (DIFFERENTIABLE)
+        features = state_to_features(source_state)
+        logits, _ = model.forward_policy.model(features, params.forward, model.states.forward)
+
+        # Get applicable actions (discrete logic - non-differentiable)
+        applicable_actions = Zygote.@ignore get_applicable_actions(source_state, model.all_actions)
+        applicable_indices = Zygote.@ignore [idx for (idx, a) in enumerate(model.all_actions) if a in applicable_actions]
+
+        if isempty(applicable_indices)
+            return Inf
+        end
+
+        # Find which action leads to target_state (discrete logic - non-differentiable)
+        target_action_idx = Zygote.@ignore begin
+            for (idx, action) in enumerate(model.all_actions)
+                if action in applicable_actions && apply_action(action, source_state) == target_state
+                    return idx
+                end
+            end
+            return nothing
+        end
+
+        if isnothing(target_action_idx)
+            return Inf
+        end
+
+        # Compute softmax log-probabilities (DIFFERENTIABLE)
+        applicable_logits = logits[applicable_indices]
+        log_probs = applicable_logits .- logsumexp_stb(applicable_logits)
+
+        # Find position of target action in applicable actions
+        action_pos = Zygote.@ignore findfirst(==(target_action_idx), applicable_indices)
+
+        if isnothing(action_pos)
+            return Inf
+        end
+
+        log_forward_prob += log_probs[action_pos]
+    end
+
+    # Compute flow estimates using flow estimator (DIFFERENTIABLE!)
+    start_features = state_to_features(sub_states[1])
+    end_features = state_to_features(sub_states[end])
+
+    # Reshape features for Lux (expects [features, batch])
+    start_features_mat = reshape(convert(Array{Float32}, start_features), :, 1)
+    end_features_mat = reshape(convert(Array{Float32}, end_features), :, 1)
+
+    start_flow_vec, _ = model.flow_estimator.model(start_features_mat, params.flow, model.states.flow)
+    end_flow_vec, _ = model.flow_estimator.model(end_features_mat, params.flow, model.states.flow)
+
+    # Ensure positive flows (using softplus-like transformation)
+    log_start_flow = log(max(start_flow_vec[1], 1e-8))
+    log_end_flow = log(max(end_flow_vec[1], 1e-8))
+
+    # SubTB loss: (log F(s_i) + log P_F(τ[i:j]) - log F(s_j))²
+    error = log_start_flow + log_forward_prob - log_end_flow
+    return error^2
+end
+
+"""
+    _compute_sub_trajectory_loss_legacy(model, sub_states, full_trajectory, start_idx)
+
+Legacy non-differentiable version for backward compatibility.
+"""
+function _compute_sub_trajectory_loss_legacy(model::GFlowNetModel, sub_states::Vector{<:AbstractState},
+                                    full_trajectory::Trajectory, start_idx::Int)::Float64
+
+    log_forward_prob = 0.0
+
+    for i in 1:length(sub_states)-1
+        source_state = sub_states[i]
+        target_state = sub_states[i+1]
+
+        action_idx = start_idx + i - 1
+        if action_idx <= length(full_trajectory.actions)
+            prob = forward_transition_probability(model, source_state, target_state)
+            if prob <= 0
+                return Inf
+            end
+            log_forward_prob += log(prob)
+        end
+    end
+
+    start_flow = Zygote.@ignore flow(model, sub_states[1])
+    end_flow = Zygote.@ignore flow(model, sub_states[end])
+
+    if start_flow <= 0 || end_flow <= 0
+        return 0.0
+    end
+
+    log_start_flow = log(start_flow)
+    log_end_flow = log(end_flow)
+
+    error = log_forward_prob + log_start_flow - log_end_flow
+    return error^2
+end
+
+"""
+    sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory}, params;
+                                     sub_length::Int=5)::Float64
+
+Compute average sub-trajectory balance loss over a batch of trajectories.
+DIFFERENTIABLE version that requires params.
+"""
+function sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory}, params;
+                                         sub_length::Int=5)::Float64
+    if isempty(trajectories)
+        return 0.0
+    end
+
+    # Validate flow estimator
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError("SUB_TRAJECTORY_BALANCE requires include_flow_estimator=true"))
+    end
+
+    # Compute losses using comprehension (Zygote-safe)
+    losses = [sub_trajectory_balance_loss(model, traj, params; sub_length=sub_length) for traj in trajectories]
+
+    # Filter NaN/Inf outside gradient computation
+    valid_indices = Zygote.@ignore [i for (i, l) in enumerate(losses) if !isnan(l) && !isinf(l)]
+
+    if isempty(valid_indices)
+        return 0.0
+    end
+
+    # Use indices to compute mean (Zygote-safe)
+    return sum(losses[i] for i in valid_indices) / length(valid_indices)
+end
+
+# Legacy batch version for backward compatibility
+function sub_trajectory_balance_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory};
+                                         sub_length::Int=5)::Float64
+    
+    if isempty(trajectories)
+        return 0.0
+    end
+    
+    losses = [sub_trajectory_balance_loss(model, traj; sub_length=sub_length) for traj in trajectories]
+    valid_losses = filter(!isnan, losses)
+    
+    return isempty(valid_losses) ? 0.0 : mean(valid_losses)
 end
 
 # =============================================================================
@@ -120,10 +436,16 @@ function _standard_trajectory_balance_loss(model::GFlowNetModel, trajectory::Tra
     initial_state = trajectory.states[1]
     terminal_state = trajectory.states[end]
 
-    # For simplified trajectory balance, we assume Z(s_0) = 1, so log(Z) = 0
-    # This is mathematically valid when the initial state is fixed
-    # TODO: In future, implement proper flow estimation if needed
-    log_initial_flow = 0.0
+    # Compute log(Z) based on partition function method
+    log_initial_flow = if isnothing(model.log_partition_function)
+        # SIMPLE_ESTIMATION: Z(s_0) = 1, so log(Z) = 0
+        # This is mathematically valid when the initial state is fixed
+        0.0
+    else
+        # LEARNABLE_ESTIMATION: Use learnable parameter from parameters structure
+        # The actual optimization happens on model.parameters.log_Z, but we use the model field for consistency
+        model.log_partition_function
+    end
 
     # Compute sum of log forward probabilities: Σ log(P_F(s_{i+1}|s_i))
     log_forward_prob_sum = 0.0
@@ -278,12 +600,19 @@ function detailed_balance_loss(model::GFlowNetModel, source_state, target_state)
         backward_prob = 1e-8
     end
 
-    # For now, detailed balance is not fully implemented due to missing flow computation
-    # This would require either:
-    # 1. Implementing recursive flow computation without DAG
-    # 2. Using a flow estimator network
-    # TODO: Implement proper flow computation for detailed balance
-    throw(ArgumentError("Detailed balance loss is not currently implemented - missing flow computation. Use TRAJECTORY_BALANCE instead."))
+    # Compute flows using our flow computation functions
+    source_flow = flow(model, source_state)
+    target_flow = flow(model, target_state)
+    
+    # Ensure flows are positive
+    if source_flow <= 0
+        @warn "Non-positive source flow: $source_flow"
+        source_flow = 1e-8
+    end
+    if target_flow <= 0
+        @warn "Non-positive target flow: $target_flow"
+        target_flow = 1e-8
+    end
 
     # Detailed balance equation in log space:
     # log(P_F(s'|s)) + log(F(s)) = log(P_B(s|s')) + log(F(s'))
@@ -370,10 +699,50 @@ function flow_matching_loss(model::GFlowNetModel, state)::Float64
         return 0.0
     end
 
-    # Flow matching is not currently implemented due to missing DAG-based flow computation
-    # This would require implementing recursive flow computation without explicit DAG
-    # TODO: Implement flow matching with on-demand state exploration
-    throw(ArgumentError("Flow matching loss is not currently implemented - requires DAG-based flow computation. Use TRAJECTORY_BALANCE instead."))
+    # Get the flow estimate from the neural network Z(s)
+    features = state_to_features(state)
+    estimated_flow = flow_estimate(
+        model.flow_estimator, state,
+        model.parameters.flow, model.states.flow
+    )
+    
+    # Compute the true flow using recursive computation
+    # F(s) = Σ_{s'} P_F(s'|s) * F(s')
+    applicable_actions = get_applicable_actions(state, model.all_actions)
+    
+    if isempty(applicable_actions)
+        # No outgoing transitions, flow should be 0
+        return (estimated_flow - 0.0)^2
+    end
+    
+    # Compute expected flow by summing over all possible next states
+    expected_flow = 0.0
+    
+    # Get forward policy probabilities for all actions
+    action_probs = forward_action_probabilities(
+        model.forward_policy, state, model.all_actions,
+        model.parameters.forward, model.states.forward
+    )
+    
+    # Sum over all applicable actions
+    for (action_idx, action) in enumerate(model.all_actions)
+        if action in applicable_actions
+            # Get next state
+            next_state = apply_action(action, state)
+            
+            # Get transition probability P_F(s'|s)
+            transition_prob = action_probs[action_idx]
+            
+            # Get flow of next state F(s')
+            next_flow = flow(model, next_state)
+            
+            # Add contribution to expected flow
+            expected_flow += transition_prob * next_flow
+        end
+    end
+    
+    # Flow matching loss: (Z(s) - F(s))²
+    return (estimated_flow - expected_flow)^2
 end
 
 """
@@ -571,6 +940,138 @@ function check_balance_condition_compatibility(model::GFlowNetModel, condition::
     end
 
     return true
+end
+
+# =============================================================================
+# Direct Flow Loss - Mathematical Foundation
+# =============================================================================
+
+"""
+    compute_log_forward_probability(model::GFlowNetModel, trajectory::Trajectory)::Float64
+
+Compute log forward probability of a trajectory.
+
+# Mathematical Foundation
+Computes log P_F(τ) = Σ_{t=0}^{T-1} log P_F(s_{t+1}|s_t)
+
+# Arguments
+- `model::GFlowNetModel`: GFlowNet model
+- `trajectory::Trajectory`: Trajectory to compute probability for
+
+# Returns
+- `Float64`: Log forward probability
+"""
+function compute_log_forward_probability(model::GFlowNetModel, trajectory::Trajectory)::Float64
+    if length(trajectory.states) < 2
+        return 0.0
+    end
+    
+    log_prob_sum = 0.0
+    
+    for i in 1:(length(trajectory.states)-1)
+        source_state = trajectory.states[i]
+        target_state = trajectory.states[i+1]
+        
+        # Compute transition probability
+        trans_prob = forward_transition_probability(model, source_state, target_state)
+        
+        if trans_prob <= 0
+            @warn "Non-positive transition probability: $trans_prob"
+            return -Inf
+        end
+        
+        log_prob_sum += log(trans_prob)
+    end
+    
+    return log_prob_sum
+end
+
+"""
+    direct_flow_loss(model::GFlowNetModel, trajectory::Trajectory)::Float64
+
+Compute direct flow loss using neural network flow estimation.
+
+# Mathematical Foundation
+Instead of computing flows recursively, train a neural network Z(s) to directly
+estimate F(s). The loss ensures consistency with trajectory rewards:
+
+L_DF(τ) = (log ∏ P_F(s_t+1|s_t) + log Z(s_0) - log R(s_T))²
+
+This is similar to trajectory balance but uses Z(s) from the flow estimator
+network instead of a learned scalar Z.
+
+# Arguments
+- `model::GFlowNetModel`: Model with flow estimator
+- `trajectory::Trajectory`: Single trajectory τ = (s_0, s_1, ..., s_T)
+
+# Returns
+- `Float64`: Direct flow loss
+
+# Requirements
+- Model must have flow estimator: !isnothing(model.flow_estimator)
+"""
+function direct_flow_loss(model::GFlowNetModel, trajectory::Trajectory)::Float64
+    if isnothing(model.flow_estimator)
+        throw(ArgumentError("Model must have flow estimator for DIRECT_FLOW_OBJECTIVE"))
+    end
+    
+    # Compute log forward probability of trajectory
+    log_pf = compute_log_forward_probability(model, trajectory)
+    
+    # Get initial state flow estimate from neural network
+    initial_state = trajectory.states[1]
+    initial_flow_estimate = Zygote.@ignore compute_flow_estimate(model, initial_state)
+    log_z = log(max(initial_flow_estimate, 1e-8))
+    
+    # Get terminal reward
+    terminal_state = trajectory.states[end]
+    if !is_terminal_state(terminal_state)
+        @warn "Trajectory does not end in terminal state for direct flow loss"
+        return 0.0
+    end
+    
+    reward_value = reward(terminal_state)
+    if reward_value <= 0
+        @warn "Non-positive reward for terminal state: $reward_value"
+        reward_value = 1e-8
+    end
+    log_reward = log(reward_value)
+    
+    # Direct flow loss: (log P_F(τ) + log Z(s_0) - log R(s_T))²
+    return (log_pf + log_z - log_reward)^2
+end
+
+"""
+    direct_flow_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory})::Float64
+
+Compute average direct flow loss over a batch of trajectories.
+
+# Arguments
+- `model::GFlowNetModel`: Model with flow estimator
+- `trajectories::Vector{Trajectory}`: Batch of trajectories
+
+# Returns
+- `Float64`: Average direct flow loss
+"""
+function direct_flow_loss_batch(model::GFlowNetModel, trajectories::Vector{Trajectory})::Float64
+    if isempty(trajectories)
+        return 0.0
+    end
+    
+    total_loss = 0.0
+    valid_trajectories = 0
+    
+    for trajectory in trajectories
+        try
+            loss = direct_flow_loss(model, trajectory)
+            total_loss += loss
+            valid_trajectories += 1
+        catch e
+            @debug "Failed to compute direct flow loss for trajectory: $e"
+        end
+    end
+    
+    return valid_trajectories > 0 ? total_loss / valid_trajectories : 0.0
 end
 
 # =============================================================================

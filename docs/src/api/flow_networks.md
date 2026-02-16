@@ -1,15 +1,16 @@
 # Flow Networks
 
-This page documents the core functions and concepts related to flow networks in GFlowNet.jl.
+This page documents the current flow-related concepts in GFlowNet.jl.
 
-## Core Flow Functions
+## Current Implementation
 
-The following functions form the foundation of GFlowNet operations:
+GFlowNet.jl uses an implicit flow approach through the Trajectory Balance objective:
 
-* `flow(model, state)`: Computes the flow (unnormalized probability) through a state
-* `edge_flow(model, parent, child)`: Computes the flow along an edge between states
 * `state_to_features(state)`: Converts a state to a feature representation for neural networks
 * `reward(state)`: Calculates the reward associated with a terminal state
+* Flow computations are handled implicitly during training
+
+**Note**: Explicit flow functions like `flow(model, state)` and `edge_flow(model, parent, child)` are not currently implemented.
 
 ## Transition Probabilities
 
@@ -25,19 +26,17 @@ GFlowNets define probability distributions over transitions:
 
 ## Flow Estimation
 
-* `estimate_flow(flow_estimator, state, ...)`: Estimates the flow through a state
-* `estimate_edge_flow(flow_estimator, parent, child, ...)`: Estimates the flow along an edge
+**Note**: Explicit flow estimation functions are not currently implemented. Flow values are computed implicitly through the Trajectory Balance objective during training.
 
-## State and Edge Operations
+## State and Action Operations
 
-Functions for managing states and edges in the flow network:
+Functions for managing states and actions in the current implementation:
 
-* `get_next_states(state, actions)`: Gets possible next states from the current state
-* `get_previous_states(state)`: Gets possible parent states of the current state
-* `get_incoming_edges(state)`: Gets edges leading to the current state
-* `get_outgoing_edges(state)`: Gets edges leading from the current state
+* `get_applicable_actions(state, all_actions)`: Gets actions that can be applied to the current state
 * `is_applicable(action, state)`: Checks if an action can be applied to a state
 * `apply_action(action, state)`: Applies an action to a state, returning a new state
+
+**Note**: Functions like `get_next_states()` and `get_previous_states()` are not implemented. Use the action-based approach instead.
 
 ## Flow Network Concepts
 
@@ -51,23 +50,25 @@ The GFlowNet framework is based on several key concepts:
 ## Code Example
 
 ```julia
-# Computing flows and sampling trajectories
-function example_flow_network()
-    # Create a GFlowNet model
-    model = create_model(...)
-    
-    # Compute flow through a state
-    state = create_initial_state()
-    state_flow = flow(model, state)
+# Sampling trajectories with current implementation
+function example_sampling()
+    # Create a GFlowNet model using high-level interface
+    model = create_grid_world_gflownet(grid_size=5)
     
     # Sample a trajectory
     trajectory = sample_trajectory(model)
     
-    # Verify flow conservation (for non-terminal states)
-    for state in trajectory.states[1:end-1]
-        incoming_flow = sum(edge_flow(model, p, state) for p in get_previous_states(state))
-        outgoing_flow = sum(edge_flow(model, state, n) for n in get_next_states(state))
-        @assert abs(incoming_flow - outgoing_flow) < 1e-5
+    # Get the terminal state and reward
+    terminal_state = trajectory.states[end]
+    final_reward = reward(terminal_state)
+    
+    # Example of action-based state exploration
+    current_state = trajectory.states[1]  # Initial state
+    applicable_actions = get_applicable_actions(current_state, model.all_actions)
+    
+    # Apply an action
+    if !isempty(applicable_actions)
+        next_state = apply_action(applicable_actions[1], current_state)
     end
     
     return trajectory

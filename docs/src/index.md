@@ -28,14 +28,16 @@ using GFlowNet
 model = create_grid_world_gflownet(
     grid_size = 5,
     hidden_dim = 64,
-    learning_rate = 0.01
+    partition_function_method = LEARNABLE_ESTIMATION  # NEW: Learn Z for better exploration
 )
 
 # Configure training
 config = TrainingConfig(
     objective = TRAJECTORY_BALANCE,
+    partition_function_method = LEARNABLE_ESTIMATION,  # NEW: Enable Z learning
     n_iterations = 1000,
-    batch_size = 32
+    batch_size = 32,
+    learning_rate = 0.001
 )
 
 # Train the model
@@ -57,11 +59,13 @@ end
 - [Core Concepts](guide/core_concepts.md): Overview of key components
 - [Mathematical Background](guide/mathematical_background.md): Theoretical foundations
 - [Training Objectives](guide/training_objectives.md): Different training objectives
+- [Learnable Partition Function](guide/learnable_partition_function.md): Advanced Z learning feature
 - [Applications](applications/causal_discovery.md): Various use cases for GFlowNets
 
 ## Key Features
 
 - **Multiple Training Objectives**: Implementations of Flow Matching, Detailed Balance, and Trajectory Balance
+- **Learnable Partition Function**: Option to learn Z as a trainable parameter for better exploration
 - **Flexible Architecture**: Customizable state and action spaces for diverse applications
 - **Domain Applications**: Support for molecular design, causal discovery, and active learning
 - **Extensions**: Support for continuous state spaces, non-acyclic graphs, and information theory

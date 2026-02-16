@@ -32,6 +32,9 @@ using StatsBase
 # Abstract types and interface contracts
 include("core/types.jl")
 
+# Load utilities module early as it's needed by other modules
+include("utils/utils.jl")
+
 # Graph theory and DAG operations
 include("core/graphs.jl")
 
@@ -48,26 +51,40 @@ include("core/balance.jl")
 include("core/sampling.jl")
 
 # =============================================================================
-# Training Infrastructure
+# Training Configuration - Must come first
 # =============================================================================
 
 include("training/configuration.jl")
 
-# Training objectives and loss functions (loaded after training config)
-include("core/objectives.jl")
+# =============================================================================
+# High-level Interface
+# =============================================================================
 
-# High-level interface functions
+# High-level interface functions (model creation, sampling)
 include("core/interface.jl")
+
+# Multi-start GFlowNets core types
+include("core/multi_start.jl")
+
+# =============================================================================
+# Training Infrastructure
+# =============================================================================
+include("training/replay_buffer.jl")  # Experience replay for off-policy learning
+include("training/objectives.jl")
+include("training/utils.jl")
+include("training/losses.jl")
+include("training/training.jl")
+include("training/multi_start_training.jl")
 
 # =============================================================================
 # Utilities and Validation
 # =============================================================================
 
+# utils.jl already included earlier
 include("utils/validation.jl")
 include("utils/logging.jl")
 include("utils/visualization.jl")
 include("utils/report.jl")
-include("utils/utils.jl")
 
 # =============================================================================
 # Applications and Extensions
@@ -115,8 +132,6 @@ export compute_forward_logits
 
 # Backward policy P_B(s|s')
 export compute_backward_probability, is_valid_backward_transition
-# export backward_probability, sample_backward_state  # Old DAG-based functions
-# export compute_backward_logits  # Old DAG-based function
 
 # Flow estimator Z(s)
 export flow_estimate, compute_flow_logits
@@ -130,15 +145,15 @@ export safe_model_call, validate_policy_consistency
 # =============================================================================
 
 # Flow computation methods
-# export flow, compute_recursive_flow, compute_flow_estimate  # Broken - requires DAG
+export flow, compute_recursive_flow, compute_flow_estimate
 export FlowComputationMethod, RECURSIVE_FLOW, DIRECT_FLOW, MIXED_FLOW
 
 # Flow analysis and validation
-# export validate_flow_conservation, validate_flow_consistency  # Broken - requires DAG
-# export flow_analysis, partition_function, edge_flow  # Broken - requires DAG
+export validate_flow_conservation, validate_flow_consistency
+export flow_analysis, partition_function, edge_flow
 
 # Flow caching
-# export clear_flow_cache!, flow_computation_benchmark  # Broken - requires DAG
+export clear_flow_cache!, flow_computation_benchmark
 
 # =============================================================================
 # Balance Conditions - Training Mathematics
@@ -149,8 +164,10 @@ export BalanceCondition, TRAJECTORY_BALANCE_CONDITION, DETAILED_BALANCE_CONDITIO
 export TrajectoryBalanceVariant, STANDARD_TB, GEOMETRIC_MEAN_TB
 
 # Loss computation
-export trajectory_balance_loss
-# export detailed_balance_loss, flow_matching_loss  # Not fully implemented
+export trajectory_balance_loss, sub_trajectory_balance_loss, sub_trajectory_balance_loss_batch
+export detailed_balance_loss  # Now implemented!
+export flow_matching_loss, flow_matching_loss_batch  # Now implemented!
+# export flow_matching_loss  # Not fully implemented
 export compute_balance_loss, validate_balance_conditions
 
 # Balance utilities
@@ -166,6 +183,7 @@ export SamplingConfig
 
 # Trajectory sampling
 export sample_trajectory, sample_trajectory_batch, sample_backward_trajectory
+export sample_backward_trajectories_from_terminals, find_parent_for_action
 export sample_action_with_strategy
 
 
@@ -199,7 +217,7 @@ export compute_gradients, clip_gradients!
 
 # Training configuration
 export TrainingConfig, TrainingState, TrainingMetrics, TrainingHistory
-export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, COMBINED_OBJECTIVES
+export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
 export PartitionFunctionMethod, OptimizationMethod
 export SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, LEARNABLE_ESTIMATION, ADAPTIVE_ESTIMATION
 export ADAM, RMSPROP, SGD, ADAMW
@@ -241,6 +259,14 @@ export create_training_logger, close_training_logger!
 # Visualization and reporting
 export plot_training_progress, plot_dag_structure, plot_trajectory_analysis
 export generate_training_report, save_training_artifacts
+
+# Z learning validation (LEARNABLE_ESTIMATION)
+export validate_z_learning, validate_z_gradients, monitor_z_learning
+export validate_z_mathematical_properties, compute_trajectory_log_probability
+
+# Backward policy validation
+export validate_backward_policy_normalization, validate_backward_policy_consistency
+export monitor_backward_policy_learning
 
 # =============================================================================
 # Applications - Domain Implementations
@@ -298,6 +324,10 @@ export NonAcyclicGFlowNet, cycle_breaking_sampling
 # High-level model creation (following the rules for clean interface)
 export create_forward_policy, create_backward_policy, create_flow_estimator
 export create_gflownet, to_component_array
+
+# Multi-start GFlowNets
+export MultiStartGFlowNetModel, create_multi_start_gflownet
+export sample_initial_state, get_initial_state_distribution
 
 # =============================================================================
 # Legacy Compatibility and Aliases

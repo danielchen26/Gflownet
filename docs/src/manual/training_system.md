@@ -63,7 +63,7 @@ config = create_modern_training_config(:molecular_design)
 - `n_iterations`: Total training iterations
 
 ### Advanced Parameters
-- `partition_function_method`: How to estimate Z (currently assumes Z=1)
+- `partition_function_method`: How to handle Z - `SIMPLE_ESTIMATION` (Z=1) or `LEARNABLE_ESTIMATION` (learn Z)
 - `validation_frequency`: How often to compute validation metrics
 - `early_stopping_patience`: Iterations without improvement before stopping
 - `sub_trajectory_config`: Configuration for sub-trajectory objectives

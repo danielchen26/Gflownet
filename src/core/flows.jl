@@ -25,6 +25,12 @@ Different approaches to computing the flow F(s) through each state:
 end
 
 # =============================================================================
+# Direct Flow Estimation - Neural Network Based
+# =============================================================================
+
+# Note: compute_flow_estimate function is defined later in this file
+
+# =============================================================================
 # Flow Caching System
 # =============================================================================
 
@@ -37,7 +43,9 @@ Caches computed flow values F(s) to avoid recomputation since:
 - Recursive computation can be expensive for deep DAGs
 - Many training objectives require repeated flow queries
 """
-const FLOW_CACHE = Dict{Tuple{Any,Any}, Float64}()
+# Use a more specific type for the cache to avoid type instability
+# Use a Ref to allow mutation of the cache container itself
+const FLOW_CACHE = Ref(Dict{Tuple{UInt64,Any}, Float64}())
 
 """
     clear_flow_cache!()
@@ -48,7 +56,7 @@ Clear the global flow cache.
 Should be called when model parameters change to ensure cache consistency.
 """
 function clear_flow_cache!()
-    empty!(FLOW_CACHE)
+    empty!(FLOW_CACHE[])
     return nothing
 end
 
@@ -144,11 +152,47 @@ function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Flo
         return terminal_flow(state)
     end
 
-    # NOTE: Flow computation requires DAG functionality which is not yet implemented
-    # For now, we return a simple estimate assuming Z = 1
-    # TODO: Implement proper flow computation when DAG support is added
-    @warn "Flow computation not fully implemented - returning estimate"
-    return 1.0
+    # Get applicable actions using on-demand computation
+    applicable_actions = get_applicable_actions(state, model.all_actions)
+    
+    # If no applicable actions, this is effectively a terminal state with zero reward
+    if isempty(applicable_actions)
+        return 0.0
+    end
+    
+    # Compute flow recursively: F(s) = Σ_{s'} P_F(s'|s) * F(s')
+    total_flow = 0.0
+    
+    # Compute forward policy probabilities for all actions
+    action_probs = forward_action_probabilities(
+        model.forward_policy, 
+        state,
+        model.all_actions,
+        model.parameters.forward, 
+        model.states.forward
+    )
+    
+    # Sum over all applicable actions and their next states
+    for (action_idx, action) in enumerate(model.all_actions)
+        # Skip non-applicable actions
+        if !(action in applicable_actions)
+            continue
+        end
+        
+        # Compute next state
+        next_state = apply_action(action, state)
+        
+        # Get transition probability P_F(s'|s)
+        transition_prob = action_probs[action_idx]
+        
+        # Recursively compute flow for next state
+        next_flow = compute_recursive_flow(model, next_state)
+        
+        # Add contribution to total flow
+        total_flow += transition_prob * next_flow
+    end
+    
+    return total_flow
 end
 
 """
@@ -166,17 +210,29 @@ flow values for states that have already been processed.
 - Maintains mathematical correctness while improving efficiency
 """
 function compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
-    # Check cache first
-    cache_key = get_cache_key(model, state)
-    if haskey(FLOW_CACHE, cache_key)
-        return FLOW_CACHE[cache_key]
+    # All cache operations are wrapped in Zygote.@ignore to avoid mutation issues
+    cache_key = Zygote.@ignore get_cache_key(model, state)
+    
+    # Check cache (non-differentiable)
+    cached_value = Zygote.@ignore begin
+        if haskey(FLOW_CACHE[], cache_key)
+            FLOW_CACHE[][cache_key]
+        else
+            nothing
+        end
+    end
+    
+    if !isnothing(cached_value)
+        return cached_value
     end
 
-    # Compute flow value
+    # Compute flow value (this is differentiable)
     flow_value = compute_recursive_flow(model, state)
 
-    # Cache result
-    FLOW_CACHE[cache_key] = flow_value
+    # Cache result (non-differentiable)
+    Zygote.@ignore begin
+        FLOW_CACHE[][cache_key] = flow_value
+    end
 
     return flow_value
 end
@@ -360,10 +416,9 @@ weighted by their forward probabilities.
 - Essential for proper normalization in GFlowNet training
 """
 function partition_function(model::GFlowNetModel)::Float64
-    # For now, we assume Z = 1 for simplicity
-    # This is mathematically valid when the initial state is fixed
-    # TODO: Implement proper partition function computation when flow functions are ready
-    return 1.0
+    # Compute the flow through the initial state
+    # Z = F(s₀)
+    return flow(model, model.initial_state)
 end
 
 # =============================================================================

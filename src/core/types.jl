@@ -136,7 +136,9 @@ issues while maintaining all mathematical properties.
 - `initial_state::AbstractState` - Starting state for trajectories
 - `all_actions::Vector{<:AbstractAction}` - Complete action space
 - `forward_policy::ForwardPolicy` - Policy network π(a|s)
+- `backward_policy::Union{Nothing,BackwardPolicy}` - Backward policy network (optional)
 - `flow_estimator::Union{Nothing,FlowEstimator}` - Flow estimation network (optional)
+- `log_partition_function::Union{Nothing,Float64}` - Learnable log partition function (optional)
 - `parameters::ComponentArray` - Neural network parameters
 - `optimizer` - Optimizer state (from Optimisers.jl)
 - `states::NamedTuple` - Neural network states (for Lux)
@@ -153,6 +155,7 @@ mutable struct GFlowNetModel
     forward_policy::ForwardPolicy
     backward_policy::Union{Nothing,BackwardPolicy}
     flow_estimator::Union{Nothing,FlowEstimator}
+    log_partition_function::Union{Nothing,Float64}
     parameters::ComponentArray
     optimizer
     states::NamedTuple
@@ -163,6 +166,7 @@ mutable struct GFlowNetModel
         forward_policy::ForwardPolicy,
         backward_policy::Union{Nothing,BackwardPolicy},
         flow_estimator::Union{Nothing,FlowEstimator},
+        log_partition_function::Union{Nothing,Float64},
         parameters::ComponentArray,
         optimizer,
         states::NamedTuple
@@ -171,7 +175,7 @@ mutable struct GFlowNetModel
             throw(ArgumentError("all_actions cannot be empty"))
         end
         new(initial_state, all_actions, forward_policy, backward_policy, flow_estimator,
-            parameters, optimizer, states)
+            log_partition_function, parameters, optimizer, states)
     end
 end
 

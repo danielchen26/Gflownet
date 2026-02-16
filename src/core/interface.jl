@@ -1,5 +1,5 @@
-# High-Level Interface for GFlowNet - Zygote+ComponentArray+Lux Compatible
-# Clean, robust implementation following official best practices
+# High-Level Interface for GFlowNet - Model Creation and Sampling
+# Clean implementation with training functions moved to training/
 
 using Lux
 using ComponentArrays
@@ -8,12 +8,19 @@ using Zygote
 using Random
 using Statistics
 
+using ..GFlowNet: AbstractState, AbstractAction, GFlowNetModel, Trajectory
+using ..GFlowNet: ForwardPolicy, BackwardPolicy, FlowEstimator
+using ..GFlowNet: PartitionFunctionMethod, SIMPLE_ESTIMATION, LEARNABLE_ESTIMATION
+using ..GFlowNet: SamplingConfig, SamplingStrategy
+using ..GFlowNet: STOCHASTIC_SAMPLING, GREEDY_SAMPLING, TEMPERATURE_SAMPLING
+using ..GFlowNet: get_applicable_actions, is_terminal_state
+
 # =============================================================================
 # Model Creation - Following Official Lux Patterns
 # =============================================================================
 
 """
-    create_gflownet(initial_state, all_actions; state_dim, hidden_dim=64, learning_rate=0.01, include_backward=false, rng=Random.default_rng())
+    create_gflownet(initial_state, all_actions; kwargs...)
 
 Create a GFlowNet model using proper Lux+ComponentArray+Zygote patterns.
 
@@ -21,10 +28,35 @@ Create a GFlowNet model using proper Lux+ComponentArray+Zygote patterns.
 - `initial_state`: Starting state s₀
 - `all_actions`: Complete action space
 - `state_dim`: Dimension of state features
-- `hidden_dim`: Hidden layer size for neural networks
-- `learning_rate`: Learning rate for optimizer
-- `include_backward`: Whether to include backward policy for full trajectory balance
-- `rng`: Random number generator
+- `hidden_dim=64`: Hidden layer size for neural networks
+- `learning_rate=0.01`: Learning rate for optimizer
+- `include_backward=false`: Whether to include backward policy for DETAILED_BALANCE
+- `include_flow_estimator=false`: Whether to include flow estimator for DIRECT_FLOW/FLOW_MATCHING
+- `partition_function_method=SIMPLE_ESTIMATION`: How to handle partition function Z:
+  - `SIMPLE_ESTIMATION`: Z = 1 (default, fixed)
+  - `LEARNABLE_ESTIMATION`: Learn Z as trainable parameter (recommended for complex environments)
+- `rng=Random.default_rng()`: Random number generator
+
+# Returns
+`GFlowNetModel` with all components initialized
+
+# Example
+```julia
+# With fixed Z (default)
+model = create_gflownet(
+    initial_state, all_actions;
+    state_dim = 10,
+    hidden_dim = 64
+)
+
+# With learnable Z (recommended)
+model = create_gflownet(
+    initial_state, all_actions;
+    state_dim = 10,
+    hidden_dim = 64,
+    partition_function_method = LEARNABLE_ESTIMATION
+)
+```
 
 Follows official Lux documentation patterns for gradient computation compatibility.
 """
@@ -35,38 +67,107 @@ function create_gflownet(
     hidden_dim::Int = 64,
     learning_rate::Float64 = 0.01,
     include_backward::Bool = false,
+    include_flow_estimator::Bool = false,
+    partition_function_method::PartitionFunctionMethod = SIMPLE_ESTIMATION,
     rng = Random.default_rng()
 )
     n_actions = length(all_actions)
 
     # Create neural networks using official Lux patterns
     forward_policy, forward_ps, forward_st = create_forward_policy(state_dim, hidden_dim, n_actions, rng)
-    flow_estimator, flow_ps, flow_st = create_flow_estimator(state_dim, hidden_dim, rng)
     
-    # Optionally create backward policy
-    if include_backward
+    # Optionally create flow estimator
+    if include_flow_estimator
+        flow_estimator, flow_ps, flow_st = create_flow_estimator(state_dim, hidden_dim, rng)
+    else
+        flow_estimator = nothing
+        flow_ps = nothing
+        flow_st = nothing
+    end
+    
+    # Initialize partition function parameter based on method
+    log_partition_function = if partition_function_method == LEARNABLE_ESTIMATION
+        0.0  # Initialize log Z to 0 (Z = 1)
+    else
+        nothing  # For SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, etc.
+    end
+
+    # Build parameters and states based on which components are included
+    if include_backward && include_flow_estimator
+        # Both backward policy and flow estimator
         backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
         
-        # Organize parameters with backward policy
-        parameters = ComponentArray(
-            forward = forward_ps,
-            backward = backward_ps,
-            flow = flow_ps
-        )
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps,
+                flow = flow_ps,
+                log_Z = log_partition_function
+            )
+        else
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps,
+                flow = flow_ps
+            )
+        end
         
-        # Network states
         states = (forward = forward_st, backward = backward_st, flow = flow_st)
-    else
+        
+    elseif include_backward && !include_flow_estimator
+        # Only backward policy
+        backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
+        
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps,
+                log_Z = log_partition_function
+            )
+        else
+            ComponentArray(
+                forward = forward_ps,
+                backward = backward_ps
+            )
+        end
+        
+        states = (forward = forward_st, backward = backward_st)
+        
+    elseif !include_backward && include_flow_estimator
+        # Only flow estimator
         backward_policy = nothing
         
-        # Organize parameters without backward policy
-        parameters = ComponentArray(
-            forward = forward_ps,
-            flow = flow_ps
-        )
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                flow = flow_ps,
+                log_Z = log_partition_function
+            )
+        else
+            ComponentArray(
+                forward = forward_ps,
+                flow = flow_ps
+            )
+        end
         
-        # Network states
         states = (forward = forward_st, flow = flow_st)
+        
+    else
+        # Neither backward policy nor flow estimator
+        backward_policy = nothing
+        
+        parameters = if partition_function_method == LEARNABLE_ESTIMATION
+            ComponentArray(
+                forward = forward_ps,
+                log_Z = log_partition_function
+            )
+        else
+            ComponentArray(
+                forward = forward_ps
+            )
+        end
+        
+        states = (forward = forward_st,)
     end
 
     # Setup optimizer (official Lux pattern)
@@ -80,6 +181,7 @@ function create_gflownet(
         forward_policy,
         backward_policy,
         flow_estimator,
+        log_partition_function,
         parameters,
         optimizer,
         states
@@ -267,6 +369,15 @@ function sample_action_from_policy(model::GFlowNetModel, state::AbstractState,
     exp_logits = exp.(applicable_logits .- max_logit)
     probs = exp_logits ./ sum(exp_logits)
 
+    # ε-Uniform Exploration Mixing (Standard GFlowNet practice)
+    # P(a|s) = (1-ε) × P_F(a|s) + ε × Uniform(applicable_actions)
+    # Reference: Malkin et al. (2022), Shen et al. (ICML 2023)
+    if config.epsilon > 0.0
+        n_actions = length(probs)
+        uniform_prob = 1.0 / n_actions
+        probs = (1.0 - config.epsilon) .* probs .+ config.epsilon * uniform_prob
+    end
+
     # Sample action based on strategy
     if config.strategy == GREEDY_SAMPLING
         action_idx = argmax(probs)
@@ -281,323 +392,6 @@ function sample_action_from_policy(model::GFlowNetModel, state::AbstractState,
     end
 
     return applicable_actions[action_idx]
-end
-
-# =============================================================================
-# Training - Proper Zygote+ComponentArray+Lux Pattern
-# =============================================================================
-
-"""
-    train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::Bool = false)
-
-Train GFlowNet using proper Lux+Zygote patterns.
-"""
-function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::Bool = false)
-    history = TrainingHistory()
-
-    if verbose
-        println("🚀 Starting GFlowNet training...")
-        println("   Configuration:")
-        println("     - Objective: $(config.objective)")
-        println("     - Iterations: $(config.n_iterations)")
-        println("     - Batch size: $(config.batch_size)")
-        println("     - Learning rate: $(config.learning_rate)")
-    end
-
-    for iteration in 1:config.n_iterations
-        start_time = time()
-
-        try
-            # Sample trajectories
-            trajectories = [sample_trajectory(model) for _ in 1:config.batch_size]
-
-            # Compute loss and gradients using official Lux pattern
-            loss_val, gradient_norm = train_step!(model, trajectories, config)
-
-            # Record metrics
-            push!(history.losses, loss_val)
-            push!(history.gradient_norms, gradient_norm)
-            push!(history.iteration_times, time() - start_time)
-
-            # Verbose output
-            if verbose && (iteration % config.validation_frequency == 0)
-                avg_loss = mean(filter(!isnan, history.losses[max(1, end-4):end]))
-                println("   Iteration $iteration:")
-                println("     - Loss: $(round(loss_val, digits=4))")
-                println("     - Avg Loss (5): $(isnan(avg_loss) ? "NaN" : round(avg_loss, digits=4))")
-                println("     - Gradient norm: $(round(gradient_norm, digits=4))")
-                println("     - Time: $(round(time() - start_time, digits=3))s")
-                println("     - Trajectories: $(length(trajectories))")
-            end
-
-        catch e
-            # Record failed iteration
-            push!(history.losses, NaN)
-            push!(history.gradient_norms, NaN)
-            push!(history.iteration_times, time() - start_time)
-
-            if verbose
-                println("   ⚠️  Training error at iteration $iteration: $e")
-            end
-        end
-    end
-
-    if verbose
-        successful_iterations = count(!isnan, history.losses)
-        final_loss = isempty(filter(!isnan, history.losses)) ? NaN : filter(!isnan, history.losses)[end]
-        total_time = sum(history.iteration_times)
-
-        println("   ✅ Training completed:")
-        println("     - Final loss: $(isnan(final_loss) ? "NaN" : round(final_loss, digits=4))")
-        println("     - Total time: $(round(total_time, digits=1))s")
-        println("     - Successful iterations: $successful_iterations/$(config.n_iterations)")
-    end
-
-    return history
-end
-
-"""
-    train_step!(model, trajectories, config)
-
-Perform single training step using official Lux+Zygote pattern.
-"""
-function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, config::TrainingConfig)
-
-    # Define loss function following official Lux pattern
-    loss_function = ps -> compute_trajectory_loss(model, trajectories, ps, config)
-
-    # Compute gradients using official Zygote pattern
-    loss_val, grads = Zygote.withgradient(loss_function, model.parameters)
-
-    # Check for valid gradients
-    if grads[1] === nothing || any_invalid(grads[1])
-        return Inf, 0.0
-    end
-
-    # Compute gradient norm
-    gradient_norm = compute_gradient_norm(grads[1])
-
-    # Update parameters using Optimisers.jl
-    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, grads[1])
-
-    # Update model state (mutation after gradient computation is safe)
-    model.optimizer = optimizer_state
-    model.parameters = parameters
-
-    return loss_val, gradient_norm
-end
-
-# =============================================================================
-# Loss Computation - Mathematically Correct Trajectory Balance
-# =============================================================================
-
-"""
-    compute_trajectory_loss(model, trajectories, params, config)
-
-Compute trajectory balance loss using Zygote-safe operations.
-
-FIXED: Now implements correct trajectory balance: P_F(τ) ∝ R(s_T)
-"""
-function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Trajectory},
-                                params, config::TrainingConfig)
-
-    # Filter valid trajectories (discrete validation - non-differentiable)
-    valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
-
-    if isempty(valid_trajectories)
-        return 0.0
-    end
-
-    # Compute losses using Zygote-safe operations
-    losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
-
-    # Filter out infinite losses
-    finite_losses = filter(!isinf, losses)
-
-    if isempty(finite_losses)
-        return Inf
-    end
-
-    return mean(finite_losses)
-end
-
-"""
-    compute_single_trajectory_loss(model, trajectory, params)
-
-Compute loss for single trajectory with CORRECTED trajectory balance.
-"""
-function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajectory, params)
-
-    # Compute log probability of trajectory
-    log_prob_sum = 0.0
-
-    for i in 1:(length(trajectory.states)-1)
-        state = trajectory.states[i]
-        action = trajectory.actions[i]
-
-        # Get state features
-        features = state_to_features(state)
-
-        # Compute forward logits using proper Lux call (Zygote-safe)
-        logits_vec, _ = model.forward_policy.model(features, params.forward, model.states.forward)
-
-        # Get applicable actions on-demand (discrete logic - non-differentiable)
-        applicable_actions = Zygote.@ignore get_applicable_actions(state, model.all_actions)
-
-        if isempty(applicable_actions)
-            return Inf  # Invalid trajectory
-        end
-
-        # Find action and applicable indices (discrete logic - non-differentiable)
-        action_idx = Zygote.@ignore findfirst(a -> a == action, model.all_actions)
-        applicable_indices = Zygote.@ignore [i for (i, a) in enumerate(model.all_actions) if a in applicable_actions]
-
-        if isnothing(action_idx)
-            return Inf  # Invalid action
-        end
-
-        if !(action_idx in applicable_indices)
-            return Inf  # Action not applicable
-        end
-
-        # Compute log probability using numerically stable operations
-        applicable_logits = logits_vec[applicable_indices]
-        if isempty(applicable_logits)
-            return Inf
-        end
-
-        # Use logsumexp for numerical stability
-        log_probs = applicable_logits .- logsumexp(applicable_logits)
-
-        # Find action position in applicable actions (discrete logic - non-differentiable)
-        action_pos = Zygote.@ignore findfirst(==(action_idx), applicable_indices)
-
-        if isnothing(action_pos)
-            return Inf
-        end
-
-        log_prob_sum += log_probs[action_pos]
-    end
-
-    # Get terminal reward (domain-specific function - non-differentiable)
-    terminal_state = trajectory.states[end]
-    terminal_reward = Zygote.@ignore reward(terminal_state)
-
-    # Ensure positive reward for GFlowNet
-    if terminal_reward <= 0
-        terminal_reward = 1e-8
-    end
-
-    # CORRECTED Trajectory Balance Loss: (log P_F(τ) - log R(s_T))²
-    # This enforces P_F(τ) ∝ R(s_T) which is the correct GFlowNet objective
-    log_reward = log(terminal_reward)
-    trajectory_balance_error = log_prob_sum - log_reward
-
-    return trajectory_balance_error^2
-end
-
-# =============================================================================
-# Utility Functions - Zygote-Safe
-# =============================================================================
-
-"""
-    sample_trajectory_batch(model, batch_size; config)
-
-Sample multiple trajectories efficiently.
-"""
-function sample_trajectory_batch(model::GFlowNetModel, batch_size::Int;
-                                config::SamplingConfig = SamplingConfig())
-    return [sample_trajectory(model; config = config) for _ in 1:batch_size]
-end
-
-"""
-    is_valid_trajectory(trajectory)
-
-Check if trajectory is valid.
-"""
-function is_valid_trajectory(trajectory::Trajectory)
-    return !isempty(trajectory.states) &&
-           length(trajectory.states) == length(trajectory.actions) + 1 &&
-           is_terminal_state(trajectory.states[end])
-end
-
-"""
-    any_invalid(gradients)
-
-Check if gradients contain invalid values.
-"""
-function any_invalid(gradients)
-    for grad in values(gradients)
-        if grad isa AbstractArray
-            if any(isnan, grad) || any(isinf, grad)
-                return true
-            end
-        end
-    end
-    return false
-end
-
-"""
-    compute_gradient_norm(gradients)
-
-Compute L2 norm of gradients with proper ComponentArray support.
-"""
-function compute_gradient_norm(gradients)
-    norm_squared = 0.0
-
-    function add_gradient_contribution!(obj)
-        if obj isa AbstractArray && !isempty(obj)
-            norm_squared += sum(abs2, obj; init=0.0)
-        elseif obj isa NamedTuple
-            for value in values(obj)
-                add_gradient_contribution!(value)
-            end
-        elseif hasproperty(obj, :axes) && hasmethod(values, (typeof(obj),))
-            # ComponentArray or similar structure
-            try
-                for value in values(obj)
-                    add_gradient_contribution!(value)
-                end
-            catch
-                # Fallback: try to access as NamedTuple-like
-                try
-                    for key in keys(obj)
-                        add_gradient_contribution!(getproperty(obj, key))
-                    end
-                catch
-                    # Last resort: treat as array if possible
-                    if obj isa AbstractArray && !isempty(obj)
-                        norm_squared += sum(abs2, obj; init=0.0)
-                    end
-                end
-            end
-        end
-    end
-
-    try
-        add_gradient_contribution!(gradients)
-    catch e
-        @warn "Error computing gradient norm: $e"
-        return 0.0
-    end
-
-    return sqrt(max(norm_squared, 0.0))
-end
-
-"""
-    logsumexp(x)
-
-Numerically stable log-sum-exp operation.
-"""
-function logsumexp(x::AbstractVector)
-    if isempty(x)
-        return -Inf
-    end
-    max_x = maximum(x)
-    if isinf(max_x)
-        return max_x
-    end
-    return max_x + log(sum(exp.(x .- max_x)))
 end
 
 # =============================================================================
@@ -620,9 +414,209 @@ function is_applicable end
 function apply_action end
 
 # =============================================================================
+# Backward Trajectory Sampling - TLM Support (ICLR 2025)
+# =============================================================================
+
+"""
+    sample_backward_trajectory(model::GFlowNetModel, terminal_state::AbstractState;
+                               config::SamplingConfig = SamplingConfig())
+
+Sample a trajectory backwards from a terminal state to the initial state using the backward policy.
+
+# Mathematical Foundation (TLM - ICLR 2025)
+The backward policy P_B(s|s') is trained to implicitly encode path counts:
+    P_B(s|s') ≈ n(s) / n(s')
+where n(s) = number of paths from initial state to s.
+
+By sampling backwards from terminal states (which are sampled ∝ R), we:
+1. Bypass the 70:1 forward path asymmetry
+2. Generate diverse trajectories that would be rarely sampled forward
+3. Use these for training to improve mode coverage
+
+# Arguments
+- `model::GFlowNetModel`: The GFlowNet model (must have backward_policy)
+- `terminal_state::AbstractState`: Terminal state to sample backward from
+- `config::SamplingConfig`: Sampling configuration
+
+# Returns
+`Trajectory` with states/actions from initial to terminal (forward direction)
+"""
+function sample_backward_trajectory(model::GFlowNetModel, terminal_state::AbstractState;
+                                    config = SamplingConfig())
+
+    if isnothing(model.backward_policy)
+        throw(ArgumentError("Backward trajectory sampling requires backward_policy. Use include_backward=true in create_gflownet"))
+    end
+
+    # Build trajectory in reverse order (terminal → initial), then reverse at end
+    # Using push! + reverse! is O(n) vs pushfirst! which is O(n²)
+    reverse_states = [terminal_state]
+    reverse_actions = AbstractAction[]
+
+    current_state = terminal_state
+    steps = 0
+    max_steps = config.max_trajectory_length
+
+    while current_state != model.initial_state && steps < max_steps
+        steps += 1
+
+        # Find all parent states that can transition to current_state
+        parent_candidates = find_parent_states(model, current_state)
+
+        if isempty(parent_candidates)
+            # Cannot find parents - may be at initial state or disconnected
+            break
+        end
+
+        # Sample parent state using backward policy
+        parent_state, action = sample_parent_from_backward_policy(
+            model, current_state, parent_candidates; config=config
+        )
+
+        # Add to trajectory (in reverse order)
+        push!(reverse_states, parent_state)
+        push!(reverse_actions, action)
+
+        current_state = parent_state
+    end
+
+    # Reverse to get forward direction (initial → terminal)
+    reverse!(reverse_states)
+    reverse!(reverse_actions)
+
+    return Trajectory(reverse_states, reverse_actions)
+end
+
+"""
+    find_parent_states(model::GFlowNetModel, target_state::AbstractState)
+
+Find all states that can transition to target_state.
+
+Returns vector of (parent_state, action) tuples.
+"""
+function find_parent_states(model::GFlowNetModel, target_state::AbstractState)
+    # This is a simple implementation that works for grid worlds
+    # For more complex domains, this would need domain-specific implementation
+
+    parents = Tuple{AbstractState, AbstractAction}[]
+
+    # Try each action from potential parent states
+    # For grid world: parent is one step behind in the direction of the action
+    for action in model.all_actions
+        # Try to find a parent state where applying action gives target
+        parent = find_parent_for_action(target_state, action)
+        if !isnothing(parent)
+            # Verify the transition is valid
+            if is_applicable(action, parent) && apply_action(action, parent) == target_state
+                push!(parents, (parent, action))
+            end
+        end
+    end
+
+    return parents
+end
+
+"""
+    find_parent_for_action(target_state, action)
+
+For a given target state and action, find the parent state that would produce target via action.
+Domain-specific implementation.
+"""
+function find_parent_for_action(target_state::AbstractState, action::AbstractAction)
+    # Default implementation - requires domain override
+    # For grid world, this is handled by specialized methods
+    return nothing
+end
+
+"""
+    sample_parent_from_backward_policy(model, target_state, parent_candidates; config)
+
+Sample a parent state using the backward policy P_B(parent|target).
+"""
+function sample_parent_from_backward_policy(model::GFlowNetModel, target_state::AbstractState,
+                                            parent_candidates::Vector{<:Tuple}; config = SamplingConfig())
+
+    if isempty(parent_candidates)
+        error("No parent candidates for backward sampling")
+    end
+
+    if length(parent_candidates) == 1
+        return parent_candidates[1]
+    end
+
+    # Compute backward probabilities for each parent
+    probs = Float64[]
+    for (parent, action) in parent_candidates
+        prob = compute_backward_probability(
+            model.backward_policy, target_state, parent,
+            model.parameters.backward, model.states.backward,
+            model.all_actions
+        )
+        push!(probs, max(prob, 1e-8))
+    end
+
+    # Normalize
+    prob_sum = sum(probs)
+    if prob_sum > 1e-8
+        probs ./= prob_sum
+    else
+        probs = fill(1.0 / length(probs), length(probs))
+    end
+
+    # Apply epsilon exploration if configured
+    if config.epsilon > 0.0
+        uniform_prob = 1.0 / length(probs)
+        probs = (1.0 - config.epsilon) .* probs .+ config.epsilon * uniform_prob
+    end
+
+    # Sample
+    cumulative = cumsum(probs)
+    r = rand()
+    idx = findfirst(p -> p >= r, cumulative)
+    if isnothing(idx)
+        idx = length(probs)
+    end
+
+    return parent_candidates[idx]
+end
+
+"""
+    sample_backward_trajectories_from_terminals(model::GFlowNetModel, terminal_states::Vector,
+                                                n_samples::Int; config = SamplingConfig())
+
+Sample backward trajectories from given terminal states.
+Terminal states should be sampled proportionally to their rewards.
+
+# Arguments
+- `model`: GFlowNet model with backward policy
+- `terminal_states`: Vector of terminal states to sample from
+- `n_samples`: Number of backward trajectories to generate
+- `config`: Sampling configuration
+
+# Returns
+Vector of Trajectory objects
+"""
+function sample_backward_trajectories_from_terminals(model::GFlowNetModel,
+                                                     terminal_states::Vector,
+                                                     n_samples::Int;
+                                                     config = SamplingConfig())
+
+    trajectories = Trajectory[]
+
+    for _ in 1:n_samples
+        # Randomly select a terminal state
+        terminal = terminal_states[rand(1:length(terminal_states))]
+        traj = sample_backward_trajectory(model, terminal; config=config)
+        push!(trajectories, traj)
+    end
+
+    return trajectories
+end
+
+# =============================================================================
 # Exports
 # =============================================================================
 
 export create_gflownet, create_forward_policy, create_backward_policy, create_flow_estimator
-export sample_trajectory, sample_trajectory_batch, train_gflownet
-export compute_trajectory_loss, compute_single_trajectory_loss
+export sample_trajectory, sample_action_from_policy
+export sample_backward_trajectory, sample_backward_trajectories_from_terminals

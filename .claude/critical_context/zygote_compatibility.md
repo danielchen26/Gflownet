@@ -1,0 +1,273 @@
+# Julia Coding Standards for GFlowNet
+
+## 🚨 CRITICAL: Automatic Differentiation (Zygote) Compatibility
+
+### The #1 Rule: NO IN-PLACE MUTATIONS in Differentiable Functions
+
+**Any function that might be called during gradient computation MUST avoid mutations:**
+
+```julia
+# ❌ WRONG - Causes "Mutating arrays is not supported" error
+function apply_action(action::GridAction, state::GridState)
+    x, y = state.x, state.y
+    isa(action, MoveUp) && (y += 1)      # ← MUTATION! Breaks Zygote!
+    isa(action, MoveDown) && (y -= 1)    # ← MUTATION! Breaks Zygote!
+    return GridState(x, y, false)
+end
+
+# ✅ CORRECT - Pure functional approach
+function apply_action(action::GridAction, state::GridState)
+    # Use conditional expressions instead of mutations
+    x = isa(action, MoveLeft) ? state.x - 1 :
+        isa(action, MoveRight) ? state.x + 1 : state.x
+
+    y = isa(action, MoveUp) ? state.y + 1 :
+        isa(action, MoveDown) ? state.y - 1 : state.y
+
+    return GridState(x, y, false)
+end
+```
+
+### AD-Friendly vs AD-Hostile Patterns
+
+**✅ AD-FRIENDLY:**
+```julia
+# Pure transformations
+new_state = transform(old_state)
+
+# Conditional assignments
+x = condition ? value_a : value_b
+
+# Construct new objects
+return SomeStruct(computed_values...)
+
+# Functional array operations
+new_array = map(f, old_array)
+```
+
+**❌ AD-HOSTILE:**
+```julia
+# In-place mutations
+x += 1
+y -= delta
+z *= factor
+
+# Array mutations
+push!(array, item)
+append!(array, items)
+array[i] = value
+
+# Field mutations
+object.field = new_value
+```
+
+### Debugging Zygote Issues
+
+When you see: `"Mutating arrays is not supported -- called push!(Vector{Int64}, ...)"`:
+
+1. **Find the mutation**: Look for `+=`, `-=`, `*=`, `push!`, `append!`, etc.
+2. **Replace with pure functions**: Use conditional expressions and new object construction
+3. **Test in isolation**: Create minimal examples to verify AD compatibility
+
+## Type System Best Practices
+
+### Abstract Types and Interfaces
+- Use `AbstractState` and `AbstractAction` as base types for all domain implementations
+- Implement required interface methods for all concrete types:
+  ```julia
+  function state_to_features(state::YourState)
+  function is_applicable(action::YourAction, state::YourState)
+  function apply_action(action::YourAction, state::YourState)
+  function reward(state::YourState)
+  ```
+
+### Type Annotations
+- Always use concrete types in struct definitions
+- Use parametric types for containers: `Vector{<:Trajectory}`, `Dict{S, Vector{A}}`
+- Prefer `ComponentArray` over `NamedTuple` for gradient-compatible parameters
+
+## Gradient Type Handling (ComponentArrays)
+
+### Zygote Returns ComponentVector, Not NamedTuple
+
+When using `ComponentArrays.jl` for parameters (which we do), Zygote returns gradients as `ComponentArrays.ComponentVector`, NOT `NamedTuple`.
+
+**Functions processing gradients MUST handle this:**
+```julia
+# ❌ WRONG - Assumes NamedTuple
+function scale_z_gradient(grads::NamedTuple)
+    grads.log_Z *= 2.0  # Will fail!
+end
+
+# ✅ CORRECT - Works with ComponentVector
+function scale_z_gradient(grads)
+    if haskey(grads, :log_Z)
+        grads.log_Z *= 2.0
+    end
+end
+```
+
+### Use Zygote.@ignore for Non-Differentiable Operations
+
+Wrap operations that shouldn't be differentiated (discrete checks, filtering):
+
+```julia
+# ✅ CORRECT - Prevent Zygote from tracing non-differentiable code
+valid_trajectories = Zygote.@ignore filter(is_valid, trajectories)
+action_count = Zygote.@ignore length(applicable_actions)
+```
+
+### Performance: Avoid pushfirst! in Loops
+
+`pushfirst!` in loops leads to O(n²) complexity due to array shifting:
+
+```julia
+# ❌ SLOW - O(n²) complexity
+trajectory = []
+for step in 1:n
+    pushfirst!(trajectory, current_state)  # Shifts entire array!
+end
+
+# ✅ FAST - O(n) complexity
+trajectory = []
+for step in 1:n
+    push!(trajectory, current_state)  # Append is O(1) amortized
+end
+reverse!(trajectory)  # Single O(n) operation at end
+```
+
+Alternative: Use `DataStructures.Deque` for O(1) operations at both ends.
+
+## Numerical Stability
+
+### Float32 Consistency
+- Use `Float32` for all neural network computations
+- Convert inputs: `features = Float32.(state.data)`
+- Use explicit constructors: `Float32(1.0)` instead of `1.0f0`
+
+### Validation Requirements
+- Validate all rewards are positive (GFlowNet mathematical requirement)
+- Check for NaN/Inf values in neural network inputs/outputs
+- Clamp extreme values: `clamp.(features, Float32(-1e10), Float32(1e10))`
+
+### Numerical Safety
+```julia
+# Safe reward handling
+reward_safe = max(reward_value, 1e-8)
+log_reward = log(reward_safe)
+
+# Safe probability computation
+prob = max(prob, 1e-10)
+log_prob = log(prob)
+```
+
+## Neural Network Integration (Lux.jl)
+
+### Model Application Pattern
+```julia
+# Proper feature reshaping for batch dimension
+features_matrix = reshape(features, :, 1)
+
+# Safe model call with error handling
+try
+    outputs, new_states = model(features_matrix, parameters, states)
+    outputs = vec(outputs)  # Remove batch dimension if needed
+catch e
+    @error "Neural network failed" error=e
+    rethrow(e)
+end
+```
+
+### Parameter Structure
+- Always use `ComponentArray` for parameters
+- Structure: `ComponentArray(forward=..., backward=..., flow=...)`
+- Validate parameter consistency before model creation
+
+## Error Handling and Debugging
+
+### Comprehensive Validation
+- Validate trajectory types: `Vector{<:Trajectory}` not `Vector{Any}`
+- Check state consistency in trajectories
+- Validate parameter structures before gradient computation
+
+### Informative Error Messages
+```julia
+if !isa(trajectories, Vector{<:Trajectory})
+    error("trajectories must be Vector{<:Trajectory}, got $(typeof(trajectories))")
+end
+```
+
+### Avoid Silent Exception Handling
+
+Never silently swallow errors during critical operations:
+
+```julia
+# ❌ WRONG - Errors disappear silently
+function sample_backward_trajectory(model, terminal_state)
+    try
+        # ... sampling logic
+    catch e
+        return nothing  # Silent failure!
+    end
+end
+
+# ✅ CORRECT - Make failures visible
+function sample_backward_trajectory(model, terminal_state)
+    try
+        # ... sampling logic
+    catch e
+        @warn "Backward sampling failed" exception=e terminal_state
+        return nothing
+    end
+end
+```
+
+## Performance Optimizations
+
+### Caching and Memoization
+- Use action caches in DAG: `action_cache::Dict{S, Vector{A}}`
+- Clear caches when parameters change: `clear_flow_cache!()`
+- Use thread-local caches to avoid locking
+
+### Memory Management (Outside Gradient Computation)
+
+**IMPORTANT**: The following optimizations apply ONLY to code that is NOT part of the gradient computation path:
+
+```julia
+# ✅ Safe in non-differentiable code (data processing, logging, etc.)
+# Use @views for array slicing to avoid allocations
+data_slice = @view data[1:100]
+
+# Pre-allocate buffers for result collection
+results = Vector{Float32}(undef, n_iterations)
+```
+
+**⚠️ NEVER use these in functions called during backpropagation!** Always prioritize Zygote compatibility over performance in differentiable code.
+
+## Documentation Standards
+
+### Function Documentation
+```julia
+"""
+    function_name(arg1::Type1, arg2::Type2)
+
+Brief description of what the function does.
+
+# Arguments
+- `arg1::Type1`: Description of first argument
+- `arg2::Type2`: Description of second argument
+
+# Returns
+- Description of return value
+
+# Example
+```julia
+result = function_name(value1, value2)
+```
+"""
+```
+
+### Comments
+- Use clean, professional comments without development tags
+- Explain **why** not **what** when the code is clear
+- Document mathematical foundations for algorithms

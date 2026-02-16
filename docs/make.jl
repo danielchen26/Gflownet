@@ -17,7 +17,8 @@ makedocs(
         "Getting Started" => [
             "guide/getting_started.md",
             "guide/core_concepts.md", 
-            "guide/examples.md"
+            "guide/examples.md",
+            "guide/learnable_partition_function.md"
         ],
         "Manual" => [
             "manual/overview.md",
@@ -37,8 +38,9 @@ makedocs(
             "api/core_types.md",
             "api/policies.md",
             "api/training.md",
+            "api/partition_function.md",
+            "api/flow_computation.md",
             "api/flow_networks.md",
-            "api/dag.md",
             "api/utils.md"
         ],
         "Applications" => [
@@ -51,7 +53,8 @@ makedocs(
         "Internals" => [
             "internals/architecture.md",
             "internals/design_decisions.md", 
-            "internals/known_limitations.md"
+            "internals/known_limitations.md",
+            "internals/flow_functions_multistart.md"
         ],
         "Extensions" => [
             "extensions/continuous.md",

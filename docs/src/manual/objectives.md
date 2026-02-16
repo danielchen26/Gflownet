@@ -27,14 +27,10 @@ objective = TRAJECTORY_BALANCE
 
 ### Mathematical Formulation
 Without backward policy: 
-```
-L = (log P_F(τ) - log R(s_T))²
-```
+$$L = (\log P_F(\tau) - \log R(s_T))^2$$
 
 With backward policy:
-```
-L = (log P_F(τ) - log R(s_T) - log P_B(τ))²
-```
+$$L = (\log P_F(\tau) - \log R(s_T) - \log P_B(\tau))^2$$
 
 ### Example
 ```julia
@@ -46,8 +42,9 @@ config = TrainingConfig(
 ```
 
 ### Notes
-- Assumes Z = 1 (valid for fixed initial state)
-- Now supports optional backward policy with `include_backward=true`
+- Assumes $Z = 1$ by default (valid for fixed initial state)
+- Now supports learnable $Z$ with `partition_function_method=LEARNABLE_ESTIMATION`
+- Supports optional backward policy with `include_backward=true`
 - Most efficient for simple domains
 
 ## General Trajectory Balance (Not Yet Implemented)
@@ -191,14 +188,10 @@ flow_mode = EDGE_LEVEL  # or STATE_LEVEL or MIXED_LEVEL
 Unifies two classical approaches:
 
 Edge-Level (Detailed Balance):
-```
-F(s) * P_F(s → s') = F(s') * P_B(s' → s)
-```
+$$F(s) \cdot P_F(s \to s') = F(s') \cdot P_B(s' \to s)$$
 
 State-Level (Flow Matching):
-```
-∑incoming_flow = ∑outgoing_flow
-```
+$$\sum \text{incoming flow} = \sum \text{outgoing flow}$$
 
 ### Modes
 - `EDGE_LEVEL`: Focus on individual transitions
@@ -241,16 +234,16 @@ Currently not fully implemented due to missing flow functions.
 ## Implementation Status
 
 ### Fully Implemented
-- ✅ Trajectory Balance (with optional backward policy)
-- ✅ Sub-Trajectory Balance variants
+- ✅ Trajectory Balance (with optional backward policy and learnable Z)
+- ✅ Detailed Balance (with joint backward policy representation)
+- ✅ Flow Matching (complete implementation)
+- ✅ Sub-Trajectory Balance (O(T²) learning signals)
+- ✅ Direct Flow Objective (neural network flow estimation)
 
-### Partially Implemented  
-- ⚠️ Flow Consistency (missing flow functions)
-
-### Not Implemented
-- ❌ General Trajectory Balance
-- ❌ Detailed Balance (requires flow functions)
-- ❌ Flow Matching (requires flow functions)
+### Flow Computation
+- ✅ Recursive flow computation with memoization
+- ✅ Edge flows and partition function
+- ✅ Zygote-compatible caching
 
 ## Examples by Domain
 

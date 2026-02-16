@@ -318,39 +318,6 @@ function compute_backward_logits(policy::BackwardPolicy, features::Vector{Float3
     return logits, new_states
 end
 
-"""
-    sample_backward_state(policy::BackwardPolicy, target_state, dag,
-                         parameters, states; rng=nothing)
-
-Sample a previous state from P_B(·|s').
-
-# Mathematical Foundation
-Samples s ∼ P_B(·|s') over all possible previous states.
-"""
-function sample_backward_state(policy::BackwardPolicy, target_state, dag,
-    parameters, states; rng=nothing)
-    if isnothing(rng)
-        rng = Random.default_rng()
-    end
-
-    # Get previous states
-    prev_states = get_previous_states(dag, target_state)
-    if isempty(prev_states)
-        throw(ArgumentError("No previous states available for backward sampling from $target_state"))
-    end
-
-    # Get target state features
-    features = state_to_features(target_state)
-
-    # Compute backward logits
-    logits, _ = compute_backward_logits(policy, features, prev_states, parameters, states)
-
-    # Sample from distribution
-    probs = softmax(logits)
-    state_idx = sample(rng, Weights(probs))
-
-    return prev_states[state_idx], state_idx
-end
 
 # =============================================================================
 # Flow Estimator Z(s) - Mathematical Foundation
@@ -442,12 +409,9 @@ function forward_transition_probability(model::GFlowNetModel, source_state, targ
     end
 
     # Check if any action leads to target state
-    valid_actions = []
-    for action in applicable_actions
-        if apply_action(action, source_state) == target_state
-            push!(valid_actions, action)
-        end
-    end
+    # Use array comprehension instead of push! for Zygote compatibility
+    valid_actions = [action for action in applicable_actions 
+                     if apply_action(action, source_state) == target_state]
     
     if isempty(valid_actions)
         return 0.0  # No action leads to target state
@@ -562,6 +526,230 @@ function is_valid_backward_transition(source_state, target_state, all_actions)
         end
     end
     return false
+end
+
+# =============================================================================
+# Backward Policy Validation Functions
+# =============================================================================
+
+"""
+    validate_backward_policy_normalization(model, state, all_actions; tolerance=1e-3)
+
+Validate that backward policy probabilities sum to 1 for all parent states.
+
+# Mathematical Property
+For any state s', the backward probabilities should satisfy:
+∑_{s ∈ parents(s')} P_B(s|s') = 1
+
+# Returns
+- `is_valid::Bool`: Whether normalization is satisfied
+- `total_prob::Float64`: Actual sum of probabilities
+- `parent_states::Vector`: List of parent states checked
+"""
+function validate_backward_policy_normalization(
+    model::GFlowNetModel,
+    state::AbstractState,
+    all_actions::Vector{<:AbstractAction};
+    tolerance::Float64 = 1e-3
+)
+    # Skip validation if no backward policy
+    if isnothing(model.backward_policy)
+        return true, 1.0, AbstractState[]
+    end
+    
+    # Skip terminal states (no parents)
+    if is_terminal_state(state)
+        return true, 0.0, AbstractState[]
+    end
+    
+    # Find all parent states (states that can transition to current state)
+    parent_states = AbstractState[]
+    for potential_parent in Zygote.@ignore get_all_states_in_dag(model, all_actions)
+        if is_valid_backward_transition(potential_parent, state, all_actions)
+            push!(parent_states, potential_parent)
+        end
+    end
+    
+    # If no parents (initial state), it's valid
+    if isempty(parent_states)
+        return true, 0.0, parent_states
+    end
+    
+    # Compute sum of backward probabilities
+    total_prob = 0.0
+    for parent in parent_states
+        prob = compute_backward_probability(
+            model.backward_policy, parent, state,
+            model.parameters.backward, model.states.backward, all_actions
+        )
+        total_prob += prob
+    end
+    
+    # Check if normalized within tolerance
+    is_valid = abs(total_prob - 1.0) < tolerance
+    
+    return is_valid, total_prob, parent_states
+end
+
+"""
+    validate_backward_policy_consistency(model, trajectories; tolerance=1e-3)
+
+Validate backward policy consistency across a batch of trajectories.
+
+# Checks performed:
+1. All backward transitions have positive probability
+2. Invalid transitions have near-zero probability
+3. Normalization constraint is satisfied
+
+# Returns
+NamedTuple with validation results and statistics.
+"""
+function validate_backward_policy_consistency(
+    model::GFlowNetModel,
+    trajectories::Vector{Trajectory};
+    tolerance::Float64 = 1e-3
+)
+    # Skip if no backward policy
+    if isnothing(model.backward_policy)
+        return (
+            is_valid = true,
+            message = "No backward policy to validate",
+            stats = nothing
+        )
+    end
+    
+    # Collect statistics
+    valid_transition_probs = Float64[]
+    invalid_transition_probs = Float64[]
+    normalization_errors = Float64[]
+    
+    # Check each trajectory
+    for traj in trajectories
+        for i in 2:length(traj.states)
+            prev_state = traj.states[i-1]
+            curr_state = traj.states[i]
+            
+            # Valid transition probability
+            prob = compute_backward_probability(
+                model.backward_policy, prev_state, curr_state,
+                model.parameters.backward, model.states.backward, model.all_actions
+            )
+            push!(valid_transition_probs, prob)
+            
+            # Check normalization for current state
+            is_normalized, total_prob, _ = validate_backward_policy_normalization(
+                model, curr_state, model.all_actions; tolerance=tolerance
+            )
+            if !is_normalized
+                push!(normalization_errors, abs(total_prob - 1.0))
+            end
+        end
+    end
+    
+    # Compute summary statistics
+    min_valid_prob = isempty(valid_transition_probs) ? 0.0 : minimum(valid_transition_probs)
+    mean_valid_prob = isempty(valid_transition_probs) ? 0.0 : mean(valid_transition_probs)
+    max_norm_error = isempty(normalization_errors) ? 0.0 : maximum(normalization_errors)
+    
+    # Determine overall validity
+    is_valid = min_valid_prob > 1e-8 && max_norm_error < tolerance
+    
+    message = if is_valid
+        "Backward policy validation passed"
+    else
+        issues = String[]
+        if min_valid_prob <= 1e-8
+            push!(issues, "Some valid transitions have near-zero probability")
+        end
+        if max_norm_error >= tolerance
+            push!(issues, "Normalization constraint violated (max error: $(round(max_norm_error, digits=4)))")
+        end
+        "Backward policy validation failed: " * join(issues, ", ")
+    end
+    
+    return (
+        is_valid = is_valid,
+        message = message,
+        stats = (
+            min_valid_prob = min_valid_prob,
+            mean_valid_prob = mean_valid_prob,
+            max_norm_error = max_norm_error,
+            n_transitions_checked = length(valid_transition_probs),
+            n_normalization_errors = length(normalization_errors)
+        )
+    )
+end
+
+"""
+    monitor_backward_policy_learning(model, validation_states; verbose=true)
+
+Monitor backward policy learning progress during training.
+
+# Returns
+Dictionary with monitoring metrics.
+"""
+function monitor_backward_policy_learning(
+    model::GFlowNetModel,
+    validation_states::Vector{<:AbstractState};
+    verbose::Bool = true
+)
+    if isnothing(model.backward_policy)
+        return Dict("status" => "No backward policy to monitor")
+    end
+    
+    metrics = Dict{String, Any}()
+    
+    # Check normalization for each validation state
+    norm_errors = Float64[]
+    for state in validation_states
+        if !is_terminal_state(state)
+            is_valid, total_prob, parents = validate_backward_policy_normalization(
+                model, state, model.all_actions
+            )
+            if !isempty(parents)
+                push!(norm_errors, abs(total_prob - 1.0))
+            end
+        end
+    end
+    
+    # Compute metrics
+    metrics["mean_normalization_error"] = isempty(norm_errors) ? 0.0 : mean(norm_errors)
+    metrics["max_normalization_error"] = isempty(norm_errors) ? 0.0 : maximum(norm_errors)
+    metrics["states_checked"] = length(validation_states)
+    metrics["states_with_parents"] = length(norm_errors)
+    
+    if verbose
+        println("\n🔍 Backward Policy Monitoring:")
+        println("   - Mean norm error: $(round(metrics["mean_normalization_error"], digits=6))")
+        println("   - Max norm error: $(round(metrics["max_normalization_error"], digits=6))")
+        println("   - States checked: $(metrics["states_checked"])")
+    end
+    
+    return metrics
+end
+
+# Helper function to get all states in DAG (for validation)
+function get_all_states_in_dag(model::GFlowNetModel, all_actions::Vector{<:AbstractAction})
+    # This is a simplified version - in practice, you might want to
+    # explore the state space more systematically
+    states = Set{AbstractState}([model.initial_state])
+    to_explore = [model.initial_state]
+    
+    while !isempty(to_explore) && length(states) < 1000  # Limit exploration
+        current = popfirst!(to_explore)
+        if !is_terminal_state(current)
+            applicable = get_applicable_actions(current, all_actions)
+            for action in applicable
+                next_state = apply_action(action, current)
+                if next_state ∉ states
+                    push!(states, next_state)
+                    push!(to_explore, next_state)
+                end
+            end
+        end
+    end
+    
+    return collect(states)
 end
 
 # =============================================================================

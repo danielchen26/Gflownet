@@ -13,6 +13,20 @@ Every example now uses:
 
 ## 📋 **Available Examples**
 
+### **🔬 Core Features** *(Understanding GFlowNet Internals)*
+
+#### **Objective Comparison**
+```bash
+cd examples/core_features/objective_comparison && julia objective_comparison.jl
+```
+**Features**:
+- Side-by-side comparison of TRAJECTORY_BALANCE vs DETAILED_BALANCE
+- Demonstrates backward policy learning and credit assignment
+- Visualizes exploration patterns and convergence differences
+- Comprehensive metrics and analysis
+
+---
+
 ### **🎯 Grid World** *(Perfect for Beginners)*
 ```bash
 cd examples/grid_world && julia grid_world.jl

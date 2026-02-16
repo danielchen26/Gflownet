@@ -35,13 +35,23 @@ Configuration for trajectory sampling algorithms.
 - `strategy::SamplingStrategy`: Sampling strategy to use
 - `max_trajectory_length::Int`: Maximum allowed trajectory length
 - `temperature::Float64`: Temperature for temperature sampling (> 0.0)
+- `epsilon::Float64`: ε-uniform exploration rate (0.0 to 1.0, default 0.0)
 - `enable_early_stopping::Bool`: Stop if stuck in non-terminal state
 - `validation_mode::Bool`: Enable additional validation during sampling
+- `acyclic_rate::Float64`: Rate for acyclic trajectory enforcement
+
+# ε-Uniform Exploration
+When `epsilon > 0`, action sampling uses:
+    P(a|s) = (1 - ε) × P_F(a|s) + ε × Uniform(applicable_actions)
+
+This is the standard exploration technique in GFlowNet (Malkin et al. 2022, ICML 2023).
+Typical values: ε = 0.05 for training, ε = 0 for evaluation.
 """
 struct SamplingConfig
     strategy::SamplingStrategy
     max_trajectory_length::Int
     temperature::Float64
+    epsilon::Float64
     enable_early_stopping::Bool
     validation_mode::Bool
     acyclic_rate::Float64
@@ -50,6 +60,7 @@ struct SamplingConfig
         strategy::SamplingStrategy=STOCHASTIC_SAMPLING,
         max_trajectory_length::Int=100,
         temperature::Float64=1.0,
+        epsilon::Float64=0.0,
         enable_early_stopping::Bool=true,
         validation_mode::Bool=false,
         acyclic_rate::Float64=0.0
@@ -60,11 +71,14 @@ struct SamplingConfig
         if temperature <= 0.0
             throw(ArgumentError("temperature must be positive"))
         end
+        if !(0.0 <= epsilon <= 1.0)
+            throw(ArgumentError("epsilon must be in [0.0, 1.0]"))
+        end
         if !(0.0 <= acyclic_rate <= 1.0)
             throw(ArgumentError("acyclic_rate must be in [0.0, 1.0]"))
         end
 
-        new(strategy, max_trajectory_length, temperature, enable_early_stopping, validation_mode, acyclic_rate)
+        new(strategy, max_trajectory_length, temperature, epsilon, enable_early_stopping, validation_mode, acyclic_rate)
     end
 end
 
@@ -170,15 +184,28 @@ function create_greedy_sampling_config(; acyclic_rate=0.0)
 end
 
 """
-    create_exploration_sampling_config(temperature::Float64=2.0)
+    create_exploration_sampling_config(; temperature=1.0, epsilon=0.05)
 
-Create a sampling configuration for exploration with temperature scaling.
+Create a sampling configuration for exploration with ε-uniform mixing.
+
+This is the standard GFlowNet exploration strategy (Malkin et al. 2022, ICML 2023).
+With probability ε, sample uniformly; otherwise sample from policy.
+
+# Arguments
+- `temperature::Float64 = 1.0`: Temperature scaling (1.0 = no scaling)
+- `epsilon::Float64 = 0.05`: ε-uniform exploration rate (standard value)
+- `acyclic_rate::Float64 = 0.0`: Rate for acyclic trajectory enforcement
+
+# References
+- Malkin et al. (2022) "Trajectory Balance" uses ε=0.05 as default
+- Shen et al. (ICML 2023) "Towards Understanding and Improving GFlowNet Training"
 """
-function create_exploration_sampling_config(temperature::Float64=2.0; acyclic_rate=0.0)
+function create_exploration_sampling_config(; temperature::Float64=1.0, epsilon::Float64=0.05, acyclic_rate::Float64=0.0)
     return SamplingConfig(
-        strategy=TEMPERATURE_SAMPLING,
+        strategy = temperature != 1.0 ? TEMPERATURE_SAMPLING : STOCHASTIC_SAMPLING,
         max_trajectory_length=100,
         temperature=temperature,
+        epsilon=epsilon,
         enable_early_stopping=true,
         validation_mode=false,
         acyclic_rate=acyclic_rate
@@ -255,6 +282,9 @@ function Base.show(io::IO, config::SamplingConfig)
     if config.strategy == TEMPERATURE_SAMPLING
         print(io, ", temp=$(config.temperature)")
     end
+    if config.epsilon > 0.0
+        print(io, ", ε=$(config.epsilon)")
+    end
     if config.acyclic_rate > 0.0
         print(io, ", acyclic_rate=$(config.acyclic_rate)")
     end
@@ -266,6 +296,7 @@ function Base.show(io::IO, ::MIME"text/plain", config::SamplingConfig)
     println(io, "  Strategy: $(config.strategy)")
     println(io, "  Max length: $(config.max_trajectory_length)")
     println(io, "  Temperature: $(config.temperature)")
+    println(io, "  Epsilon (ε-uniform): $(config.epsilon)")
     println(io, "  Early stopping: $(config.enable_early_stopping)")
     println(io, "  Validation mode: $(config.validation_mode)")
     println(io, "  Acyclic rate: $(config.acyclic_rate)")

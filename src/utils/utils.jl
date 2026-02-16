@@ -17,9 +17,33 @@ export visualize_molecular_state, visualize_causal_graph, visualize_experiment_s
 include("logging.jl")
 
 # Include visualization utilities
-include("visualization.jl")
+include("visualization/visualization.jl")
 
 # Include HTML report system
 include("report.jl")
+
+# Mathematical utilities
+"""
+    softmax(x::AbstractVector)
+
+Compute softmax probabilities from logits.
+
+# Mathematical Definition
+softmax(x)ᵢ = exp(xᵢ) / Σⱼ exp(xⱼ)
+
+# Arguments
+- `x::AbstractVector`: Vector of logits
+
+# Returns
+- Vector of probabilities that sum to 1
+"""
+function softmax(x::AbstractVector)
+    # Subtract maximum for numerical stability
+    x_max = maximum(x)
+    exp_x = exp.(x .- x_max)
+    return exp_x ./ sum(exp_x)
+end
+
+export softmax
 
 end # module

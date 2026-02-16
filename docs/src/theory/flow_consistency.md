@@ -8,52 +8,40 @@ Flow consistency is a fundamental property of GFlowNets that ensures the learned
 
 The core flow conservation principle states:
 
-```
-F(s) = Σ_{s': s→s'} P_F(s'|s) · F(s')
-```
+$$F(s) = \sum_{s': s \to s'} P_F(s'|s) \cdot F(s')$$
 
 Where:
-- `F(s)` is the flow through state s
-- `P_F(s'|s)` is the forward transition probability
-- The sum is over all states s' reachable from s
+- $F(s)$ is the flow through state $s$
+- $P_F(s'|s)$ is the forward transition probability
+- The sum is over all states $s'$ reachable from $s$
 
 ## Boundary Conditions
 
 ### Terminal States
 For terminal states, flow equals reward:
-```
-F(s) = R(s) for s ∈ S_T
-```
+$$F(s) = R(s) \text{ for } s \in S_T$$
 
 ### Initial State
 The flow through the initial state is the partition function:
-```
-F(s₀) = Z = Σ_{τ: s₀→s_T} P_F(τ) · R(s_T)
-```
+$$F(s_0) = Z = \sum_{\tau: s_0 \to s_T} P_F(\tau) \cdot R(s_T)$$
 
 ## Balance Conditions
 
 ### Detailed Balance
 At the edge level, detailed balance requires:
-```
-F(s) · P_F(s'|s) = F(s') · P_B(s|s')
-```
+$$F(s) \cdot P_F(s'|s) = F(s') \cdot P_B(s|s')$$
 
 This ensures flow is conserved along each edge.
 
 ### Flow Matching
 At the state level, flow matching requires:
-```
-F(s) = Σ_{s': s'→s} F(s') · P_F(s|s')
-```
+$$F(s) = \sum_{s': s' \to s} F(s') \cdot P_F(s|s')$$
 
 This ensures incoming flow equals outgoing flow.
 
 ### Trajectory Balance
 At the trajectory level:
-```
-Z · P_F(τ) = R(s_T) · P_B(τ)
-```
+$$Z \cdot P_F(\tau) = R(s_T) \cdot P_B(\tau)$$
 
 This is what we actually optimize in practice.
 
@@ -61,9 +49,9 @@ This is what we actually optimize in practice.
 
 ### Theoretical Equivalence
 Under certain conditions, all three balance conditions are equivalent:
-1. **Detailed Balance ⟹ Flow Matching**: If detailed balance holds for all edges, flow matching holds for all states
-2. **Flow Matching ⟹ Trajectory Balance**: If flow matching holds everywhere, trajectory balance holds for all trajectories
-3. **Trajectory Balance ⟹ Flow Conservation**: If trajectory balance holds for sufficient trajectories, flow conservation emerges
+1. **Detailed Balance $\Rightarrow$ Flow Matching**: If detailed balance holds for all edges, flow matching holds for all states
+2. **Flow Matching $\Rightarrow$ Trajectory Balance**: If flow matching holds everywhere, trajectory balance holds for all trajectories
+3. **Trajectory Balance $\Rightarrow$ Flow Conservation**: If trajectory balance holds for sufficient trajectories, flow conservation emerges
 
 ### Practical Differences
 - **Trajectory Balance**: Global constraint, easier to optimize
@@ -74,14 +62,12 @@ Under certain conditions, all three balance conditions are equivalent:
 
 The flow consistency objective unifies different balance conditions:
 
-```julia
-L_FC = α₁ · L_edge + α₂ · L_state + α₃ · L_trajectory
-```
+$$L_{FC} = \alpha_1 \cdot L_{edge} + \alpha_2 \cdot L_{state} + \alpha_3 \cdot L_{trajectory}$$
 
 Where:
-- `L_edge`: Edge-level detailed balance loss
-- `L_state`: State-level flow matching loss
-- `L_trajectory`: Trajectory-level balance loss
+- $L_{edge}$: Edge-level detailed balance loss
+- $L_{state}$: State-level flow matching loss
+- $L_{trajectory}$: Trajectory-level balance loss
 
 ## Mathematical Properties
 
@@ -103,21 +89,21 @@ Where:
 - Must rely on trajectory-based approximations
 
 ### Current Approach
-GFlowNet.jl uses trajectory balance with Z=1 assumption:
+GFlowNet.jl uses trajectory balance with $Z=1$ assumption:
 - Valid for fixed initial state
 - Avoids need for flow computation
 - Sufficient for most applications
 
 ### Future Extensions
 To implement full flow consistency:
-1. **Flow Network**: Learn F(s) for all states
+1. **Flow Network**: Learn $F(s)$ for all states
 2. **Backward Policy**: Enable detailed balance
 3. **State Enumeration**: For exact flow matching
 
 ## Theoretical Insights
 
 ### Why Trajectory Balance Works
-- Samples from P_F provide unbiased gradient estimates
+- Samples from $P_F$ provide unbiased gradient estimates
 - Convergence guaranteed under mild conditions
 - No need for explicit flow computation
 
@@ -127,7 +113,7 @@ To implement full flow consistency:
 - Theoretical analysis of convergence
 
 ### Approximations and Their Impact
-- Z=1 assumption: Valid for conditional distributions
+- $Z=1$ assumption: Valid for conditional distributions
 - Missing backward policy: Limits to deterministic environments
 - No flow network: Cannot verify conservation directly
 

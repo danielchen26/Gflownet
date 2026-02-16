@@ -1,0 +1,175 @@
+# GFlowNet High-Level API Requirements
+
+## ❌ NEVER Manually Define Neural Networks
+
+Users should NEVER see manual neural network definitions in examples:
+
+```julia
+# ❌ WRONG - Manual neural network definition
+forward_nn = Chain(
+    Dense(input_dim => 64, tanh),
+    Dense(64 => 32, tanh),
+    Dense(32 => n_actions)
+)
+```
+
+## ✅ ALWAYS Use High-Level GFlowNet Functions
+
+Instead, use GFlowNet's built-in functions for automatic neural network creation:
+
+```julia
+# ✅ CORRECT - High-level interface
+forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(input_dim, hidden_dim, n_actions, rng)
+flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(input_dim, hidden_dim, rng)
+```
+
+## Required High-Level Functions
+
+All examples must use these high-level functions:
+
+1. **Neural Network Creation:**
+   - `GFlowNet.create_forward_policy(input_dim, hidden_dim, n_actions, rng)`
+   - `GFlowNet.create_flow_estimator(input_dim, hidden_dim, rng)`
+   - `GFlowNet.create_backward_policy()` (if needed)
+
+2. **Training:**
+   - `GFlowNet.TrainingConfig()` for configuration
+   - `GFlowNet.train_gflownet(model, config; verbose=true)` for training
+
+3. **Evaluation:**
+   - `GFlowNet.sample_trajectory(model)` for sampling
+
+## ✅ Complete Working Example Pattern
+
+```julia
+# 1. Create model using HIGH-LEVEL functions
+forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(3, 64, 5, rng)
+flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(3, 64, rng)
+
+# 2. Setup parameters with ComponentArray
+parameters = ComponentArray(
+    forward=ComponentArray(forward_ps),
+    flow=ComponentArray(flow_ps)
+)
+
+# 3. Use high-level training
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.TRAJECTORY_BALANCE,
+    partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
+    n_iterations=50,
+    batch_size=16,
+    learning_rate=0.01
+)
+
+training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+
+# 4. Use high-level evaluation
+trajectories = [GFlowNet.sample_trajectory(model) for _ in 1:50]
+```
+
+## Configuration Helpers (Convenience Functions)
+
+GFlowNet provides preset configuration templates for common scenarios:
+
+```julia
+# Quick configuration templates
+config = GFlowNet.create_default_config()   # Balanced settings (recommended)
+config = GFlowNet.create_fast_config()      # Fast iterations, lower quality
+config = GFlowNet.create_robust_config()    # Slower, higher quality
+
+# Custom optimizer setup
+optimizer = GFlowNet.create_optimizer(model, learning_rate=0.001)
+```
+
+These helper functions are useful when you need quick setup without specifying all parameters manually.
+
+## Training Interface
+
+Use the high-level training interface:
+
+```julia
+# ✅ CORRECT - High-level training
+config = GFlowNet.TrainingConfig(
+    objective=GFlowNet.TRAJECTORY_BALANCE,
+    partition_function_method=GFlowNet.SIMPLE_ESTIMATION,
+    n_iterations=50,
+    batch_size=16,
+    learning_rate=0.01
+)
+
+training_history = GFlowNet.train_gflownet(model, config; verbose=true)
+```
+
+## Training Parameters
+
+### z_learning_rate_multiplier
+
+The `z_learning_rate_multiplier` parameter accelerates partition function (Z) convergence by applying a higher learning rate specifically to the `log_Z` parameter.
+
+**Purpose**: Based on literature (peptide generation paper), Z often converges slower than policy networks. A higher multiplier (e.g., 2.0-5.0) can speed up convergence.
+
+```julia
+config = TrainingConfig(
+    objective = TRAJECTORY_BALANCE,
+    z_learning_rate_multiplier = 2.0,  # Z learns 2x faster
+    learning_rate = 0.01
+)
+```
+
+**Note**: This is a convergence optimization, NOT a mode discovery mechanism.
+
+### Parameter Validation Requirements
+
+All parameters in `TrainingConfig` must have:
+1. **Working implementation**: Never expose parameters without functionality
+2. **Validation**: Check ranges and types at construction time
+3. **Documentation**: Clear docstrings explaining purpose and valid values
+
+### Advertising Unimplemented Features
+
+**❌ NEVER** expose parameters if functionality isn't implemented:
+
+```julia
+# ❌ WRONG - Parameter exists but does nothing
+struct TrainingConfig
+    fancy_feature::Bool = false  # TODO: implement later
+end
+
+# ✅ CORRECT - Only expose working features
+# If adding for API compatibility, clearly document:
+struct TrainingConfig
+    fancy_feature::Bool = false  # EXPERIMENTAL: Not yet implemented
+end
+```
+
+When adding experimental parameters, always:
+- Mark as "EXPERIMENTAL" or "NOT YET IMPLEMENTED" in docstring
+- Explain WHY it's not implemented
+- Consider throwing a warning if someone enables it
+
+## Model Creation
+
+Use the highest-level API for model creation:
+
+```julia
+# ✅ RECOMMENDED: Highest-level API
+model = GFlowNet.create_gflownet(
+    initial_state,
+    all_actions;
+    state_dim = 3,                    # Output dimension of state_to_features()
+    hidden_dim = 64,                  # Neural network hidden layer size
+    learning_rate = 0.01,
+    include_backward = false,         # Set true for DETAILED_BALANCE
+    include_flow_estimator = false    # Set true for FLOW_MATCHING/DIRECT_FLOW
+)
+
+# ✅ DOMAIN-SPECIFIC CONVENIENCE (Grid World example)
+model = GFlowNet.create_grid_world_gflownet(
+    grid_size = 8,
+    reward_positions = Dict((3,3) => 10.0, (8,8) => 15.0),
+    hidden_dim = 64,
+    learning_rate = 0.01
+)
+```
+
+This ensures users interact with GFlowNet at the appropriate abstraction level without getting bogged down in neural network implementation details.
