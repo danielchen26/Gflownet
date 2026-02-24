@@ -32,3 +32,15 @@
 # Web visualization build artifacts
 src/utils/visualization/web/dist/
 src/utils/visualization/web/node_modules/
+
+# Craft Agent workspace files
+.claude-plugin/
+.conductor/
+config.json
+events.jsonl
+labels/
+sessions/
+skills/
+sources/
+statuses/
+views.json

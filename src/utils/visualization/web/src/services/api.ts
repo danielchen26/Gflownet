@@ -3,10 +3,9 @@
 
 import axios from '../lib/axios'
 
-// Use empty string to use Vite proxy (recommended for development)
-// The Vite proxy in vite.config.ts forwards /api to http://localhost:8080
-// This avoids CORS issues in the browser
-const API_BASE_URL = ''
+// In production, VITE_API_URL points to the Railway backend (e.g., https://your-app.railway.app)
+// In development, empty string uses the Vite proxy (forwards /api to http://localhost:8080)
+const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 // Debug logging helper
 const logApiCall = (endpoint: string, data: any) => {

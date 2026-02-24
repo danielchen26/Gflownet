@@ -511,10 +511,10 @@ include("src/utils/visualization/api/unified_server.jl")
 start_real_training_server(port=8080)
 ```
 """
-function start_real_training_server(; port::Int = 8080)
-    @info "Starting real GFlowNet training visualization server on port $port"
+function start_real_training_server(; port::Int = 8080, host::String = "127.0.0.1")
+    @info "Starting real GFlowNet training visualization server on $host:$port"
     @info "Frontend: http://localhost:3000 (Vite dev server)"
-    @info "API base: http://localhost:$port/api/v2/"
+    @info "API base: http://$host:$port/api/v2/"
     @info ""
     @info "Available endpoints:"
     @info "  POST /api/v2/training/start    - Start training session"
@@ -524,7 +524,7 @@ function start_real_training_server(; port::Int = 8080)
     @info "  GET  /api/v2/analysis/flow     - Get flow field data"
     @info "  GET  /api/v2/analysis/distribution - Get distribution data"
 
-    serve(; port = port, middleware = [add_cors_headers])
+    serve(; host = host, port = port, middleware = [add_cors_headers])
 end
 
 # Auto-start when script is run directly
