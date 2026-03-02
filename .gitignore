@@ -25,6 +25,12 @@
 *.swp
 *~
 
+# Database files
+*.db
+*.db-wal
+*.db-shm
+/data/
+
 # Test artifacts
 /test_env/
 /results/
@@ -32,6 +38,19 @@
 # Web visualization build artifacts
 src/utils/visualization/web/dist/
 src/utils/visualization/web/node_modules/
+
+# Conda/Python environment
+.CondaPkg/
+__pycache__/
+*.pyc
+
+# Log files
+*.log
+backend.log
+frontend.log
+
+# Test results
+test-results/
 
 # Craft Agent workspace files
 .claude-plugin/
