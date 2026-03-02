@@ -189,35 +189,117 @@ export const domainApi = {
   },
 }
 
+// Molecular Generation API — connected to real Julia backend
+export const molecularApi = {
+  async generate(config: MolecularGenerationConfig) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/generate`, config)
+    return response.data
+  },
+
+  async getMolecules(params?: { limit?: number; offset?: number; sort_by?: string; filter?: Record<string, unknown> }) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules`, { params })
+    return response.data
+  },
+
+  async getMolecule(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules/${id}`)
+    return response.data
+  },
+
+  async compareMolecules(ids: string[]) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/molecules/compare`, { ids })
+    return response.data
+  },
+
+  async getChemicalSpace(params?: { method?: 'umap' | 'tsne' | 'pca'; color_by?: string }) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/space`, { params })
+    return response.data
+  },
+
+  async getAttribution(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/attribution/${id}`)
+    return response.data
+  },
+
+  async getRewardDecomposition(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/reward-decomposition/${id}`)
+    return response.data
+  },
+
+  async getGenerationDAG(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/generation-dag/${id}`)
+    return response.data
+  },
+
+  async retrain(config: { molecule_ids: string[]; additional_config?: Record<string, unknown> }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/retrain`, config)
+    return response.data
+  },
+
+  async exportMolecules(params: { ids: string[]; format: 'smiles' | 'sdf' | 'csv' | 'png' }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/export`, params, {
+      responseType: params.format === 'png' ? 'blob' : 'text',
+    })
+    return response.data
+  },
+
+  async getADMET(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/admet/${id}`)
+    return response.data
+  },
+
+  async validateSmiles(smiles: string) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/validate-smiles`, { smiles })
+    return response.data
+  },
+}
+
 // Combined API object for convenience
 export const api = {
   training: trainingApi,
   trajectories: trajectoriesApi,
   analysis: analysisApi,
   domain: domainApi,
+  molecular: molecularApi,
 }
 
 // TypeScript types for API responses
 export interface TrainingState {
-  status: string
+  has_session: boolean
   current_iteration: number
   total_iterations: number
   is_training: boolean
   is_paused: boolean
-  loss: number
+  is_real_training?: boolean
+  progress?: number
+  // Latest scalar metrics (match backend field names)
   latest_loss?: number
-  mean_reward: number
-  gradient_norm: number
+  latest_reward?: number
   latest_gradient_norm?: number
-  learning_rate: number
   last_error: string | null
   error_count?: number
-  // Exploration metrics (Phase 7: Mode Collapse Fix)
+  // Exploration metrics
   current_epsilon?: number
   epsilon_decay?: boolean
+  entropy_weight?: number
+  z_learning_rate_multiplier?: number
+  // Computed aggregate metrics
   metrics?: {
     mean_reward?: number
     diversity_ratio?: number
+    mean_log_Z?: number
+    mean_trajectory_length?: number
+  }
+  domain_metrics?: Record<string, unknown>
+  // Molecular domain stats (returned inline when domain is molecule)
+  total_molecules?: number
+  unique_smiles?: number
+  // Flow statistics
+  flow_statistics?: {
+    mean_log_Z?: number
+    mean_reward?: number
+    progress?: number
+    mean_trajectory_length?: number
   }
 }
 
@@ -225,7 +307,7 @@ export interface TrainingHistory {
   losses: number[]
   rewards: number[]
   gradient_norms: number[]
-  iterations: number[]
+  iteration_times: number[]
 }
 
 export interface Trajectory {
@@ -266,6 +348,98 @@ export interface DomainInfo {
     supports_domain_metrics: boolean
   }
   config: any
+}
+
+// Molecular Generation Types
+export interface MolecularGenerationConfig {
+  method: 'de_novo' | 'scaffold_hopping' | 'fragment_linking' | 'r_group' | 'optimization' | 'grid_world'
+  seed_smiles?: string
+  scaffold_smiles?: string
+  constraints?: MolecularConstraints
+  gflownet_config?: {
+    objective: string
+    n_episodes: number
+    batch_size: number
+    learning_rate: number
+    hidden_dim?: number
+    temperature?: number
+    epsilon?: number
+    entropy_weight?: number
+  }
+  preset?: string
+}
+
+export interface MolecularConstraints {
+  mw_range?: [number, number]
+  logp_range?: [number, number]
+  qed_range?: [number, number]
+  sa_range?: [number, number]
+  tpsa_range?: [number, number]
+  rotatable_bonds_range?: [number, number]
+  hbd_range?: [number, number]
+  hba_range?: [number, number]
+  lipinski?: boolean
+  veber?: boolean
+  pains_filter?: boolean
+  brenk_filter?: boolean
+}
+
+export interface Molecule {
+  id: string
+  smiles: string
+  properties: MolecularProperties
+  reward: number
+  generation_step: number
+  method: string
+  svg_2d?: string
+  fingerprint?: number[]
+  created_at?: string
+  coords_3d?: Array<{ atom: string; x: number; y: number; z: number }>
+  bonds?: Array<{ from: number; to: number; order: number }>
+}
+
+export interface MolecularProperties {
+  molecular_weight: number
+  logp: number
+  qed: number
+  synthetic_accessibility: number
+  tpsa: number
+  rotatable_bonds: number
+  hbd: number
+  hba: number
+  num_rings: number
+  num_aromatic_rings: number
+  formula?: string
+}
+
+export interface ChemicalSpacePoint {
+  id: string
+  x: number
+  y: number
+  smiles: string
+  reward: number
+  properties: MolecularProperties
+  cluster_id?: number
+  generation_epoch?: number
+}
+
+export interface AtomAttribution {
+  molecule_id: string
+  smiles: string
+  atom_scores: number[]
+  bond_scores?: number[]
+  attribution_type: 'reward' | 'flow' | 'loss'
+}
+
+export interface RewardDecompositionData {
+  molecule_id: string
+  components: Array<{
+    name: string
+    value: number
+    weight: number
+    contribution: number
+  }>
+  total_reward: number
 }
 
 export default api

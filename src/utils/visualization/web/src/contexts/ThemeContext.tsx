@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 
-export type ThemeName = 'cyberpunk' | 'cream' | 'glass' | 'midnight'
+export type ThemeName = 'cyberpunk' | 'cream' | 'glass' | 'midnight' | 'lab'
 
 export interface ThemeOption {
   id: ThemeName
@@ -41,6 +41,14 @@ export const THEMES: ThemeOption[] = [
     font: 'Space Grotesk',
     colors: ['#14B8A6', '#06B6D4', '#10B981'],
   },
+  {
+    id: 'lab',
+    label: 'Lab White',
+    description: 'Clean scientific, paper-white',
+    font: 'Inter',
+    colors: ['#3B82F6', '#10B981', '#6366F1'],
+    isLight: true,
+  },
 ]
 
 interface ThemeContextValue {
@@ -57,7 +65,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeName>(() => {
     const stored = localStorage.getItem('gflownet-theme')
     // Validate stored theme is still a valid option
-    if (stored && ['cyberpunk', 'cream', 'glass', 'midnight'].includes(stored)) {
+    if (stored && ['cyberpunk', 'cream', 'glass', 'midnight', 'lab'].includes(stored)) {
       return stored as ThemeName
     }
     return 'cyberpunk'
@@ -144,6 +152,17 @@ const CHART_COLORS: Record<ThemeName, {
     brushFill: '#0E1621',
     gradientStart: '#14B8A6',
     gradientEnd: '#06B6D4',
+  },
+  lab: {
+    primary: '#3B82F6',
+    secondary: '#6366F1',
+    tertiary: '#EC4899',
+    green: '#10B981',
+    grid: '#E2E8F0',
+    axis: '#94A3B8',
+    brushFill: '#F1F5F9',
+    gradientStart: '#3B82F6',
+    gradientEnd: '#10B981',
   },
 }
 
@@ -245,6 +264,23 @@ const THEME_LAYOUTS: Record<ThemeName, ThemeLayout> = {
     compact: true,
     spacious: false,
     ringSize: 56,
+  },
+  lab: {
+    cardPad: 'p-4',
+    sectionPad: 'p-6',
+    innerPad: 'p-3',
+    gap: 'gap-3',
+    sectionGap: 'gap-6',
+    headingSize: 'text-sm',
+    labelSize: 'text-xs',
+    valueSize: 'text-lg',
+    tinySize: 'text-[10px]',
+    titleSize: 'text-xl',
+    metricsColumns: 'grid-cols-3',
+    configColumns: 'grid-cols-3 lg:grid-cols-4',
+    compact: false,
+    spacious: false,
+    ringSize: 80,
   },
 }
 

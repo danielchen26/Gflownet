@@ -9,6 +9,33 @@ export const COLORS = {
     pink: '#FF006E',       // Warning/terminal pink
     orange: '#FFA07A',     // Exploration orange
   },
+
+  // Chemistry atom colors (CPK convention)
+  atom: {
+    carbon: '#404040',
+    nitrogen: '#3050F8',
+    oxygen: '#FF0D0D',
+    sulfur: '#FFFF30',
+    phosphorus: '#FF8000',
+    halogen: '#1FF01F',
+    hydrogen: '#FFFFFF',
+    iron: '#E06633',
+    default: '#FF1493',
+  },
+
+  // Molecular property indicators
+  property: {
+    good: '#10B981',       // Emerald - within range
+    warning: '#F59E0B',    // Amber - borderline
+    bad: '#EF4444',        // Red - out of range
+  },
+
+  // Reward gradient for molecular scoring
+  molecularReward: {
+    low: '#3B82F6',        // Blue
+    mid: '#EAB308',        // Yellow
+    high: '#EF4444',       // Red
+  },
   
   // Reward-related colors
   reward: {
