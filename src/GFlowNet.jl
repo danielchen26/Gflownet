@@ -75,6 +75,7 @@ include("training/utils.jl")
 include("training/losses.jl")
 include("training/training.jl")
 include("training/multi_start_training.jl")
+include("training/checkpoint.jl")  # Versioned checkpoint save/load (Prerequisite D)
 
 # =============================================================================
 # Utilities and Validation
@@ -217,7 +218,7 @@ export compute_gradients, clip_gradients!
 
 # Training configuration
 export TrainingConfig, TrainingState, TrainingMetrics, TrainingHistory
-export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
+export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB
 export PartitionFunctionMethod, OptimizationMethod
 export SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, LEARNABLE_ESTIMATION, ADAPTIVE_ESTIMATION
 export ADAM, RMSPROP, SGD, ADAMW
@@ -228,6 +229,9 @@ export create_optimizer, create_default_config, create_fast_config, create_robus
 
 # Training execution
 export train_gflownet
+
+# Checkpoint versioning (Prerequisite D)
+export ModelCheckpoint, save_checkpoint, load_checkpoint
 
 # Sampling and trajectory generation
 export sample_trajectory, sample_trajectory_batch
@@ -272,9 +276,12 @@ export monitor_backward_policy_learning
 # Applications - Domain Implementations
 # =============================================================================
 
-# Molecular design application
-export MolecularState, MolecularAction, create_molecular_gflownet
-export molecular_reward, molecular_features
+# Molecular design application (atom-level, from molecular_design.jl)
+export MoleculeState, MoleculeData, AddAtomAction, AddBondAction, TerminateMoleculeAction
+# Fragment-based molecular types (MolState, FragmentAction, etc.) are in
+# molecular_generation.jl, loaded by the visualization server — not this module.
+# Reaction GFlowNet factory (Gap 4, from interface.jl)
+export create_reaction_gflownet
 
 # Causal discovery application
 export CausalState, CausalAction, create_causal_gflownet

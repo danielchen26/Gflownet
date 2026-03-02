@@ -4,11 +4,15 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   BarChart3, Grid3X3, List, Download, Filter, X,
   ChevronRight, Copy, Check, Eye, Trash2, SlidersHorizontal,
+  ChevronDown, Fingerprint, FlaskConical, Crosshair,
 } from 'lucide-react'
 import { MoleculeViewer2D } from '../components/MoleculeViewer2D'
 import { MoleculeGallery } from '../components/MoleculeCard'
 import { PropertySliderRange } from '../components/PropertySliderRange'
 import { PropertyRadarChart } from '../components/PropertyRadarChart'
+import DiversityStats from '../components/DiversityStats'
+import SynthesisRoute from '../components/SynthesisRoute'
+import DockingPanel from '../components/DockingPanel'
 import { api, type Molecule } from '../services/api'
 import type { ViewId } from '../components/Sidebar'
 
@@ -48,6 +52,8 @@ export function ResultsHub({ onNavigate, problemConfig }: ResultsHubProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [detailMolecule, setDetailMolecule] = useState<Molecule | null>(null)
   const [copied, setCopied] = useState(false)
+  const [showDiversity, setShowDiversity] = useState(false)
+  const [detailTab, setDetailTab] = useState<'properties' | 'synthesis' | 'docking'>('properties')
 
   const { data, isLoading } = useQuery({
     queryKey: ['molecules-results', sortBy],
@@ -172,6 +178,15 @@ export function ResultsHub({ onNavigate, problemConfig }: ResultsHubProps) {
             </button>
           </div>
 
+          {/* Diversity Toggle */}
+          <button
+            onClick={() => setShowDiversity(!showDiversity)}
+            className={`p-1.5 rounded-md border ${showDiversity ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400' : 'border-dark-border text-muted-foreground hover:text-white'}`}
+            title="Diversity Analysis"
+          >
+            <Fingerprint className="w-3.5 h-3.5" />
+          </button>
+
           {/* Filter Toggle */}
           <button
             onClick={() => setShowFilters(!showFilters)}
@@ -258,6 +273,22 @@ export function ResultsHub({ onNavigate, problemConfig }: ResultsHubProps) {
                   />
                 </div>
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Diversity Analysis Panel (Gap 1) */}
+      <AnimatePresence>
+        {showDiversity && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden mb-3"
+          >
+            <div className="glass-dark rounded-lg p-3 border border-dark-border">
+              <DiversityStats autoRefresh refreshInterval={30000} />
             </div>
           </motion.div>
         )}
@@ -355,29 +386,68 @@ export function ResultsHub({ onNavigate, problemConfig }: ResultsHubProps) {
                 </button>
               </div>
 
-              {/* Properties */}
-              <div className="space-y-1.5 mb-3">
-                <DetailRow label="Reward" value={detailMolecule.reward?.toFixed(3)} color="#00FF88" />
-                <DetailRow label="Molecular Weight" value={`${detailMolecule.properties?.molecular_weight?.toFixed(1)} Da`} />
-                <DetailRow label="LogP" value={detailMolecule.properties?.logp?.toFixed(2)} />
-                <DetailRow label="QED" value={detailMolecule.properties?.qed?.toFixed(3)} />
-                <DetailRow label="SA Score" value={detailMolecule.properties?.synthetic_accessibility?.toFixed(2)} />
-                <DetailRow label="TPSA" value={`${detailMolecule.properties?.tpsa?.toFixed(1)} A²`} />
-                <DetailRow label="Rotatable Bonds" value={detailMolecule.properties?.rotatable_bonds?.toString()} />
-                <DetailRow label="HBD" value={detailMolecule.properties?.hbd?.toString()} />
-                <DetailRow label="HBA" value={detailMolecule.properties?.hba?.toString()} />
-                <DetailRow label="Rings" value={detailMolecule.properties?.num_rings?.toString()} />
-                <DetailRow label="Aromatic Rings" value={detailMolecule.properties?.num_aromatic_rings?.toString()} />
-                {detailMolecule.properties?.formula && (
-                  <DetailRow label="Formula" value={detailMolecule.properties.formula} />
-                )}
+              {/* Analysis Tabs */}
+              <div className="flex rounded-md border border-dark-border overflow-hidden mb-3">
+                {([
+                  { id: 'properties' as const, label: 'Props', icon: BarChart3 },
+                  { id: 'synthesis' as const, label: 'Synth', icon: FlaskConical },
+                  { id: 'docking' as const, label: 'Dock', icon: Crosshair },
+                ] as const).map((tab) => {
+                  const TIcon = tab.icon
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setDetailTab(tab.id)}
+                      className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] transition-colors ${
+                        detailTab === tab.id ? 'bg-neon-purple/20 text-neon-purple font-medium' : 'text-muted-foreground hover:text-white'
+                      }`}
+                    >
+                      <TIcon className="w-3 h-3" />
+                      {tab.label}
+                    </button>
+                  )
+                })}
               </div>
 
-              {/* Radar Chart */}
-              {detailMolecule.properties && (
+              {/* Properties Tab */}
+              {detailTab === 'properties' && (
+                <>
+                  <div className="space-y-1.5 mb-3">
+                    <DetailRow label="Reward" value={detailMolecule.reward?.toFixed(3)} color="#00FF88" />
+                    <DetailRow label="Molecular Weight" value={`${detailMolecule.properties?.molecular_weight?.toFixed(1)} Da`} />
+                    <DetailRow label="LogP" value={detailMolecule.properties?.logp?.toFixed(2)} />
+                    <DetailRow label="QED" value={detailMolecule.properties?.qed?.toFixed(3)} />
+                    <DetailRow label="SA Score" value={detailMolecule.properties?.synthetic_accessibility?.toFixed(2)} />
+                    <DetailRow label="TPSA" value={`${detailMolecule.properties?.tpsa?.toFixed(1)} A²`} />
+                    <DetailRow label="Rotatable Bonds" value={detailMolecule.properties?.rotatable_bonds?.toString()} />
+                    <DetailRow label="HBD" value={detailMolecule.properties?.hbd?.toString()} />
+                    <DetailRow label="HBA" value={detailMolecule.properties?.hba?.toString()} />
+                    <DetailRow label="Rings" value={detailMolecule.properties?.num_rings?.toString()} />
+                    <DetailRow label="Aromatic Rings" value={detailMolecule.properties?.num_aromatic_rings?.toString()} />
+                    {detailMolecule.properties?.formula && (
+                      <DetailRow label="Formula" value={detailMolecule.properties.formula} />
+                    )}
+                  </div>
+                  {detailMolecule.properties && (
+                    <div className="mb-3">
+                      <h4 className="text-[10px] font-semibold text-muted-foreground mb-1">Property Profile</h4>
+                      <PropertyRadarChart properties={detailMolecule.properties} height={200} />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Synthesis Tab (Gap 4) */}
+              {detailTab === 'synthesis' && (
                 <div className="mb-3">
-                  <h4 className="text-[10px] font-semibold text-muted-foreground mb-1">Property Profile</h4>
-                  <PropertyRadarChart properties={detailMolecule.properties} height={200} />
+                  <SynthesisRoute moleculeId={detailMolecule.id} compact />
+                </div>
+              )}
+
+              {/* Docking Tab (Gap 2) */}
+              {detailTab === 'docking' && (
+                <div className="mb-3">
+                  <DockingPanel compact />
                 </div>
               )}
 

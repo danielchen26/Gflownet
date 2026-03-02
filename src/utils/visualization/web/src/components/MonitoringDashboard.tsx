@@ -8,6 +8,11 @@ import { RealtimeMetrics } from './RealtimeMetrics'
 import { ErrorPanel } from './ErrorPanel'
 import { TrainingControls } from './TrainingControls'
 import { MoleculeViewer2D } from './MoleculeViewer2D'
+import DiversityStats from './DiversityStats'
+import ParetoFrontExplorer from './ParetoFrontExplorer'
+import PreferenceSliders from './PreferenceSliders'
+import DockingPanel from './DockingPanel'
+import SynthesisRoute from './SynthesisRoute'
 import { api } from '../services/api'
 import type { Molecule } from '../services/api'
 import { useThemeLayout, useChartColors } from '../contexts/ThemeContext'
@@ -69,6 +74,8 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
 
   // Detect molecular domain
   const isMolecularDomain = problemConfig?.domain_type === 'molecule' || problemConfig?.domain === 'molecule'
+  // Detect MOGFN multi-objective mode
+  const isMOGFN = problemConfig?.training_objective === 'MULTI_OBJECTIVE_TB'
   const chartColors = useChartColors()
 
   // Fetch latest generated molecules for the live feed (molecular domain only)
@@ -195,6 +202,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
                   <option value="DETAILED_BALANCE">Detailed Balance (DB)</option>
                   <option value="FLOW_MATCHING">Flow Matching (FM)</option>
                   <option value="TRAJECTORY_LIKELIHOOD_MAXIMIZATION">TLM (ICLR 2025 - Backward Policy Training)</option>
+                  <option value="MULTI_OBJECTIVE_TB">MOGFN-PC (Multi-Objective Pareto)</option>
                 </select>
                 {editConfig.training_objective === 'TRAJECTORY_LIKELIHOOD_MAXIMIZATION' && (
                   <span className="px-1.5 py-0.5 text-[9px] bg-neon-cyan/20 text-neon-cyan rounded">
@@ -642,7 +650,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
 
         {/* Right: Molecule Feed Side Panel (molecular domain only) */}
         {isMolecularDomain && expandedView === 'none' && (
-          <MoleculeFeedPanel molecules={feedMolecules} layout={layout} chartColors={chartColors} />
+          <MoleculeFeedPanel molecules={feedMolecules} layout={layout} chartColors={chartColors} isMOGFN={isMOGFN} />
         )}
       </div>
     </div>
@@ -675,10 +683,11 @@ function DiversityMetricCard({ icon, label, value, sub, color, layout }: {
   )
 }
 
-function MoleculeFeedPanel({ molecules, layout, chartColors }: {
+function MoleculeFeedPanel({ molecules, layout, chartColors, isMOGFN }: {
   molecules: Molecule[]
   layout: ReturnType<typeof useThemeLayout>
   chartColors: ReturnType<typeof useChartColors>
+  isMOGFN?: boolean
 }) {
   const [selectedIdx, setSelectedIdx] = useState(0)
   const selected = molecules[selectedIdx] ?? null
@@ -721,7 +730,7 @@ function MoleculeFeedPanel({ molecules, layout, chartColors }: {
                 {selected.smiles.length > 20 ? selected.smiles.slice(0, 20) + '...' : selected.smiles}
               </div>
               <div className={`${layout.labelSize} font-bold mt-1`} style={{ color: chartColors.green }}>
-                Reward: {selected.reward.toFixed(2)}
+                Reward: {(selected.reward ?? 0).toFixed(2)}
               </div>
               <div className={`grid grid-cols-2 gap-x-2 gap-y-0.5 mt-1 ${layout.tinySize}`}>
                 <span className="text-muted-foreground">MW: <span className="font-mono text-foreground">{(selected.properties?.molecular_weight ?? 0).toFixed(0)}</span></span>
@@ -731,6 +740,13 @@ function MoleculeFeedPanel({ molecules, layout, chartColors }: {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Synthesis Route (Gap 4) */}
+      {selected && (
+        <div className="mb-2 border border-dark-border/20 rounded-md overflow-hidden bg-dark-bg/30">
+          <SynthesisRoute moleculeId={selected.id} compact />
         </div>
       )}
 
@@ -767,6 +783,28 @@ function MoleculeFeedPanel({ molecules, layout, chartColors }: {
           </button>
         ))}
       </div>
+
+      {/* Diversity Analysis (Gap 1) */}
+      <div className="border-t border-dark-border/30 mt-2">
+        <DiversityStats autoRefresh refreshInterval={30000} />
+      </div>
+
+      {/* Docking Panel (Gap 2) */}
+      <div className="border-t border-dark-border/30 mt-2">
+        <DockingPanel compact />
+      </div>
+
+      {/* MOGFN Pareto Optimization (Gap 5) */}
+      {isMOGFN && (
+        <>
+          <div className="border-t border-dark-border/30 mt-2">
+            <PreferenceSliders compact />
+          </div>
+          <div className="border-t border-dark-border/30 mt-2">
+            <ParetoFrontExplorer autoRefresh refreshInterval={15000} />
+          </div>
+        </>
+      )}
     </motion.div>
   )
 }

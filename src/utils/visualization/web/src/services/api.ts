@@ -252,6 +252,89 @@ export const molecularApi = {
     const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/validate-smiles`, { smiles })
     return response.data
   },
+
+  // Gap 1: Diversity Analysis
+  async getDiversity(params?: { ids?: string[]; sample_size?: number }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/diversity`, params || {})
+    return response.data
+  },
+
+  // Gap 3: Fragment Library
+  async getFragments() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/fragments`)
+    return response.data
+  },
+
+  async getFragmentsCurrent() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/fragments/current`)
+    return response.data as FragmentLibraryResponse
+  },
+
+  async getDiversityTraining() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/diversity/training`)
+    return response.data
+  },
+
+  // Gap 5: MOGFN Pareto Optimization
+  async generatePareto(params: {
+    preferences: Record<string, number>
+    n_molecules?: number
+  }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/generate-pareto`, params)
+    return response.data as ParetoGenerateResponse
+  },
+
+  async getParetoFront(params?: { session_id?: string }) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/pareto-front`, { params })
+    return response.data as ParetoFrontResponse
+  },
+
+  async getObjectives(moleculeId: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules/${moleculeId}/objectives`)
+    return response.data as ObjectivesResponse
+  },
+
+  // Gap 2: Docking-Based Reward
+  async getDockingTargets() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/targets`)
+    return response.data as DockingTargetsResponse
+  },
+
+  async dockMolecule(params: { smiles: string; target?: string; method?: 'proxy' | 'vina' }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/dock`, params)
+    return response.data as DockingResultResponse
+  },
+
+  async dockBatch(params: { ids: string[]; target?: string }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/dock-batch`, params)
+    return response.data as DockingBatchResponse
+  },
+
+  async setDockingTarget(targetId: string) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/docking/set-target`, { target_id: targetId })
+    return response.data
+  },
+
+  // Gap 4: Reaction Domain / Synthesis Routes
+  async getReactions() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/reactions`)
+    return response.data as ReactionsResponse
+  },
+
+  async getSynthesisRoute(moleculeId: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules/${moleculeId}/synthesis`)
+    return response.data as SynthesisRouteResponse
+  },
+
+  async executeReaction(params: { reaction_id: number; reactant1: string; reactant2?: string }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/reaction/execute`, params)
+    return response.data as ReactionExecuteResponse
+  },
+
+  async checkCompatibility(params: { smiles: string; reaction_id: number }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/reaction/check-compatibility`, params)
+    return response.data
+  },
 }
 
 // Combined API object for convenience
@@ -440,6 +523,152 @@ export interface RewardDecompositionData {
     contribution: number
   }>
   total_reward: number
+}
+
+// Gap 3: Fragment Library Types
+export interface FragmentInfo {
+  id: number
+  smiles: string
+  name: string
+  category: string
+  is_starter: boolean
+  n_attachments: number
+  brics_labels: number[]
+}
+
+export interface FragmentLibraryResponse {
+  n_fragments: number
+  fragments: FragmentInfo[]
+}
+
+// Gap 5: MOGFN Pareto Optimization Types
+export interface ParetoPoint {
+  id: string
+  smiles: string
+  objectives: Record<string, number>
+  is_pareto_optimal: boolean
+  reward: number
+}
+
+export interface ParetoFrontResponse {
+  points: ParetoPoint[]
+  hypervolume: number
+  objective_names: string[]
+  objective_ranges: Record<string, [number, number]>
+}
+
+export interface ParetoGenerateResponse {
+  molecules: ParetoPoint[]
+  pareto_front: ParetoPoint[]
+  hypervolume: number
+  preferences_used: Record<string, number>
+  error?: string
+}
+
+export interface ObjectivesResponse {
+  molecule_id: string
+  objectives: Record<string, number>
+  objective_names: string[]
+}
+
+// Gap 1: Diversity Analysis Types
+export interface DiversityStats {
+  mean_pairwise: number
+  internal_diversity_1: number
+  internal_diversity_2: number
+  min_nn_distance: number
+  max_nn_distance: number
+  median_nn_distance: number
+  n_molecules: number
+  n_unique_scaffolds?: number
+  scaffold_entropy?: number
+}
+
+export interface DiversityResponse {
+  stats: DiversityStats
+  nearest_neighbors: Array<{ id: string; neighbor_id: string; similarity: number }>
+  similarity_matrix: number[][] | null
+}
+
+// Gap 2: Docking Types
+export interface DockingTarget {
+  id: string
+  name: string
+  pdb_id: string
+  description: string
+  has_receptor: boolean
+}
+
+export interface DockingTargetsResponse {
+  targets: DockingTarget[]
+  active_target: string
+  docking_available: boolean
+  proxy_available: boolean
+}
+
+export interface DockingResultResponse {
+  smiles: string
+  method: 'proxy' | 'vina'
+  normalized_score?: number
+  affinity_kcal?: number
+  n_poses?: number
+  runtime_ms?: number
+  target: string
+  error?: string
+}
+
+export interface DockingBatchResponse {
+  results: Array<{
+    id: string
+    smiles: string
+    normalized_score?: number
+    affinity_kcal?: number
+    method: string
+  }>
+  target: string
+  n_docked: number
+}
+
+// Gap 4: Reaction / Synthesis Route Types
+export interface ReactionTemplate {
+  id: number
+  name: string
+  class: string
+  yield_estimate: number
+  functional_groups: string[]
+}
+
+export interface ReactionsResponse {
+  reactions: ReactionTemplate[]
+  n_reactions: number
+  engine_available: boolean
+}
+
+export interface SynthesisStep {
+  step: number
+  reaction_id: number
+  reaction_name: string
+  reaction_class: string
+  yield_estimate: number
+  intermediate: string
+}
+
+export interface SynthesisRouteResponse {
+  molecule_id: string
+  smiles: string
+  has_synthesis: boolean
+  n_steps?: number
+  steps: SynthesisStep[]
+  cumulative_yield?: number
+  method?: string
+  message?: string
+}
+
+export interface ReactionExecuteResponse {
+  valid: boolean
+  product_smiles: string
+  reaction_name: string
+  reaction_class: string
 }
 
 export default api

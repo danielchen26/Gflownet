@@ -246,6 +246,129 @@ function create_backward_policy(state_dim::Int, hidden_dim::Int, rng)
 end
 
 # =============================================================================
+# MOGFN Model Creation — Preference-Conditioned GFlowNet (Gap 5)
+# =============================================================================
+
+"""
+    create_preference_encoder(n_objectives::Int, embed_dim::Int, rng)
+
+Create a preference encoder MLP that maps w ∈ R^K → R^d.
+Shared between forward policy, backward policy, and Z network.
+"""
+function create_preference_encoder(n_objectives::Int, embed_dim::Int, rng)
+    encoder = Lux.Chain(
+        Lux.Dense(n_objectives => embed_dim, Lux.relu),
+        Lux.Dense(embed_dim => embed_dim, Lux.relu)
+    )
+    ps, st = Lux.setup(rng, encoder)
+    return encoder, ps, st
+end
+
+"""
+    create_z_network(embed_dim::Int, rng)
+
+Create a Z(w) network: maps preference embedding → scalar log Z(w).
+Replaces the scalar log_Z parameter in MOGFN mode.
+"""
+function create_z_network(embed_dim::Int, rng)
+    z_net = Lux.Chain(
+        Lux.Dense(embed_dim => embed_dim, Lux.relu),
+        Lux.Dense(embed_dim => 1)  # Scalar log Z output
+    )
+    ps, st = Lux.setup(rng, z_net)
+    return z_net, ps, st
+end
+
+"""
+    create_mogfn_gflownet(initial_state, all_actions; kwargs...)
+
+Create a MOGFN-PC (preference-conditioned) GFlowNet model (Gap 5, ICML 2023).
+
+The forward policy input is [state_features; embed(w)] where embed(w)
+is a learned preference embedding. Z(w) is a network that outputs
+log Z conditioned on the same embedding.
+
+# Arguments
+- `initial_state`: Starting state s₀
+- `all_actions`: Complete action space
+- `state_dim`: Base dimension of state features (without preference)
+- `hidden_dim=256`: Hidden layer size
+- `learning_rate=0.001`: Learning rate
+- `n_objectives=4`: Number of objectives K
+- `preference_dim=64`: Preference embedding dimension d
+- `include_backward=false`: Include backward policy
+- `rng`: Random number generator
+"""
+function create_mogfn_gflownet(
+    initial_state::AbstractState,
+    all_actions::Vector{<:AbstractAction};
+    state_dim::Int,
+    hidden_dim::Int = 256,
+    learning_rate::Float64 = 0.001,
+    n_objectives::Int = 4,
+    preference_dim::Int = 64,
+    include_backward::Bool = false,
+    rng = Random.default_rng()
+)
+    n_actions = length(all_actions)
+
+    # Augmented state dim: state features + preference embedding
+    augmented_state_dim = state_dim + preference_dim
+
+    # Create components
+    forward_policy, forward_ps, forward_st = create_forward_policy(augmented_state_dim, hidden_dim, n_actions, rng)
+    preference_encoder, pref_ps, pref_st = create_preference_encoder(n_objectives, preference_dim, rng)
+    z_net, z_ps, z_st = create_z_network(preference_dim, rng)
+
+    if include_backward
+        # Backward policy also conditioned on preferences
+        backward_input_dim = 2 * state_dim + preference_dim
+        backward_net = Lux.Chain(
+            Lux.Dense(backward_input_dim => hidden_dim, tanh),
+            Lux.Dense(hidden_dim => hidden_dim, tanh),
+            Lux.Dense(hidden_dim => 1)
+        )
+        backward_ps_raw, backward_st = Lux.setup(rng, backward_net)
+        backward_policy = BackwardPolicy(backward_net)
+
+        parameters = ComponentArray(
+            forward = forward_ps,
+            backward = backward_ps_raw,
+            preference = pref_ps,
+            z_net = z_ps
+        )
+        states = (forward = forward_st, backward = backward_st, preference = pref_st, z_net = z_st)
+    else
+        backward_policy = nothing
+
+        parameters = ComponentArray(
+            forward = forward_ps,
+            preference = pref_ps,
+            z_net = z_ps
+        )
+        states = (forward = forward_st, preference = pref_st, z_net = z_st)
+    end
+
+    # Setup optimizer
+    opt = Optimisers.Adam(learning_rate)
+    optimizer = Optimisers.setup(opt, parameters)
+
+    return GFlowNetModel(
+        initial_state,
+        all_actions,
+        forward_policy,
+        backward_policy,
+        nothing,          # flow_estimator
+        nothing,          # log_partition_function (replaced by z_network)
+        parameters,
+        optimizer,
+        states,
+        preference_encoder,
+        z_net
+    )
+end
+
+# =============================================================================
 # Trajectory Sampling - Zygote-Safe Implementation
 # =============================================================================
 
@@ -383,6 +506,119 @@ function sample_action_from_policy(model::GFlowNetModel, state::AbstractState,
         action_idx = argmax(probs)
     else
         # Stochastic sampling
+        cumulative = cumsum(probs)
+        r = rand()
+        action_idx = findfirst(p -> p >= r, cumulative)
+        if isnothing(action_idx)
+            action_idx = length(probs)
+        end
+    end
+
+    return applicable_actions[action_idx]
+end
+
+# =============================================================================
+# MOGFN Trajectory Sampling — Preference-Conditioned (Gap 5)
+# =============================================================================
+
+"""
+    sample_mogfn_trajectory(model::GFlowNetModel, w::Vector{Float64};
+                            config::SamplingConfig = SamplingConfig())
+
+Sample a trajectory from a MOGFN-PC model conditioned on preference vector w.
+
+The preference is embedded once via the shared encoder, then concatenated
+to state features at each step for the forward policy.
+
+# Arguments
+- `model`: MOGFN GFlowNet model (must have preference_encoder)
+- `w`: Preference vector (sums to ~1.0, length K)
+- `config`: Sampling configuration
+"""
+function sample_mogfn_trajectory(model::GFlowNetModel, w::Vector{Float64};
+                                  config = SamplingConfig())
+    if isa(config, NamedTuple)
+        config = SamplingConfig(
+            strategy = get(config, :strategy, STOCHASTIC_SAMPLING),
+            temperature = get(config, :temperature, 1.0),
+            epsilon = get(config, :epsilon, 0.0),
+            max_trajectory_length = get(config, :max_trajectory_length, 100)
+        )
+    elseif !isa(config, SamplingConfig)
+        config = SamplingConfig()
+    end
+
+    # Embed preference vector once (reused for all steps)
+    w_f32 = Float32.(w)
+    w_embed, _ = model.preference_encoder(w_f32, model.parameters.preference, model.states.preference)
+
+    trajectory_states = [model.initial_state]
+    trajectory_actions = AbstractAction[]
+    current_state = model.initial_state
+    steps = 0
+
+    while !is_terminal_state(current_state) && steps < config.max_trajectory_length
+        steps += 1
+
+        applicable_actions = get_applicable_actions(current_state, model.all_actions)
+        if isempty(applicable_actions)
+            break
+        end
+
+        # Sample action with augmented features
+        action = sample_mogfn_action(model, current_state, applicable_actions, w_embed; config=config)
+
+        next_state = apply_action(action, current_state)
+
+        trajectory_actions = [trajectory_actions..., action]
+        trajectory_states = [trajectory_states..., next_state]
+        current_state = next_state
+    end
+
+    return Trajectory(trajectory_states, trajectory_actions)
+end
+
+"""
+    sample_mogfn_action(model, state, applicable_actions, w_embed; config)
+
+Sample an action from MOGFN forward policy using [state_features; w_embed] input.
+"""
+function sample_mogfn_action(model::GFlowNetModel, state::AbstractState,
+                              applicable_actions::Vector{<:AbstractAction},
+                              w_embed::AbstractVector;
+                              config::SamplingConfig = SamplingConfig())
+
+    features = state_to_features(state)
+    augmented_features = vcat(features, w_embed)
+
+    logits_vec, _ = model.forward_policy.model(augmented_features, model.parameters.forward, model.states.forward)
+
+    applicable_indices = [i for (i, a) in enumerate(model.all_actions) if a in applicable_actions]
+
+    if isempty(applicable_indices)
+        return applicable_actions[1]
+    end
+
+    applicable_logits = logits_vec[applicable_indices]
+
+    if config.strategy == TEMPERATURE_SAMPLING
+        applicable_logits = applicable_logits ./ config.temperature
+    end
+
+    max_logit = maximum(applicable_logits)
+    exp_logits = exp.(applicable_logits .- max_logit)
+    probs = exp_logits ./ sum(exp_logits)
+
+    # ε-uniform exploration
+    if config.epsilon > 0.0
+        n_actions = length(probs)
+        uniform_prob = 1.0 / n_actions
+        probs = (1.0 - config.epsilon) .* probs .+ config.epsilon * uniform_prob
+    end
+
+    if config.strategy == GREEDY_SAMPLING
+        action_idx = argmax(probs)
+    else
         cumulative = cumsum(probs)
         r = rand()
         action_idx = findfirst(p -> p >= r, cumulative)
@@ -614,9 +850,82 @@ function sample_backward_trajectories_from_terminals(model::GFlowNetModel,
 end
 
 # =============================================================================
+# Gap 4: Reaction-Based GFlowNet Factory
+# =============================================================================
+
+"""
+    create_reaction_gflownet(; kwargs...) → GFlowNetModel
+
+Create a GFlowNet model for reaction-based molecular generation.
+Uses a two-head architecture:
+- Reaction head: selects which reaction template (or terminate)
+- Reactant head: produces embedding for dot-product scoring of building blocks
+"""
+function create_reaction_gflownet(;
+    n_reactions::Int = 17,
+    state_dim::Int = 1049,
+    hidden_dim::Int = 256,
+    fp_dim::Int = 1024,
+    learning_rate::Float64 = 0.001,
+    initial_state::Union{Nothing, AbstractState} = nothing,
+    all_actions::Union{Nothing, Vector{<:AbstractAction}} = nothing,
+    rng = Random.default_rng()
+)
+    # Combined forward policy: state → (reaction logits + reactant embedding)
+    # Output: [n_reactions+1 logits | fp_dim embedding]
+    output_dim = n_reactions + 1 + fp_dim
+
+    forward_policy = Lux.Chain(
+        Lux.Dense(state_dim => hidden_dim, Lux.relu),
+        Lux.Dense(hidden_dim => hidden_dim, Lux.relu),
+        Lux.Dense(hidden_dim => output_dim),
+    )
+
+    fp_ps, fp_st = Lux.setup(rng, forward_policy)
+
+    parameters = ComponentArray(forward = fp_ps)
+    states = (forward = fp_st,)
+
+    # Setup optimizer
+    opt = Optimisers.Adam(learning_rate)
+    optimizer = Optimisers.setup(opt, parameters)
+
+    # Use provided initial state/actions or create minimal placeholders
+    # (the server will replace these with real ReactionMolState/ReactionAction at training time)
+    init_state = if initial_state !== nothing
+        initial_state
+    else
+        # Minimal placeholder — a grid state works as any AbstractState subtype
+        GridState(1, 1, false)
+    end
+
+    actions = if all_actions !== nothing
+        all_actions
+    else
+        # Placeholder terminate action
+        AbstractAction[Terminate()]
+    end
+
+    return GFlowNetModel(
+        init_state,
+        actions,
+        ForwardPolicy(forward_policy),
+        nothing,          # backward_policy
+        nothing,          # flow_estimator
+        nothing,          # log_partition_function
+        parameters,
+        optimizer,
+        states,
+    )
+end
+
+# =============================================================================
 # Exports
 # =============================================================================
 
 export create_gflownet, create_forward_policy, create_backward_policy, create_flow_estimator
+export create_mogfn_gflownet, create_preference_encoder, create_z_network
+export create_reaction_gflownet
 export sample_trajectory, sample_action_from_policy
+export sample_mogfn_trajectory, sample_mogfn_action
 export sample_backward_trajectory, sample_backward_trajectories_from_terminals

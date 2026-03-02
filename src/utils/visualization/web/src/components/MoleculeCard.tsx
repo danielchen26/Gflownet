@@ -44,7 +44,9 @@ export const MoleculeCard = React.memo(function MoleculeCard({
     setTimeout(() => setCopied(false), 1500)
   }, [molecule.smiles])
 
-  const rewardColor = getRewardColor(molecule.reward)
+  const reward = molecule.reward ?? 0
+  const props = molecule.properties
+  const rewardColor = getRewardColor(reward)
 
   return (
     <motion.div
@@ -99,21 +101,21 @@ export const MoleculeCard = React.memo(function MoleculeCard({
       </motion.div>
 
       {/* Properties */}
-      {showProperties && (
+      {showProperties && props && (
         <div className="space-y-1">
           {/* Reward */}
           <div className="flex items-center justify-between">
             <span className={`${s.text} text-muted-foreground`}>Reward</span>
             <span className={`${s.text} font-bold font-mono`} style={{ color: rewardColor }}>
-              {molecule.reward.toFixed(2)}
+              {reward.toFixed(2)}
             </span>
           </div>
 
           {/* Key Properties */}
-          <PropertyRow label="QED" value={molecule.properties.qed} format={2} size={s.text} good={molecule.properties.qed > 0.5} />
-          <PropertyRow label="MW" value={molecule.properties.molecular_weight} format={0} size={s.text} unit="Da" />
-          <PropertyRow label="LogP" value={molecule.properties.logp} format={1} size={s.text} />
-          <PropertyRow label="SA" value={molecule.properties.synthetic_accessibility} format={1} size={s.text} good={molecule.properties.synthetic_accessibility < 5} />
+          <PropertyRow label="QED" value={props.qed} format={2} size={s.text} good={(props.qed ?? 0) > 0.5} />
+          <PropertyRow label="MW" value={props.molecular_weight} format={0} size={s.text} unit="Da" />
+          <PropertyRow label="LogP" value={props.logp} format={1} size={s.text} />
+          <PropertyRow label="SA" value={props.synthetic_accessibility} format={1} size={s.text} good={(props.synthetic_accessibility ?? 10) < 5} />
 
           {/* SMILES */}
           <div className="flex items-center mt-1.5 pt-1.5 border-t border-dark-border/30">
@@ -139,17 +141,18 @@ function PropertyRow({
   good,
 }: {
   label: string
-  value: number
+  value: number | undefined
   format: number
   size: string
   unit?: string
   good?: boolean
 }) {
+  const display = value != null ? value.toFixed(format) : '—'
   return (
     <div className="flex items-center justify-between">
       <span className={`${size} text-muted-foreground`}>{label}</span>
       <span className={`${size} font-mono ${good != null ? (good ? 'text-neon-green' : 'text-neon-orange') : 'text-white'}`}>
-        {value.toFixed(format)}{unit ? ` ${unit}` : ''}
+        {display}{unit && value != null ? ` ${unit}` : ''}
       </span>
     </div>
   )

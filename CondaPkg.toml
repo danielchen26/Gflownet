@@ -18,3 +18,6 @@ channel = "conda-forge"
 
 [pip.deps]
 umap-learn = ">=0.5"
+# meeko and vina require Boost C++ headers — install separately if needed:
+# meeko = ">=0.5"        # SMILES → PDBQT conversion for AutoDock Vina (Gap 2)
+# vina = ">=1.2.5"       # AutoDock Vina Python bindings (Gap 2)

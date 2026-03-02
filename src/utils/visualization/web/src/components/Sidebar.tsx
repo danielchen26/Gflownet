@@ -13,6 +13,7 @@ import {
   Sparkles,
   Sliders,
   Bot,
+  FlaskConical,
 } from 'lucide-react'
 import { useThemeLayout } from '../contexts/ThemeContext'
 import { ThemeSelector } from './ThemeSelector'
@@ -23,6 +24,7 @@ export type ViewId =
   | 'configure'
   | 'train'
   | 'candidates'
+  | 'toolkit'
   | 'structure'
   | 'landscape'
   | 'interpret'
@@ -50,6 +52,7 @@ const NAV_ITEMS: Array<{
 
   // Explore — domain-adaptive result exploration
   { id: 'candidates', label: 'Candidates', icon: BarChart3, section: 'explore', desc: 'Generated solutions' },
+  { id: 'toolkit', label: 'Toolkit', icon: FlaskConical, section: 'explore', desc: 'Molecular design tools' },
   { id: 'structure', label: 'Structure', icon: Box, section: 'explore', desc: 'Inspect candidates' },
   { id: 'landscape', label: 'Landscape', icon: Map, section: 'explore', desc: 'Solution space' },
 

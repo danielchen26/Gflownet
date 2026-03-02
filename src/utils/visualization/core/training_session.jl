@@ -312,19 +312,47 @@ function step!(session::TrainingSession)::Dict
         batch_rewards = Float64[reward(t.states[end]) for t in fresh_trajectories]
         push!(session.rewards, mean(batch_rewards))
 
+        # Gap 1: Compute per-batch diversity from fingerprints
+        batch_diversity = nothing
+        try
+            batch_fps = Vector{Float32}[]
+            for t in fresh_trajectories
+                terminal = t.states[end]
+                if GFlowNet.is_terminal_state(terminal) && !isempty(terminal.smiles)
+                    if !isempty(terminal.fingerprint) && length(terminal.fingerprint) > 0
+                        push!(batch_fps, terminal.fingerprint)
+                    end
+                end
+            end
+            if length(batch_fps) >= 2
+                div_stats = RDKitBridge.compute_diversity_stats(batch_fps)
+                batch_diversity = Dict(
+                    "internal_diversity_1" => div_stats["internal_diversity_1"],
+                    "mean_pairwise"        => div_stats["mean_pairwise"],
+                    "n_molecules"          => div_stats["n_molecules"],
+                )
+            end
+        catch
+            # Diversity computation is non-critical
+        end
+
         # Check if done
         if session.current_iteration >= session.total_iterations
             session.is_training = false
         end
 
-        return Dict(
+        result = Dict(
             "status"         => "ok",
             "iteration"      => session.current_iteration,
             "loss"           => loss_val,
             "gradient_norm"  => grad_norm,
             "mean_reward"    => mean(batch_rewards),
-            "iteration_time" => iteration_time
+            "iteration_time" => iteration_time,
         )
+        if batch_diversity !== nothing
+            result["batch_diversity"] = batch_diversity
+        end
+        return result
 
     catch e
         session.error_count += 1

@@ -304,6 +304,50 @@ function _row_to_mol_dict(row)
     )
 end
 
+"""Bulk retrieve fingerprints and IDs for diversity computation (Gap 1)."""
+function db_get_fingerprints(; ids::Union{Vector{String},Nothing}=nothing,
+                              session_id::Union{String,Nothing}=nothing,
+                              limit::Int=10000)
+    db_execute() do db
+        if ids !== nothing && !isempty(ids)
+            placeholders = join(fill("?", length(ids)), ",")
+            rows = SQLite.DBInterface.execute(db,
+                "SELECT id, smiles, fingerprint FROM molecules WHERE id IN ($placeholders) AND fingerprint IS NOT NULL",
+                ids
+            ) |> SQLite.rowtable
+        elseif session_id !== nothing
+            rows = SQLite.DBInterface.execute(db,
+                "SELECT id, smiles, fingerprint FROM molecules WHERE session_id = ? AND fingerprint IS NOT NULL LIMIT ?",
+                [session_id, limit]
+            ) |> SQLite.rowtable
+        else
+            rows = SQLite.DBInterface.execute(db,
+                "SELECT id, smiles, fingerprint FROM molecules WHERE fingerprint IS NOT NULL LIMIT ?",
+                [limit]
+            ) |> SQLite.rowtable
+        end
+
+        result_ids = String[]
+        result_smiles = String[]
+        result_fps = Vector{Float32}[]
+
+        for row in rows
+            if row.fingerprint !== nothing && !isempty(row.fingerprint)
+                try
+                    fp = reinterpret(Float32, Vector{UInt8}(row.fingerprint)) |> collect
+                    push!(result_ids, row.id)
+                    push!(result_smiles, row.smiles)
+                    push!(result_fps, fp)
+                catch
+                    continue
+                end
+            end
+        end
+
+        return (ids=result_ids, smiles=result_smiles, fingerprints=result_fps)
+    end
+end
+
 """Get total molecule count."""
 function db_molecule_count(; session_id::Union{String,Nothing}=nothing)
     db_execute() do db

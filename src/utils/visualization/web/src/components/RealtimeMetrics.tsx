@@ -38,7 +38,7 @@ function AnimatedNumber({ value }: { value: number }) {
     return () => clearInterval(interval)
   }, [value])
   
-  return <>{displayValue.toFixed(2)}</>
+  return <>{(displayValue ?? 0).toFixed(2)}</>
 }
 
 // Single metric display

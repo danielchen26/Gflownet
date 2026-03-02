@@ -86,6 +86,23 @@ const VIEW_HELP: Record<ViewId, { title: string; explanation: string; tips: stri
     ],
     nextStep: { label: 'Inspect structures', view: 'structure' },
   },
+  toolkit: {
+    title: 'Molecular Design Toolkit',
+    explanation:
+      'A unified hub for all molecular design capabilities.\n\n' +
+      '• Diversity — Tanimoto similarity matrix, IntDiv metrics, scaffold analysis\n' +
+      '• Docking — Binding affinity prediction with AutoDock Vina proxy\n' +
+      '• Fragments — Browse the BRICS fragment library (50 fragments, 4 categories)\n' +
+      '• Synthesis — Reaction-constrained generation with 17 SMARTS templates\n' +
+      '• Pareto — Multi-objective optimization with preference-conditioned sampling',
+    tips: [
+      'Run a molecular training session first to populate diversity and docking data',
+      'Fragment Browser works without training — explore the building blocks anytime',
+      'Use Pareto tab to balance QED, SA, LogP, and docking objectives simultaneously',
+      'Synthesis routes ensure generated molecules are practically synthesizable',
+    ],
+    nextStep: { label: 'Inspect structures', view: 'structure' },
+  },
   structure: {
     title: 'Structure Viewer',
     explanation:

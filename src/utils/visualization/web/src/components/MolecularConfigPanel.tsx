@@ -2,12 +2,14 @@ import { useState, useCallback, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   FlaskConical, Atom, Link2, Scissors, RefreshCcw, Grid3X3,
-  Beaker, Shield, CheckCircle, Target, Layers,
+  Beaker, Shield, CheckCircle, Target, Layers, Puzzle, Crosshair,
 } from 'lucide-react'
 import { SMILESInput } from './SMILESInput'
 import { PropertySliderRange } from './PropertySliderRange'
 import { PropertyRadarChart } from './PropertyRadarChart'
 import { MoleculeViewer2D } from './MoleculeViewer2D'
+import FragmentBrowser from './FragmentBrowser'
+import DockingPanel from './DockingPanel'
 import type { DomainOption } from './DomainSelector'
 import type { MolecularConstraints } from '../services/api'
 
@@ -352,6 +354,26 @@ export function MolecularConfigPanel({
               ))}
             </div>
           </Section>
+
+          {/* 5. Fragment Library (Gap 3) */}
+          <Section title="Building Blocks" icon={<Puzzle className="w-4 h-4" />} step={5}>
+            <p className="text-[10px] text-muted-foreground mb-3">
+              Browse the BRICS fragment library used as molecular building blocks during generation.
+            </p>
+            <div style={{ maxHeight: '360px', overflow: 'auto' }} className="rounded-lg border border-dark-border">
+              <FragmentBrowser compact />
+            </div>
+          </Section>
+
+          {/* 6. Docking Target (Gap 2) — shown when binding affinity scoring */}
+          {scoringFunction === 'binding_affinity' && (
+            <Section title="Docking Target" icon={<Crosshair className="w-4 h-4" />} step={6}>
+              <p className="text-[10px] text-muted-foreground mb-3">
+                Select a protein target for binding affinity scoring during training.
+              </p>
+              <DockingPanel compact />
+            </Section>
+          )}
         </div>
 
         {/* RIGHT: Sticky Live Preview (1/3) */}

@@ -5,7 +5,7 @@ using Zygote
 using Statistics
 
 using ..GFlowNet: GFlowNetModel, Trajectory, TrainingConfig, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB
 using ..GFlowNet: AbstractState, AbstractAction
 using ..GFlowNet: state_to_features, is_terminal_state, reward, is_applicable, apply_action
 using ..GFlowNet: get_applicable_actions, is_valid_trajectory
@@ -338,6 +338,65 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         end
 
         return total_loss
+
+    elseif config.objective == MULTI_OBJECTIVE_TB
+        # MOGFN-PC (Gap 5, ICML 2023): Preference-conditioned trajectory balance
+        #
+        # L(τ, w) = (log Z(w) + Σ log P_F(aᵢ|sᵢ, w) - log R(s_T, w))²
+        #
+        # Each batch uses a freshly sampled preference vector w from Dirichlet(α).
+        # The preference is embedded via shared encoder: w_embed = encode(w).
+        # Forward policy sees [state_features; w_embed], Z is computed via Z network.
+
+        # Filter valid trajectories
+        valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
+
+        if isempty(valid_trajectories)
+            return 0.0
+        end
+
+        # Check that model has MOGFN components
+        if isnothing(model.preference_encoder) || isnothing(model.z_network)
+            throw(ArgumentError(
+                "MULTI_OBJECTIVE_TB requires preference_encoder and z_network. " *
+                "Use create_mogfn_gflownet() or create_mogfn_molecular_gflownet()."
+            ))
+        end
+
+        # Sample preference vector for this batch (non-differentiable)
+        n_obj = config.mogfn_n_objectives
+        w = Zygote.@ignore begin
+            alpha = config.mogfn_dirichlet_alpha
+            if alpha == 1.0
+                gammas = [randexp() for _ in 1:n_obj]
+            else
+                gammas = Float64[_mogfn_sample_gamma(alpha) for _ in 1:n_obj]
+            end
+            gammas ./ sum(gammas)
+        end
+        w_f32 = Float32.(w)
+
+        # Compute preference embedding (differentiable)
+        w_embed, _ = model.preference_encoder(w_f32, params.preference, model.states.preference)
+
+        # Compute losses for each trajectory with this preference
+        losses = [compute_mogfn_single_trajectory_loss(model, traj, w, w_embed, params)
+                  for traj in valid_trajectories]
+
+        finite_losses = filter(!isinf, losses)
+        if isempty(finite_losses)
+            return Inf
+        end
+
+        base_loss = mean(finite_losses)
+
+        # Add entropy regularization if configured
+        if config.entropy_weight > 0.0
+            entropy_loss = compute_mogfn_entropy_loss(model, valid_trajectories, w_embed, params)
+            base_loss += config.entropy_weight * entropy_loss
+        end
+
+        return base_loss
 
     else
         throw(ArgumentError("Unsupported training objective: $(config.objective)"))
@@ -739,4 +798,160 @@ function compute_backward_policy_entropy_loss(model::GFlowNetModel, trajectories
 
     # Return negative average entropy (minimize to maximize entropy)
     return n_states > 0 ? -(total_entropy / n_states) : 0.0
+end
+
+# =============================================================================
+# MOGFN-PC Loss Functions (Gap 5, ICML 2023)
+# =============================================================================
+
+"""
+    compute_mogfn_single_trajectory_loss(model, trajectory, w, w_embed, params)
+
+Compute MOGFN preference-conditioned trajectory balance loss for a single trajectory.
+
+L(τ, w) = (log Z(w) + Σ log P_F(aᵢ|sᵢ, w) - log R(s_T, w))²
+
+The forward policy receives augmented features [state_features; w_embed].
+Z(w) is computed via the z_network from the preference embedding.
+R(s_T, w) is the linear scalarization of objectives with preference weights.
+"""
+function compute_mogfn_single_trajectory_loss(model::GFlowNetModel,
+                                              trajectory::Trajectory,
+                                              w::Vector{Float64},
+                                              w_embed::AbstractVector,
+                                              params)
+
+    # Compute log Z(w) via Z network (differentiable)
+    log_Z_vec, _ = model.z_network(w_embed, params.z_net, model.states.z_net)
+    log_Z = log_Z_vec[1]  # Scalar
+
+    # Compute log probability of trajectory under conditioned policy
+    log_prob_sum = 0.0
+
+    for i in 1:(length(trajectory.states)-1)
+        state = trajectory.states[i]
+        action = trajectory.actions[i]
+
+        # Get state features and augment with preference embedding
+        features = Zygote.@ignore state_to_features(state)
+        augmented_features = vcat(features, w_embed)
+
+        # Compute forward logits using augmented features (differentiable)
+        logits_vec, _ = model.forward_policy.model(augmented_features, params.forward, model.states.forward)
+
+        # Get applicable actions (non-differentiable)
+        applicable_actions = Zygote.@ignore get_applicable_actions(state, model.all_actions)
+
+        if isempty(applicable_actions)
+            return Inf
+        end
+
+        # Find action and applicable indices
+        action_idx = Zygote.@ignore findfirst(a -> a == action, model.all_actions)
+        applicable_indices = Zygote.@ignore [i for (i, a) in enumerate(model.all_actions) if a in applicable_actions]
+
+        if isnothing(action_idx) || !(action_idx in applicable_indices)
+            return Inf
+        end
+
+        # Compute log probability using numerically stable operations
+        applicable_logits = logits_vec[applicable_indices]
+        if isempty(applicable_logits)
+            return Inf
+        end
+
+        log_probs = applicable_logits .- logsumexp(applicable_logits)
+        action_pos = Zygote.@ignore findfirst(==(action_idx), applicable_indices)
+
+        if isnothing(action_pos)
+            return Inf
+        end
+
+        log_prob_sum += log_probs[action_pos]
+    end
+
+    # Get terminal reward with preference scalarization (non-differentiable)
+    terminal_state = trajectory.states[end]
+    terminal_reward = Zygote.@ignore reward(terminal_state, w)
+
+    if terminal_reward <= 0
+        terminal_reward = 1e-8
+    end
+
+    log_reward = log(terminal_reward)
+
+    # MOGFN Trajectory Balance Loss
+    trajectory_balance_error = log_Z + log_prob_sum - log_reward
+    return trajectory_balance_error^2
+end
+
+"""
+    compute_mogfn_entropy_loss(model, trajectories, w_embed, params)
+
+Compute policy entropy loss for MOGFN (preference-conditioned).
+Same as standard entropy loss but with augmented features [state; w_embed].
+"""
+function compute_mogfn_entropy_loss(model::GFlowNetModel, trajectories::Vector{Trajectory},
+                                    w_embed::AbstractVector, params)
+    total_entropy = 0.0
+    n_states = 0
+
+    for traj in trajectories
+        for i in 1:(length(traj.states) - 1)
+            state = traj.states[i]
+
+            if Zygote.@ignore is_terminal_state(state)
+                continue
+            end
+
+            features = Zygote.@ignore state_to_features(state)
+            augmented_features = vcat(features, w_embed)
+
+            applicable_indices = Zygote.@ignore begin
+                applicable = get_applicable_actions(state, model.all_actions)
+                isempty(applicable) ? Int[] : [idx for (idx, a) in enumerate(model.all_actions) if a in applicable]
+            end
+
+            if isempty(applicable_indices)
+                continue
+            end
+
+            logits_vec, _ = model.forward_policy.model(augmented_features, params.forward, model.states.forward)
+            applicable_logits = logits_vec[applicable_indices]
+            log_probs = applicable_logits .- logsumexp(applicable_logits)
+            probs = exp.(log_probs)
+
+            entropy = 0.0
+            for (p, lp) in zip(probs, log_probs)
+                if p > 1e-10
+                    entropy -= p * lp
+                end
+            end
+
+            total_entropy += entropy
+            n_states += 1
+        end
+    end
+
+    return n_states > 0 ? -(total_entropy / n_states) : 0.0
+end
+
+"""Helper: Sample from Gamma(alpha, 1) for non-unit Dirichlet (used in MOGFN loss)."""
+function _mogfn_sample_gamma(alpha::Float64)::Float64
+    if alpha >= 1.0
+        d = alpha - 1.0/3.0
+        c = 1.0 / sqrt(9.0 * d)
+        while true
+            x = randn()
+            v = (1.0 + c * x)^3
+            if v > 0.0
+                u = rand()
+                if u < 1.0 - 0.0331 * x^4 || log(u) < 0.5 * x^2 + d * (1.0 - v + log(v))
+                    return d * v
+                end
+            end
+        end
+    else
+        return _mogfn_sample_gamma(alpha + 1.0) * rand()^(1.0 / alpha)
+    end
 end

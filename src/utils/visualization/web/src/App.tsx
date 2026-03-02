@@ -20,6 +20,7 @@ import { MolecularViewer3D } from './pages/MolecularViewer3D'
 import { ChemicalSpaceExplorer } from './pages/ChemicalSpaceExplorer'
 import { ResultsHub } from './pages/ResultsHub'
 import { InterpretabilityPanel } from './pages/InterpretabilityPanel'
+import { MolecularToolkit } from './pages/MolecularToolkit'
 
 function AppContent() {
   const [activeView, setActiveView] = useState<ViewId>('home')
@@ -132,6 +133,10 @@ function AppContent() {
 
               {activeView === 'candidates' && (
                 <ResultsHub onNavigate={handleNavigate} problemConfig={problemConfig} />
+              )}
+
+              {activeView === 'toolkit' && (
+                <MolecularToolkit />
               )}
 
               {activeView === 'structure' && (

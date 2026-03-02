@@ -2,7 +2,7 @@
 
 julia_version = "1.12.4"
 manifest_format = "2.0"
-project_hash = "91c215c89f150c97b8bd5a166603bdd559701134"
+project_hash = "01297288d3a0a01945e4f23302ffc47f711728f0"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "be7ae030256b8ef14a441726c4c37766b90b93a3"
@@ -585,7 +585,7 @@ uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 version = "1.11.0"
 
 [[deps.GFlowNet]]
-deps = ["BenchmarkTools", "CSV", "Combinatorics", "ComponentArrays", "DataFrames", "DataStructures", "Dates", "Distributions", "GraphRecipes", "Graphs", "HTTP", "IJulia", "JSON3", "LanguageServer", "LinearAlgebra", "Lux", "NNlib", "Optimisers", "Oxygen", "Plots", "PythonCall", "Random", "Reexport", "Statistics", "StatsBase", "SymbolServer", "Zygote"]
+deps = ["BenchmarkTools", "CSV", "Combinatorics", "ComponentArrays", "DataFrames", "DataStructures", "Dates", "Distributions", "GraphRecipes", "Graphs", "HTTP", "IJulia", "JSON3", "LanguageServer", "LinearAlgebra", "Lux", "NNlib", "Optimisers", "Oxygen", "Plots", "PythonCall", "Random", "Reexport", "SQLite", "Serialization", "Statistics", "StatsBase", "SymbolServer", "Zygote"]
 path = "."
 uuid = "2d7ca041-c8ad-46e9-a25d-4e8f55c0c8f5"
 version = "1.0.0"

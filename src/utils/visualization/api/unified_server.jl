@@ -20,6 +20,7 @@ include("../domains/grid_world.jl")
 include("../python/rdkit_bridge.jl")
 include("../../../applications/molecular_generation.jl")
 include("../domains/molecular.jl")
+include("../domains/reaction_molecular.jl")
 
 # Include database module for persistence
 include("../core/database.jl")
@@ -45,6 +46,7 @@ end
 function register_builtin_domains!()
     register_domain!("grid_world", GridWorldAdapter)
     register_domain!("molecule", MolecularAdapter)
+    register_domain!("reaction_molecule", ReactionMolecularAdapter)
 end
 
 # Register domains on module load
@@ -76,8 +78,10 @@ function create_model_and_adapter(domain_type::String, config::Dict)
         return create_grid_world_model_and_adapter(config)
     elseif domain_type == "molecule"
         return create_molecule_model_and_adapter(config)
+    elseif domain_type == "reaction_molecule"
+        return create_reaction_molecule_model_and_adapter(config)
     else
-        error("Unsupported domain type: $domain_type. Available: grid_world, molecule")
+        error("Unsupported domain type: $domain_type. Available: grid_world, molecule, reaction_molecule")
     end
 end
 
@@ -192,6 +196,35 @@ function create_molecule_model_and_adapter(config::Dict)
     return model, adapter
 end
 
+"""
+    create_reaction_molecule_model_and_adapter(config::Dict)
+
+Create a Reaction-Based Molecular GFlowNet model and ReactionMolecularAdapter.
+"""
+function create_reaction_molecule_model_and_adapter(config::Dict)
+    hidden_dim = get(config, "hidden_dim", 256)
+    learning_rate = Float64(get(config, "learning_rate", 0.001))
+    max_steps = Int(get(config, "max_steps", MAX_REACTION_STEPS))
+
+    # Initialize reaction engine if not already done
+    if !RDKitBridge._reaction_engine_available[]
+        try
+            RDKitBridge.load_reaction_templates!()
+            RDKitBridge.init_reaction_engine!()
+        catch e
+            @warn "Reaction engine initialization failed" exception=e
+        end
+    end
+
+    model = create_reaction_gflownet(
+        hidden_dim = hidden_dim,
+        learning_rate = learning_rate,
+    )
+
+    adapter = ReactionMolecularAdapter(max_steps, Dict[])
+    return model, adapter
+end
+
 # ============================================
 # CORS Middleware
 # ============================================
@@ -219,6 +252,14 @@ function add_cors_headers(handler)
     end
 end
 
+"""Check if adapter is any molecular domain type (fragment-based or reaction-based)."""
+_is_molecular_adapter(adapter) = adapter isa MolecularAdapter || adapter isa ReactionMolecularAdapter
+
+"""Get generated molecules from any molecular adapter."""
+_get_molecules(adapter::MolecularAdapter) = adapter.generated_molecules
+_get_molecules(adapter::ReactionMolecularAdapter) = adapter.generated_molecules
+_get_molecules(::Any) = Dict[]
+
 # ============================================
 # JSON Sanitization (NaN/Inf → null for JSON spec)
 # ============================================
@@ -229,6 +270,8 @@ function sanitize_for_json(x)
         return (isnan(x) || isinf(x)) ? nothing : x
     elseif x isa AbstractDict
         return Dict(k => sanitize_for_json(v) for (k, v) in x)
+    elseif x isa AbstractMatrix
+        return [sanitize_for_json(x[i, :]) for i in 1:size(x, 1)]
     elseif x isa AbstractVector
         return [sanitize_for_json(v) for v in x]
     elseif x isa Tuple
@@ -337,7 +380,7 @@ end
 
     # Check RDKit readiness for molecular domain
     domain_type = get(config, "domain_type", "grid_world")
-    if domain_type == "molecule" && !RDKIT_AVAILABLE[]
+    if (domain_type == "molecule" || domain_type == "reaction_molecule") && !RDKIT_AVAILABLE[]
         return safe_json(Dict(
             "error" => "Molecular domain unavailable: RDKit failed to initialize. Check backend logs.",
             "domain_type" => "molecule",
@@ -395,7 +438,7 @@ end
                 try
                     valid_losses = filter(!isnan, session.losses)
                     final_loss = isempty(valid_losses) ? 0.0 : valid_losses[end]
-                    mol_count = session.adapter isa MolecularAdapter ? length(session.adapter.generated_molecules) : 0
+                    mol_count = hasproperty(session.adapter, :generated_molecules) ? length(session.adapter.generated_molecules) : 0
                     db_complete_session!(session.id, final_loss, mol_count)
                 catch e
                     @warn "Failed to record session completion" exception=e
@@ -562,6 +605,15 @@ end
             "total_molecules" => length(adapter.generated_molecules),
             "unique_smiles"   => length(unique(all_smiles)),
         )
+    elseif session.adapter isa ReactionMolecularAdapter
+        # Reaction molecular domain: synthesis-level stats
+        adapter = session.adapter
+        all_smiles = [m["smiles"] for m in adapter.generated_molecules]
+        Dict(
+            "total_molecules"  => length(adapter.generated_molecules),
+            "unique_smiles"    => length(unique(all_smiles)),
+            "domain_subtype"   => "reaction_molecule",
+        )
     else
         Dict()
     end
@@ -680,8 +732,8 @@ end
 
     # Try in-memory first (active session)
     session = CURRENT_SESSION[]
-    if session !== nothing && session.adapter isa MolecularAdapter
-        molecules = session.adapter.generated_molecules
+    if session !== nothing && _is_molecular_adapter(session.adapter)
+        molecules = _get_molecules(session.adapter)
         if !isempty(molecules)
             # Sort in-memory
             key_fn = get(sort_key_map, sort_by, sort_key_map["reward"])
@@ -706,11 +758,12 @@ end
     session = CURRENT_SESSION[]
     session === nothing && return safe_json(Dict("error" => "No session"), status=404)
     adapter = session.adapter
-    !(adapter isa MolecularAdapter) && return safe_json(Dict("error" => "Not a molecular session"), status=400)
+    !_is_molecular_adapter(adapter) && return safe_json(Dict("error" => "Not a molecular session"), status=400)
 
-    idx = findfirst(m -> m["id"] == id, adapter.generated_molecules)
+    molecules = _get_molecules(adapter)
+    idx = findfirst(m -> m["id"] == id, molecules)
     idx === nothing && return safe_json(Dict("error" => "Molecule not found: $id"), status=404)
-    return safe_json(adapter.generated_molecules[idx])
+    return safe_json(molecules[idx])
 end
 
 @get "/api/v2/molecular/space" function(req)
@@ -719,8 +772,8 @@ end
     # Try in-memory first (active session)
     mols = Dict[]
     session = CURRENT_SESSION[]
-    if session !== nothing && session.adapter isa MolecularAdapter
-        mols = session.adapter.generated_molecules
+    if session !== nothing && _is_molecular_adapter(session.adapter)
+        mols = _get_molecules(session.adapter)
     end
 
     # Fallback: query from database
@@ -959,6 +1012,625 @@ end
 
 @post "/api/v2/molecular/retrain" function(req)
     return safe_json(Dict("status" => "not_implemented", "message" => "Focused retraining coming soon"))
+end
+
+# ============================================
+# Gap 1: Diversity Analysis Endpoints
+# ============================================
+
+@post "/api/v2/molecular/diversity" function(req)
+    body = JSON3.read(String(req.body), Dict)
+    ids = get(body, "ids", nothing)
+    sample_size = get(body, "sample_size", 500)
+
+    try
+        # Get fingerprints from database
+        fp_data = if ids !== nothing && !isempty(ids)
+            db_get_fingerprints(ids=String.(ids))
+        else
+            db_get_fingerprints(limit=sample_size)
+        end
+
+        if isempty(fp_data.fingerprints)
+            return safe_json(Dict("error" => "No fingerprints available"))
+        end
+
+        # Compute Tanimoto diversity stats
+        stats = RDKitBridge.compute_diversity_stats(fp_data.fingerprints)
+
+        # Compute scaffold diversity
+        scaffold_stats = RDKitBridge.compute_scaffold_diversity(fp_data.smiles)
+
+        # Compute nearest neighbors (for small sets or sampled)
+        nn_results = if length(fp_data.fingerprints) <= 200
+            RDKitBridge.compute_nearest_neighbors(fp_data.fingerprints, fp_data.ids; k=3)
+        else
+            # Sample for nearest neighbor computation
+            sample_idx = sort(randperm(length(fp_data.fingerprints))[1:min(200, length(fp_data.fingerprints))])
+            RDKitBridge.compute_nearest_neighbors(
+                fp_data.fingerprints[sample_idx], fp_data.ids[sample_idx]; k=3
+            )
+        end
+
+        # Compute similarity matrix for small sets
+        sim_matrix = if length(fp_data.fingerprints) <= 100
+            RDKitBridge.compute_tanimoto_matrix(fp_data.fingerprints)
+        else
+            nothing  # Too large to send
+        end
+
+        return safe_json(Dict(
+            "stats" => merge(stats, Dict(
+                "n_unique_scaffolds" => scaffold_stats["n_unique_scaffolds"],
+                "scaffold_entropy" => scaffold_stats["scaffold_entropy"],
+            )),
+            "nearest_neighbors" => nn_results,
+            "similarity_matrix" => sim_matrix,
+        ))
+    catch e
+        @error "Diversity computation failed" exception=e
+        return safe_json(Dict("error" => "Diversity computation failed: $(sprint(showerror, e))"))
+    end
+end
+
+@get "/api/v2/molecular/diversity/training" function(req)
+    session = CURRENT_SESSION[]
+    session === nothing && return safe_json(Dict("error" => "No active session"))
+    adapter = session.adapter
+    !(adapter isa MolecularAdapter) && return safe_json(Dict("error" => "Not a molecular session"))
+
+    # Compute diversity over the most recent molecules
+    n = length(adapter.generated_molecules)
+    if n < 2
+        return safe_json(Dict("diversity_over_time" => [], "current" => Dict()))
+    end
+
+    # Get fingerprints from generated molecules
+    fps = Vector{Float32}[]
+    for mol in adapter.generated_molecules
+        fp = get(mol, "fingerprint", nothing)
+        if fp !== nothing
+            push!(fps, Float32.(fp))
+        end
+    end
+
+    if length(fps) < 2
+        return safe_json(Dict("diversity_over_time" => [], "current" => Dict()))
+    end
+
+    # Current diversity
+    current_stats = RDKitBridge.compute_diversity_stats(fps)
+
+    return safe_json(Dict(
+        "current" => current_stats,
+        "n_molecules" => length(fps),
+    ))
+end
+
+# ============================================
+# Gap 3: Fragment Library Endpoints
+# ============================================
+
+@get "/api/v2/molecular/fragments" function(req)
+    # Return info about available fragment libraries
+    libraries_dir = joinpath(@__DIR__, "..", "..", "..", "..", "data", "fragment_libraries")
+    available = Dict[]
+
+    if isdir(libraries_dir)
+        for f in readdir(libraries_dir)
+            endswith(f, ".json") || continue
+            path = joinpath(libraries_dir, f)
+            try
+                data = JSON3.read(read(path, String), Dict)
+                push!(available, Dict(
+                    "filename" => f,
+                    "n_fragments" => get(data, "n_fragments", length(get(data, "fragments", []))),
+                    "source" => get(data, "source", "unknown"),
+                    "version" => get(data, "version", "1.0"),
+                ))
+            catch
+                push!(available, Dict("filename" => f, "error" => "parse_failed"))
+            end
+        end
+    end
+
+    # Current library info
+    session = CURRENT_SESSION[]
+    current_count = if session !== nothing && session.adapter isa MolecularAdapter
+        length(session.adapter.fragment_library)
+    else
+        length(FRAGMENT_LIBRARY)
+    end
+
+    return safe_json(Dict(
+        "current_count" => current_count,
+        "available_libraries" => available,
+    ))
+end
+
+@get "/api/v2/molecular/fragments/current" function(req)
+    # Return the current fragment library details
+    session = CURRENT_SESSION[]
+    fragments = if session !== nothing && session.adapter isa MolecularAdapter
+        session.adapter.fragment_library
+    else
+        FRAGMENT_LIBRARY
+    end
+
+    frag_list = [Dict(
+        "id" => f.fragment_id,
+        "smiles" => f.fragment_smiles,
+        "name" => f.fragment_name,
+        "category" => f.metadata.category,
+        "is_starter" => f.metadata.is_starter,
+        "n_attachments" => f.metadata.n_attachments,
+        "brics_labels" => f.metadata.brics_labels,
+    ) for f in fragments]
+
+    return safe_json(Dict(
+        "n_fragments" => length(fragments),
+        "fragments" => frag_list,
+    ))
+end
+
+# ============================================
+# Gap 5: MOGFN Pareto Optimization Endpoints
+# ============================================
+
+@get "/api/v2/molecular/pareto-front" function(req)
+    session = CURRENT_SESSION[]
+
+    # Return empty Pareto front if no session or not molecular
+    if session === nothing || !(session.adapter isa MolecularAdapter)
+        return safe_json(Dict(
+            "points" => [],
+            "hypervolume" => 0.0,
+            "objective_names" => ["qed", "sa_norm", "logp_score", "mw_score"],
+            "objective_ranges" => Dict(),
+        ))
+    end
+
+    # Get all molecules from the current session
+    molecules = session.adapter.generated_molecules
+
+    if isempty(molecules)
+        return safe_json(Dict(
+            "points" => [],
+            "hypervolume" => 0.0,
+            "objective_names" => ["qed", "sa_norm", "logp_score", "mw_score"],
+            "objective_ranges" => Dict(),
+        ))
+    end
+
+    # Compute objectives for all molecules
+    objective_names = ["qed", "sa_norm", "logp_score", "mw_score"]
+    points = []
+
+    for mol in molecules
+        smiles = mol isa Dict ? get(mol, "smiles", "") : ""
+        if isempty(smiles)
+            continue
+        end
+
+        # Create a terminal MolState to compute objectives
+        try
+            fp = RDKitBridge.compute_fingerprint(smiles)
+            state = MolState(smiles, Int[], 0, true, fp)
+            objs = compute_all_objectives(state)
+
+            if !isempty(objs)
+                push!(points, Dict(
+                    "id" => get(mol, "id", string(UUIDs.uuid4())),
+                    "smiles" => smiles,
+                    "objectives" => Dict(zip(objective_names, objs)),
+                    "reward" => GFlowNet.reward(state),
+                    "is_pareto_optimal" => false,  # Computed below
+                ))
+            end
+        catch
+            continue
+        end
+    end
+
+    # Compute Pareto optimality
+    if !isempty(points)
+        for i in 1:length(points)
+            is_dominated = false
+            objs_i = [points[i]["objectives"][n] for n in objective_names]
+            for j in 1:length(points)
+                i == j && continue
+                objs_j = [points[j]["objectives"][n] for n in objective_names]
+                # j dominates i if all objectives of j >= i and at least one strictly >
+                if all(objs_j .>= objs_i) && any(objs_j .> objs_i)
+                    is_dominated = true
+                    break
+                end
+            end
+            points[i]["is_pareto_optimal"] = !is_dominated
+        end
+    end
+
+    # Compute objective ranges
+    obj_ranges = Dict()
+    for name in objective_names
+        vals = [p["objectives"][name] for p in points if haskey(p["objectives"], name)]
+        if !isempty(vals)
+            obj_ranges[name] = [minimum(vals), maximum(vals)]
+        end
+    end
+
+    # Compute hypervolume indicator (2D approximation using first two objectives)
+    pareto_pts = filter(p -> p["is_pareto_optimal"], points)
+    hypervolume = if length(pareto_pts) >= 2 && length(objective_names) >= 2
+        # Simple 2D hypervolume with reference point [0, 0]
+        sorted_pts = sort(pareto_pts, by=p -> p["objectives"][objective_names[1]])
+        hv = 0.0
+        for k in 1:length(sorted_pts)
+            x = sorted_pts[k]["objectives"][objective_names[1]]
+            y = sorted_pts[k]["objectives"][objective_names[2]]
+            if k < length(sorted_pts)
+                next_x = sorted_pts[k+1]["objectives"][objective_names[1]]
+                hv += (next_x - x) * y
+            else
+                hv += (1.0 - x) * y  # reference point at x=1
+            end
+        end
+        hv
+    else
+        0.0
+    end
+
+    return safe_json(Dict(
+        "points" => points,
+        "hypervolume" => hypervolume,
+        "objective_names" => objective_names,
+        "objective_ranges" => obj_ranges,
+    ))
+end
+
+@get "/api/v2/molecular/molecules/:id/objectives" function(req, id)
+    # Compute objectives for a specific molecule
+    session = CURRENT_SESSION[]
+    if session === nothing
+        return safe_json(Dict("error" => "No active training session"); status=400)
+    end
+
+    # Find the molecule by ID
+    molecules = if session.adapter isa MolecularAdapter
+        session.adapter.generated_molecules
+    else
+        return safe_json(Dict("error" => "Not a molecular session"); status=400)
+    end
+
+    mol = nothing
+    for m in molecules
+        if m isa Dict && get(m, "id", "") == id
+            mol = m
+            break
+        end
+    end
+
+    if mol === nothing
+        return safe_json(Dict("error" => "Molecule not found: $id"); status=404)
+    end
+
+    smiles = get(mol, "smiles", "")
+    objective_names = ["qed", "sa_norm", "logp_score", "mw_score"]
+
+    try
+        fp = RDKitBridge.compute_fingerprint(smiles)
+        state = MolState(smiles, Int[], 0, true, fp)
+        objs = compute_all_objectives(state)
+
+        return safe_json(Dict(
+            "molecule_id" => id,
+            "objectives" => Dict(zip(objective_names, objs)),
+            "objective_names" => objective_names,
+        ))
+    catch e
+        return safe_json(Dict("error" => "Failed to compute objectives: $e"); status=500)
+    end
+end
+
+@post "/api/v2/molecular/generate-pareto" function(req)
+    # Generate molecules with a specific preference weighting
+    body = try
+        JSON3.read(String(req.body))
+    catch
+        return safe_json(Dict("error" => "Invalid JSON body"); status=400)
+    end
+
+    preferences = get(body, :preferences, nothing)
+    n_molecules = get(body, :n_molecules, 100)
+
+    if preferences === nothing
+        return safe_json(Dict("error" => "preferences field required"); status=400)
+    end
+
+    session = CURRENT_SESSION[]
+    if session === nothing || session.model === nothing
+        return safe_json(Dict("error" => "No active MOGFN training session"); status=400)
+    end
+
+    # Check if model has MOGFN components
+    if isnothing(session.model.preference_encoder)
+        return safe_json(Dict("error" => "Model is not MOGFN-PC. Train with MULTI_OBJECTIVE_TB objective."); status=400)
+    end
+
+    # Convert preferences dict to vector
+    objective_names = ["qed", "sa_norm", "logp_score", "mw_score"]
+    w = Float64[get(preferences, Symbol(name), 0.25) for name in objective_names]
+    w_sum = sum(w)
+    if w_sum > 0
+        w = w ./ w_sum  # Normalize to simplex
+    else
+        w = fill(1.0 / length(objective_names), length(objective_names))
+    end
+
+    # Generate molecules using MOGFN sampling
+    molecules = []
+    sampling_config = GFlowNet.SamplingConfig(
+        strategy = GFlowNet.STOCHASTIC_SAMPLING,
+        temperature = 1.0,
+        epsilon = 0.0,
+        max_trajectory_length = 100
+    )
+
+    for _ in 1:n_molecules
+        try
+            traj = GFlowNet.sample_mogfn_trajectory(session.model, w; config=sampling_config)
+            terminal = traj.states[end]
+            if GFlowNet.is_terminal_state(terminal) && !isempty(terminal.smiles)
+                fp = terminal.fingerprint
+                state = MolState(terminal.smiles, Int[], 0, true, fp)
+                objs = compute_all_objectives(state)
+                if !isempty(objs)
+                    push!(molecules, Dict(
+                        "id" => string(UUIDs.uuid4()),
+                        "smiles" => terminal.smiles,
+                        "objectives" => Dict(zip(objective_names, objs)),
+                        "reward" => GFlowNet.reward(state, w),
+                        "is_pareto_optimal" => false,
+                    ))
+                end
+            end
+        catch
+            continue
+        end
+    end
+
+    return safe_json(Dict(
+        "molecules" => molecules,
+        "pareto_front" => filter(m -> m["is_pareto_optimal"], molecules),
+        "hypervolume" => 0.0,  # TODO: compute when pymoo available
+        "preferences_used" => Dict(zip(objective_names, w)),
+    ))
+end
+
+# ============================================
+# Gap 2: Docking API Endpoints
+# ============================================
+
+@get "/api/v2/molecular/targets" function(req)
+    targets = RDKitBridge.get_docking_targets()
+    target_list = [Dict(
+        "id" => t["id"],
+        "name" => t["name"],
+        "pdb_id" => t["pdb_id"],
+        "description" => get(t, "description", ""),
+        "has_receptor" => isfile(RDKitBridge._get_receptor_path(t["id"])),
+    ) for t in values(targets)]
+
+    return safe_json(Dict(
+        "targets" => target_list,
+        "active_target" => RDKitBridge.get_docking_target(),
+        "docking_available" => RDKitBridge.is_docking_available(),
+        "proxy_available" => RDKitBridge.is_proxy_available(),
+    ))
+end
+
+@post "/api/v2/molecular/dock" function(req)
+    body = JSON3.read(String(req.body), Dict)
+
+    smiles = get(body, "smiles", "")
+    isempty(smiles) && return safe_json(Dict("error" => "Missing 'smiles' field"))
+
+    target = get(body, "target", RDKitBridge.get_docking_target())
+    method = get(body, "method", "proxy")
+
+    if method == "proxy"
+        if !RDKitBridge.is_proxy_available()
+            return safe_json(Dict("error" => "Proxy model not trained. Use method='vina' or train proxy first."))
+        end
+        score = RDKitBridge.proxy_dock(smiles, target)
+        return safe_json(Dict(
+            "smiles" => smiles,
+            "method" => "proxy",
+            "normalized_score" => score,
+            "target" => target,
+        ))
+    elseif method == "vina"
+        if !RDKitBridge.is_docking_available()
+            return safe_json(Dict("error" => "AutoDock Vina not available. Install meeko and vina."))
+        end
+        result = RDKitBridge.dock_molecule(smiles, target)
+        if !isempty(result.error)
+            return safe_json(Dict("error" => result.error))
+        end
+        return safe_json(Dict(
+            "smiles" => result.smiles,
+            "method" => "vina",
+            "affinity_kcal" => result.affinity_kcal,
+            "normalized_score" => RDKitBridge.sigmoid_normalize(result.affinity_kcal),
+            "n_poses" => result.n_poses,
+            "runtime_ms" => result.runtime_ms,
+            "target" => target,
+        ))
+    else
+        return safe_json(Dict("error" => "Unknown method: $method. Use 'proxy' or 'vina'."))
+    end
+end
+
+@post "/api/v2/molecular/dock-batch" function(req)
+    body = JSON3.read(String(req.body), Dict)
+
+    ids = get(body, "ids", String[])
+    target = get(body, "target", RDKitBridge.get_docking_target())
+
+    session = CURRENT_SESSION[]
+    session === nothing && return safe_json(Dict("error" => "No active training session"))
+
+    results = Dict[]
+    for id in ids
+        # Look up molecule SMILES from the session's molecule store
+        mol = get(session.molecules, string(id), nothing)
+        if mol !== nothing && haskey(mol, "smiles")
+            smiles = mol["smiles"]
+            if RDKitBridge.is_proxy_available()
+                score = RDKitBridge.proxy_dock(smiles, target)
+                push!(results, Dict("id" => id, "smiles" => smiles, "normalized_score" => score, "method" => "proxy"))
+            elseif RDKitBridge.is_docking_available()
+                dock_result = RDKitBridge.dock_molecule(smiles, target)
+                push!(results, Dict(
+                    "id" => id, "smiles" => smiles,
+                    "affinity_kcal" => dock_result.affinity_kcal,
+                    "normalized_score" => RDKitBridge.sigmoid_normalize(dock_result.affinity_kcal),
+                    "method" => "vina",
+                ))
+            end
+        end
+    end
+
+    return safe_json(Dict(
+        "results" => results,
+        "target" => target,
+        "n_docked" => length(results),
+    ))
+end
+
+@post "/api/v2/molecular/docking/set-target" function(req)
+    body = JSON3.read(String(req.body), Dict)
+    target_id = get(body, "target_id", "")
+    isempty(target_id) && return safe_json(Dict("error" => "Missing 'target_id'"))
+
+    success = RDKitBridge.set_docking_target!(target_id)
+    return safe_json(Dict(
+        "success" => success,
+        "active_target" => RDKitBridge.get_docking_target(),
+    ))
+end
+
+# ============================================
+# Gap 4: Reaction Domain / Synthesis Route Endpoints
+# ============================================
+
+@get "/api/v2/molecular/reactions" function(req)
+    templates = RDKitBridge.get_reaction_templates()
+    return safe_json(Dict(
+        "reactions" => [Dict(
+            "id"             => t["id"],
+            "name"           => t["name"],
+            "class"          => t["class"],
+            "yield_estimate" => t["yield_estimate"],
+            "functional_groups" => get(t, "functional_groups", String[]),
+        ) for t in templates],
+        "n_reactions"        => length(templates),
+        "engine_available"   => RDKitBridge._reaction_engine_available[],
+    ))
+end
+
+@get "/api/v2/molecular/molecules/{id}/synthesis" function(req, id::String)
+    session = CURRENT_SESSION[]
+    session === nothing && return safe_json(Dict("error" => "No session"), status=404)
+    adapter = session.adapter
+
+    # Support both fragment and reaction adapters
+    molecules = if adapter isa ReactionMolecularAdapter
+        adapter.generated_molecules
+    elseif adapter isa MolecularAdapter
+        adapter.generated_molecules
+    else
+        return safe_json(Dict("error" => "Not a molecular session"), status=400)
+    end
+
+    idx = findfirst(m -> m["id"] == id, molecules)
+    idx === nothing && return safe_json(Dict("error" => "Molecule not found: $id"), status=404)
+
+    mol = molecules[idx]
+    route = get(mol, "synthesis_route", nothing)
+
+    if route === nothing || isempty(route)
+        return safe_json(Dict(
+            "molecule_id"    => id,
+            "smiles"         => mol["smiles"],
+            "has_synthesis"  => false,
+            "steps"          => [],
+            "message"        => "No synthesis route available (fragment-based generation)",
+        ))
+    end
+
+    # Compute cumulative yield
+    cumulative_yield = 1.0
+    for step in route
+        cumulative_yield *= get(step, "yield_estimate", 0.8)
+    end
+
+    return safe_json(Dict(
+        "molecule_id"       => id,
+        "smiles"            => mol["smiles"],
+        "has_synthesis"     => true,
+        "n_steps"           => length(route),
+        "steps"             => route,
+        "cumulative_yield"  => cumulative_yield,
+        "method"            => get(mol, "method", "reaction_gflownet"),
+    ))
+end
+
+@post "/api/v2/molecular/reaction/execute" function(req)
+    body = JSON3.read(String(req.body), Dict)
+    reaction_id = get(body, "reaction_id", 0)
+    reactant1 = get(body, "reactant1", "")
+    reactant2 = get(body, "reactant2", "")
+
+    if reaction_id <= 0 || isempty(reactant1)
+        return safe_json(Dict("error" => "Missing reaction_id or reactant1"))
+    end
+
+    templates = RDKitBridge.get_reaction_templates()
+    template = nothing
+    for t in templates
+        if t["id"] == reaction_id
+            template = t
+            break
+        end
+    end
+    template === nothing && return safe_json(Dict("error" => "Unknown reaction_id: $reaction_id"))
+
+    reactants = String[reactant1]
+    !isempty(reactant2) && push!(reactants, reactant2)
+
+    result = RDKitBridge.execute_reaction(template["smarts"], reactants)
+    return safe_json(Dict(
+        "valid"           => result.valid,
+        "product_smiles"  => result.product_smiles,
+        "reaction_name"   => template["name"],
+        "reaction_class"  => template["class"],
+    ))
+end
+
+@post "/api/v2/molecular/reaction/check-compatibility" function(req)
+    body = JSON3.read(String(req.body), Dict)
+    smiles = get(body, "smiles", "")
+    reaction_id = get(body, "reaction_id", 0)
+
+    isempty(smiles) && return safe_json(Dict("error" => "Missing smiles"))
+
+    compatible = RDKitBridge.check_reactant(smiles, reaction_id)
+    return safe_json(Dict(
+        "smiles"      => smiles,
+        "reaction_id" => reaction_id,
+        "compatible"  => compatible,
+    ))
 end
 
 # ============================================

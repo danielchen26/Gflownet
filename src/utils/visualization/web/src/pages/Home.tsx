@@ -357,6 +357,50 @@ export function Home({ onNavigate, onDomainSelect }: HomeProps) {
         </div>
       </div>
 
+      {/* Molecular Design Capabilities — Five Gaps */}
+      <div className="glass-dark rounded-xl p-5 border border-dark-border">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Atom className="w-4 h-4 text-neon-green" />
+              Molecular Design Capabilities
+            </h3>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Advanced tools for drug-like molecule generation and multi-objective optimization
+            </p>
+          </div>
+          <button
+            onClick={() => onNavigate('toolkit')}
+            className="text-xs text-neon-purple hover:text-neon-blue transition-colors flex items-center gap-1"
+          >
+            Open Toolkit <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {[
+            { label: 'Diversity Analysis', desc: 'Tanimoto similarity, scaffold diversity, nearest-neighbor metrics', color: '#00D9FF', badge: 'Gap 1' },
+            { label: 'Docking Reward', desc: 'AutoDock Vina binding affinity with proxy MLP for fast scoring', color: '#BD00FF', badge: 'Gap 2' },
+            { label: 'Fragment Library', desc: '50 BRICS fragments with category metadata and compatibility rules', color: '#F59E0B', badge: 'Gap 3' },
+            { label: 'Synthesis Routes', desc: '17 reaction templates ensuring synthesizable molecule designs', color: '#00FF88', badge: 'Gap 4' },
+            { label: 'Multi-Objective', desc: 'MOGFN Pareto-front exploration with preference-conditioned sampling', color: '#FF6B6B', badge: 'Gap 5' },
+          ].map((cap) => (
+            <button
+              key={cap.label}
+              onClick={() => onNavigate('toolkit')}
+              className="p-3 rounded-lg bg-white/5 border border-dark-border/50 hover:border-neon-purple/30 transition-all text-left group"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${cap.color}20`, color: cap.color }}>
+                  {cap.badge}
+                </span>
+              </div>
+              <h4 className="text-xs font-semibold mb-1 group-hover:text-white transition-colors">{cap.label}</h4>
+              <p className="text-[9px] text-muted-foreground leading-relaxed line-clamp-2">{cap.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Supported Objectives */}
       <div className="glass-dark rounded-xl p-5 border border-dark-border">
         <h3 className="text-sm font-semibold mb-3">Supported Training Objectives</h3>

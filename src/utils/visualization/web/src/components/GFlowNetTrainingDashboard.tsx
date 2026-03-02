@@ -28,7 +28,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         <p className="text-xs text-muted-foreground mb-1">Episode {label}</p>
         {payload.map((entry: any, index: number) => (
           <p key={index} className="text-xs font-medium" style={{ color: entry.color }}>
-            {entry.name}: {entry.value.toFixed(4)}
+            {entry.name}: {(entry.value ?? 0).toFixed(4)}
           </p>
         ))}
       </div>
@@ -340,15 +340,15 @@ export function GFlowNetTrainingDashboard({ problemConfig, trainingState: extern
             <div className={`grid grid-cols-3 ${layout.compact ? 'gap-0.5' : 'gap-1.5'}`}>
               <div className={`glass-dark rounded ${layout.compact ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
                 <div className={`${layout.tinySize} text-muted-foreground`}>Mean Loss</div>
-                <div className={`${layout.labelSize} font-mono font-medium text-neon-blue`}>{metrics.mean_loss.toFixed(2)}</div>
+                <div className={`${layout.labelSize} font-mono font-medium text-neon-blue`}>{(metrics.mean_loss ?? 0).toFixed(2)}</div>
               </div>
               <div className={`glass-dark rounded ${layout.compact ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
                 <div className={`${layout.tinySize} text-muted-foreground`}>Mean Reward</div>
-                <div className={`${layout.labelSize} font-mono font-medium text-neon-green`}>{metrics.mean_reward.toFixed(2)}</div>
+                <div className={`${layout.labelSize} font-mono font-medium text-neon-green`}>{(metrics.mean_reward ?? 0).toFixed(2)}</div>
               </div>
               <div className={`glass-dark rounded ${layout.compact ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
                 <div className={`${layout.tinySize} text-muted-foreground`}>Grad Norm</div>
-                <div className={`${layout.labelSize} font-mono font-medium text-neon-orange`}>{metrics.mean_gradient_norm.toFixed(2)}</div>
+                <div className={`${layout.labelSize} font-mono font-medium text-neon-orange`}>{(metrics.mean_gradient_norm ?? 0).toFixed(2)}</div>
               </div>
             </div>
 
