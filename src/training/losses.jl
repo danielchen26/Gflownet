@@ -358,8 +358,8 @@ function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajec
         state = trajectory.states[i]
         action = trajectory.actions[i]
 
-        # Get state features
-        features = state_to_features(state)
+        # Get state features (non-differentiable: features are constant inputs, not trainable)
+        features = Zygote.@ignore state_to_features(state)
 
         # Compute forward logits using proper Lux call (Zygote-safe)
         logits_vec, _ = model.forward_policy.model(features, params.forward, model.states.forward)
@@ -467,27 +467,34 @@ function compute_policy_entropy_loss(model::GFlowNetModel, trajectories::Vector{
             state = traj.states[i]
 
             # Skip if terminal (no applicable actions)
-            if is_terminal_state(state)
+            if Zygote.@ignore is_terminal_state(state)
                 continue
             end
 
-            # Get applicable actions
-            applicable_actions = Zygote.@ignore get_applicable_actions(state, model.all_actions)
-            if isempty(applicable_actions)
+            # Get state features and applicable indices (non-differentiable)
+            features = Zygote.@ignore state_to_features(state)
+            applicable_indices = Zygote.@ignore begin
+                applicable = get_applicable_actions(state, model.all_actions)
+                isempty(applicable) ? Int[] : [idx for (idx, a) in enumerate(model.all_actions) if a in applicable]
+            end
+
+            if isempty(applicable_indices)
                 continue
             end
 
-            # Get action probabilities
-            probs = forward_action_probabilities(
-                model.forward_policy, state, model.all_actions,
-                params.forward, model.states.forward
-            )
+            # Compute forward logits directly (differentiable — same pattern as TB loss)
+            logits_vec, _ = model.forward_policy.model(features, params.forward, model.states.forward)
 
-            # Compute entropy: -Σ p log(p+ε)
+            # Softmax over applicable actions (differentiable)
+            applicable_logits = logits_vec[applicable_indices]
+            log_probs = applicable_logits .- logsumexp(applicable_logits)
+            probs = exp.(log_probs)
+
+            # Compute entropy: H = -Σ p * log(p) using log_probs for numerical stability
             entropy = 0.0
-            for p in probs
+            for (p, lp) in zip(probs, log_probs)
                 if p > 1e-10
-                    entropy -= p * log(p)
+                    entropy -= p * lp
                 end
             end
 

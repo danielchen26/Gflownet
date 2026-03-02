@@ -76,11 +76,17 @@ obj = parse_objective("TRAJECTORY_BALANCE")
 function parse_objective(name::String)::TrainingObjective
     mapping = Dict(
         "TRAJECTORY_BALANCE"               => TRAJECTORY_BALANCE,
+        "TB"                               => TRAJECTORY_BALANCE,
         "DETAILED_BALANCE"                 => DETAILED_BALANCE,
+        "DB"                               => DETAILED_BALANCE,
         "FLOW_MATCHING"                    => FLOW_MATCHING,
+        "FM"                               => FLOW_MATCHING,
         "SUB_TRAJECTORY_BALANCE"           => SUB_TRAJECTORY_BALANCE,
+        "STB"                              => SUB_TRAJECTORY_BALANCE,
         "DIRECT_FLOW_OBJECTIVE"            => DIRECT_FLOW_OBJECTIVE,
+        "DFO"                              => DIRECT_FLOW_OBJECTIVE,
         "TRAJECTORY_LIKELIHOOD_MAXIMIZATION" => TRAJECTORY_LIKELIHOOD_MAXIMIZATION,
+        "TLM"                              => TRAJECTORY_LIKELIHOOD_MAXIMIZATION,
     )
     upper = uppercase(strip(name))
     haskey(mapping, upper) || error("Unknown objective: $name. Valid: $(join(keys(mapping), ", "))")
@@ -290,6 +296,15 @@ function step!(session::TrainingSession)::Dict
             push!(session.trajectory_buffer, traj)
             if length(session.trajectory_buffer) > session.max_buffer_size
                 popfirst!(session.trajectory_buffer)
+            end
+        end
+
+        # Store molecules if this is a molecular domain
+        if hasproperty(session.adapter, :generated_molecules)
+            try
+                store_molecules_from_trajectories!(session.adapter, fresh_trajectories, session.current_iteration; session_id=session.id)
+            catch e
+                @warn "Molecule storage failed" exception=e
             end
         end
 
