@@ -94,14 +94,31 @@ const VIEW_HELP: Record<ViewId, { title: string; explanation: string; tips: stri
       '• Docking — Binding affinity prediction with AutoDock Vina proxy\n' +
       '• Fragments — Browse the BRICS fragment library (50 fragments, 4 categories)\n' +
       '• Synthesis — Reaction-constrained generation with 17 SMARTS templates\n' +
-      '• Pareto — Multi-objective optimization with preference-conditioned sampling',
+      '• Pareto — Multi-objective optimization with preference-conditioned sampling\n' +
+      '• Oracles — TDC activity oracles for target-specific scoring (DRD2, GSK3B, JNK3)',
     tips: [
       'Run a molecular training session first to populate diversity and docking data',
       'Fragment Browser works without training — explore the building blocks anytime',
       'Use Pareto tab to balance QED, SA, LogP, and docking objectives simultaneously',
       'Synthesis routes ensure generated molecules are practically synthesizable',
+      'Use the Oracles tab to evaluate molecules against TDC bioactivity oracles',
     ],
     nextStep: { label: 'Inspect structures', view: 'structure' },
+  },
+  benchmark: {
+    title: 'PMO Benchmark',
+    explanation:
+      'Evaluate your GFlowNet model against the Practical Molecular Optimization (PMO) benchmark.\n\n' +
+      'The PMO benchmark consists of 23 standardized tasks that test molecular optimization across ' +
+      'diverse objectives including rediscovery, similarity, multi-property optimization, and bioactivity.\n\n' +
+      'Results are measured by AUC of top-10 molecules over oracle calls, with a fixed budget of 10,000 calls per task.',
+    tips: [
+      'Run benchmark only after training — it evaluates your trained GFlowNet model',
+      'AUC Top-10 is the primary metric, averaged across all 23 tasks',
+      'State-of-the-art total scores are around 15-17 across methods',
+      'High diversity alongside high scores indicates robust generalization',
+    ],
+    nextStep: { label: 'Return to Toolkit', view: 'toolkit' },
   },
   structure: {
     title: 'Structure Viewer',

@@ -276,6 +276,26 @@ function step!(session::TrainingSession)::Dict
             (trajectories=fresh_trajectories, weights=ones(length(fresh_trajectories)), use_weights=false)
         end
 
+        # ---- 4b. Batch pre-compute oracle scores for terminal molecules ----
+        # This happens OUTSIDE the gradient computation — one PythonCall crossing per oracle.
+        # Oracle scores are cached so that reward() reads from cache during Zygote.withgradient.
+        if session.adapter isa MolecularAdapter && session.adapter.oracle_manager !== nothing
+            oracle_mgr = session.adapter.oracle_manager
+            if budget_remaining(oracle_mgr) > 0
+                terminal_smiles = String[]
+                all_trajs = training_data.trajectories
+                for traj in all_trajs
+                    terminal = traj.states[end]
+                    if hasproperty(terminal, :smiles) && !isempty(terminal.smiles)
+                        push!(terminal_smiles, terminal.smiles)
+                    end
+                end
+                if !isempty(terminal_smiles)
+                    evaluate_molecules!(oracle_mgr, unique(terminal_smiles))
+                end
+            end
+        end
+
         # ---- 5. Gradient descent step (weighted if replay active) ----
         loss_val, grad_norm = if training_data.use_weights
             GFlowNet.train_step_weighted!(model, training_data.trajectories, training_data.weights, config)

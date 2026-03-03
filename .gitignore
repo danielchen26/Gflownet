@@ -31,6 +31,10 @@
 *.db-shm
 /data/
 
+# TDC oracle model files (large pickles, downloaded at runtime)
+oracle/
+data/tdc_cache/
+
 # Test artifacts
 /test_env/
 /results/

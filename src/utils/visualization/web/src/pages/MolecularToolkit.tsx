@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Fingerprint, Crosshair, Puzzle, FlaskConical, Target,
+  Fingerprint, Crosshair, Puzzle, FlaskConical, Target, Zap,
 } from 'lucide-react'
 
 // Gap components
@@ -12,6 +12,7 @@ import FragmentBrowser from '../components/FragmentBrowser'
 import SynthesisRoute from '../components/SynthesisRoute'
 import ParetoFrontExplorer from '../components/ParetoFrontExplorer'
 import PreferenceSliders from '../components/PreferenceSliders'
+import OraclePanel from '../components/OraclePanel'
 
 const TABS = [
   {
@@ -59,6 +60,15 @@ const TABS = [
     gap: 5,
     description: 'MOGFN-PC preference-conditioned optimization across competing objectives',
   },
+  {
+    id: 'oracles',
+    label: 'TDC Oracles',
+    shortLabel: 'Oracles',
+    icon: Zap,
+    color: '#06B6D4',
+    gap: 'PMO',
+    description: 'Target-specific activity oracles for DRD2, GSK3B, JNK3, and PMO benchmark evaluation',
+  },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -73,7 +83,7 @@ export function MolecularToolkit() {
       <div>
         <h1 className="text-2xl font-bold gradient-text">Molecular Toolkit</h1>
         <p className="text-xs text-muted-foreground mt-1">
-          Five integrated capabilities for production-grade molecular design
+          Six integrated capabilities for production-grade molecular design
         </p>
       </div>
 
@@ -195,6 +205,12 @@ export function MolecularToolkit() {
             <div>
               <ParetoFrontExplorer autoRefresh refreshInterval={15000} />
             </div>
+          </div>
+        )}
+
+        {activeTab === 'oracles' && (
+          <div style={{ maxWidth: '600px' }}>
+            <OraclePanel />
           </div>
         )}
       </motion.div>

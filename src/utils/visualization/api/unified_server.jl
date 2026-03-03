@@ -18,6 +18,9 @@ include("../domains/grid_world.jl")
 
 # Include molecular domain modules
 include("../python/rdkit_bridge.jl")
+include("../python/oracle_bridge.jl")           # TDC oracle bridge (after rdkit, before oracle_mgr)
+include("../core/oracle_manager.jl")           # Oracle config, cache, budget (after oracle_bridge, before mol_gen)
+include("../core/pmo_benchmark.jl")            # PMO 23-task benchmark runner (after oracle_manager)
 include("../../../applications/molecular_generation.jl")
 include("../domains/molecular.jl")
 include("../domains/reaction_molecular.jl")
@@ -172,6 +175,7 @@ end
     create_molecule_model_and_adapter(config::Dict)
 
 Create a Molecular GFlowNet model and MolecularAdapter.
+Supports oracle configuration for target-specific optimization and MOGFN activation.
 """
 function create_molecule_model_and_adapter(config::Dict)
     hidden_dim = get(config, "hidden_dim", 256)
@@ -179,20 +183,59 @@ function create_molecule_model_and_adapter(config::Dict)
     max_fragments = Int(get(config, "max_fragments", 8))
 
     objective_str = get(config, "objective", "TRAJECTORY_BALANCE")
-    needs_backward = objective_str == "DETAILED_BALANCE" ||
-                     objective_str == "TRAJECTORY_LIKELIHOOD_MAXIMIZATION"
-    needs_flow_est = objective_str == "FLOW_MATCHING" ||
-                     objective_str == "DIRECT_FLOW_OBJECTIVE"
+    needs_backward = objective_str in ("DETAILED_BALANCE", "TRAJECTORY_LIKELIHOOD_MAXIMIZATION")
+    needs_flow_est = objective_str in ("FLOW_MATCHING", "DIRECT_FLOW_OBJECTIVE")
 
-    model = create_molecular_gflownet(
-        hidden_dim = hidden_dim,
-        learning_rate = learning_rate,
-        include_backward = needs_backward,
-        include_flow_estimator = needs_flow_est,
-        partition_function_method = GFlowNet.LEARNABLE_ESTIMATION,
-    )
+    # Oracle configuration
+    oracle_config_raw = get(config, "oracles", nothing)
+    benchmark_mode = Bool(get(config, "benchmark_mode", false))
+    oracle_budget = Int(get(config, "oracle_budget", 10000))
 
-    adapter = MolecularAdapter(max_fragments, FRAGMENT_LIBRARY, Dict[])
+    oracle_mgr = if oracle_config_raw !== nothing && !isempty(oracle_config_raw)
+        oracle_names = [String(o["name"]) for o in oracle_config_raw]
+        try
+            OracleBridge.init_oracles!(oracle_names;
+                cache_dir=joinpath(@__DIR__, "..", "..", "..", "..", "data", "tdc_cache"))
+        catch e
+            @warn "Oracle initialization failed" exception=e
+        end
+
+        configs = [OracleConfig(String(o["name"]), Float64(get(o, "weight", 1.0)))
+                   for o in oracle_config_raw]
+        OracleManager(configs, oracle_budget, 0,
+                      Dict{String,Dict{String,Float64}}(), benchmark_mode)
+    else
+        nothing
+    end
+
+    # Compute total objectives for MOGFN
+    n_objectives = if benchmark_mode && oracle_mgr !== nothing
+        length(oracle_mgr.configs)  # benchmark: oracle-only
+    else
+        4 + (oracle_mgr !== nothing ? length(oracle_mgr.configs) : 0)  # QED+SA+logP+MW+oracles
+    end
+
+    # Activate MOGFN when oracles are configured or MULTI_OBJECTIVE_TB requested
+    use_mogfn = objective_str == "MULTI_OBJECTIVE_TB" || oracle_mgr !== nothing
+
+    model = if use_mogfn
+        create_mogfn_molecular_gflownet(
+            n_objectives = n_objectives,
+            hidden_dim = hidden_dim,
+            learning_rate = learning_rate,
+            include_backward = needs_backward,
+        )
+    else
+        create_molecular_gflownet(
+            hidden_dim = hidden_dim,
+            learning_rate = learning_rate,
+            include_backward = needs_backward,
+            include_flow_estimator = needs_flow_est,
+            partition_function_method = GFlowNet.LEARNABLE_ESTIMATION,
+        )
+    end
+
+    adapter = MolecularAdapter(max_fragments, FRAGMENT_LIBRARY, Dict[], oracle_mgr)
     return model, adapter
 end
 
@@ -254,6 +297,14 @@ end
 
 """Check if adapter is any molecular domain type (fragment-based or reaction-based)."""
 _is_molecular_adapter(adapter) = adapter isa MolecularAdapter || adapter isa ReactionMolecularAdapter
+
+"""Get the oracle manager from the current session (if molecular with oracles)."""
+function _get_oracle_manager()
+    session = CURRENT_SESSION[]
+    session === nothing && return nothing
+    session.adapter isa MolecularAdapter || return nothing
+    return session.adapter.oracle_manager
+end
 
 """Get generated molecules from any molecular adapter."""
 _get_molecules(adapter::MolecularAdapter) = adapter.generated_molecules
@@ -1216,7 +1267,8 @@ end
         try
             fp = RDKitBridge.compute_fingerprint(smiles)
             state = MolState(smiles, Int[], 0, true, fp)
-            objs = compute_all_objectives(state)
+            oracle_mgr = _get_oracle_manager()
+            objs = compute_all_objectives(state; oracle_mgr=oracle_mgr)
 
             if !isempty(objs)
                 push!(points, Dict(
@@ -1320,7 +1372,8 @@ end
     try
         fp = RDKitBridge.compute_fingerprint(smiles)
         state = MolState(smiles, Int[], 0, true, fp)
-        objs = compute_all_objectives(state)
+        oracle_mgr = _get_oracle_manager()
+        objs = compute_all_objectives(state; oracle_mgr=oracle_mgr)
 
         return safe_json(Dict(
             "molecule_id" => id,
@@ -1383,7 +1436,8 @@ end
             if GFlowNet.is_terminal_state(terminal) && !isempty(terminal.smiles)
                 fp = terminal.fingerprint
                 state = MolState(terminal.smiles, Int[], 0, true, fp)
-                objs = compute_all_objectives(state)
+                oracle_mgr = _get_oracle_manager()
+                objs = compute_all_objectives(state; oracle_mgr=oracle_mgr)
                 if !isempty(objs)
                     push!(molecules, Dict(
                         "id" => string(UUIDs.uuid4()),
@@ -1630,6 +1684,108 @@ end
         "smiles"      => smiles,
         "reaction_id" => reaction_id,
         "compatible"  => compatible,
+    ))
+end
+
+# ============================================
+# Oracle API Endpoints (PMO Integration)
+# ============================================
+
+@get "/api/v2/oracles/available" function(req)
+    available = OracleBridge.get_all_available_oracles()
+    loaded = OracleBridge.is_initialized() ? OracleBridge.get_loaded_oracles() : String[]
+    return safe_json(Dict(
+        "oracles" => available["all"],
+        "bioactivity" => available["bioactivity"],
+        "pmo_tasks" => available["pmo_tasks"],
+        "loaded" => loaded,
+    ))
+end
+
+@get "/api/v2/oracles/status" function(req)
+    oracle_mgr = _get_oracle_manager()
+    if oracle_mgr === nothing
+        return safe_json(Dict(
+            "configured" => String[],
+            "budget_used" => 0,
+            "budget_total" => 0,
+            "cache_size" => 0,
+            "benchmark_mode" => false,
+            "active" => false,
+        ))
+    end
+    status = get_status(oracle_mgr)
+    status["active"] = true
+    return safe_json(status)
+end
+
+@post "/api/v2/oracles/evaluate" function(req)
+    body = JSON3.read(String(req.body), Dict)
+    smiles = get(body, "smiles", "")
+    isempty(smiles) && return safe_json(Dict("error" => "Missing 'smiles' field"))
+
+    oracle_names = get(body, "oracles", nothing)
+
+    # Use session oracles if none specified
+    oracle_mgr = _get_oracle_manager()
+    if oracle_names === nothing && oracle_mgr !== nothing
+        oracle_names = get_objective_names(oracle_mgr)
+    end
+
+    if oracle_names === nothing || isempty(oracle_names)
+        return safe_json(Dict("error" => "No oracles specified and no oracle session active"))
+    end
+
+    # Initialize oracles if needed
+    if !OracleBridge.is_initialized()
+        try
+            OracleBridge.init_oracles!(String.(oracle_names);
+                cache_dir=joinpath(@__DIR__, "..", "..", "..", "..", "data", "tdc_cache"))
+        catch e
+            return safe_json(Dict("error" => "Failed to initialize oracles: $(sprint(showerror, e))"))
+        end
+    end
+
+    # Check cache first if oracle_mgr exists
+    cached = false
+    scores = Dict{String,Float64}()
+
+    if oracle_mgr !== nothing
+        all_cached = true
+        for name in oracle_names
+            s = lookup_score(oracle_mgr, smiles, String(name))
+            if s == 0.5  # neutral = not cached
+                all_cached = false
+                break
+            end
+            scores[String(name)] = s
+        end
+        cached = all_cached
+    end
+
+    if !cached
+        for name in oracle_names
+            try
+                score = OracleBridge.evaluate(smiles, String(name))
+                scores[String(name)] = score
+                # Update cache if manager exists
+                if oracle_mgr !== nothing
+                    if !haskey(oracle_mgr.cache, smiles)
+                        oracle_mgr.cache[smiles] = Dict{String,Float64}()
+                    end
+                    oracle_mgr.cache[smiles][String(name)] = score
+                end
+            catch e
+                scores[String(name)] = -1.0  # error sentinel
+                @warn "Oracle evaluation failed" oracle=name smiles=smiles exception=e
+            end
+        end
+    end
+
+    return safe_json(Dict(
+        "smiles" => smiles,
+        "scores" => scores,
+        "cached" => cached,
     ))
 end
 

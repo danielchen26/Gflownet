@@ -21,6 +21,7 @@ import { ChemicalSpaceExplorer } from './pages/ChemicalSpaceExplorer'
 import { ResultsHub } from './pages/ResultsHub'
 import { InterpretabilityPanel } from './pages/InterpretabilityPanel'
 import { MolecularToolkit } from './pages/MolecularToolkit'
+import { BenchmarkPage } from './pages/BenchmarkPage'
 
 function AppContent() {
   const [activeView, setActiveView] = useState<ViewId>('home')
@@ -137,6 +138,10 @@ function AppContent() {
 
               {activeView === 'toolkit' && (
                 <MolecularToolkit />
+              )}
+
+              {activeView === 'benchmark' && (
+                <BenchmarkPage onNavigate={handleNavigate} />
               )}
 
               {activeView === 'structure' && (

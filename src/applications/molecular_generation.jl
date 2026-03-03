@@ -371,7 +371,7 @@ end
 # ============================================
 
 """
-    compute_all_objectives(state::MolState)::Vector{Float64}
+    compute_all_objectives(state::MolState; oracle_mgr=nothing)::Vector{Float64}
 
 Compute all individual objectives normalized to [0,1] range.
 Used by MOGFN (Gap 5) for preference-conditioned scalarization
@@ -379,14 +379,22 @@ and by the docking reward (Gap 2) for consistent normalization.
 
 Returns: [qed, sa_norm, logp_score, mw_score] — all in [0,1].
 When a docking target is configured: [qed, sa, logp, mw, dock_score].
+When oracles are configured: appends oracle scores from cache.
+In benchmark_mode: returns ONLY oracle scores (PMO-compliant).
 """
-function compute_all_objectives(state::MolState)::Vector{Float64}
+function compute_all_objectives(state::MolState; oracle_mgr=nothing)::Vector{Float64}
     !state.is_terminated && return Float64[]
     isempty(state.smiles) && return Float64[]
+
+    # In benchmark_mode, return ONLY oracle scores (PMO compliant)
+    if oracle_mgr !== nothing && oracle_mgr.benchmark_mode
+        return [lookup_score(oracle_mgr, state.smiles, c.name) for c in oracle_mgr.configs]
+    end
 
     props = RDKitBridge.compute_mol_properties(state.smiles)
     props === nothing && return Float64[]
 
+    # Base objectives (always computed — these are free/fast)
     objectives = Float64[
         props.qed,                                            # Already [0,1]
         clamp(1.0 - (props.sa_score - 1.0) / 9.0, 0.0, 1.0), # SA → [0,1]
@@ -398,6 +406,13 @@ function compute_all_objectives(state::MolState)::Vector{Float64}
     if RDKitBridge.has_docking_target() && RDKitBridge.is_proxy_available()
         dock_score = RDKitBridge.proxy_dock(state.smiles)
         push!(objectives, dock_score)
+    end
+
+    # Oracle objectives (looked up from pre-computed cache)
+    if oracle_mgr !== nothing
+        for config in oracle_mgr.configs
+            push!(objectives, lookup_score(oracle_mgr, state.smiles, config.name))
+        end
     end
 
     return objectives
@@ -426,6 +441,20 @@ function GFlowNet.reward(state::MolState, w::Vector{Float64})::Float64
     isempty(objectives) && return 1e-4
 
     # Linear scalarization: R(x,w) = Σ wᵢ × Rᵢ(x)
+    reward_val = sum(w .* objectives[1:min(length(w), length(objectives))])
+    return max(reward_val, 1e-4)
+end
+
+"""
+    GFlowNet.reward(state::MolState, w::Vector{Float64}, oracle_mgr)::Float64
+
+Oracle-aware variant that passes oracle_mgr to compute_all_objectives.
+Used when oracles are configured for target-specific optimization.
+"""
+function GFlowNet.reward(state::MolState, w::Vector{Float64}, oracle_mgr)::Float64
+    objectives = compute_all_objectives(state; oracle_mgr=oracle_mgr)
+    isempty(objectives) && return 1e-4
+
     reward_val = sum(w .* objectives[1:min(length(w), length(objectives))])
     return max(reward_val, 1e-4)
 end

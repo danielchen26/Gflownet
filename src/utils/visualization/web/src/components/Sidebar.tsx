@@ -14,6 +14,7 @@ import {
   Sliders,
   Bot,
   FlaskConical,
+  Zap,
 } from 'lucide-react'
 import { useThemeLayout } from '../contexts/ThemeContext'
 import { ThemeSelector } from './ThemeSelector'
@@ -25,6 +26,7 @@ export type ViewId =
   | 'train'
   | 'candidates'
   | 'toolkit'
+  | 'benchmark'
   | 'structure'
   | 'landscape'
   | 'interpret'
@@ -53,6 +55,7 @@ const NAV_ITEMS: Array<{
   // Explore — domain-adaptive result exploration
   { id: 'candidates', label: 'Candidates', icon: BarChart3, section: 'explore', desc: 'Generated solutions' },
   { id: 'toolkit', label: 'Toolkit', icon: FlaskConical, section: 'explore', desc: 'Molecular design tools' },
+  { id: 'benchmark', label: 'Benchmark', icon: Zap, section: 'explore', desc: 'PMO benchmark results' },
   { id: 'structure', label: 'Structure', icon: Box, section: 'explore', desc: 'Inspect candidates' },
   { id: 'landscape', label: 'Landscape', icon: Map, section: 'explore', desc: 'Solution space' },
 

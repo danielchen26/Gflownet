@@ -335,6 +335,22 @@ export const molecularApi = {
     const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/reaction/check-compatibility`, params)
     return response.data
   },
+
+  // PMO Oracle API
+  async getOraclesAvailable() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/oracles/available`)
+    return response.data as OracleAvailableResponse
+  },
+
+  async getOracleStatus() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/oracles/status`)
+    return response.data as OracleStatusResponse
+  },
+
+  async evaluateOracle(params: { smiles: string; oracles?: string[] }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/oracles/evaluate`, params)
+    return response.data as OracleEvaluateResponse
+  },
 }
 
 // Combined API object for convenience
@@ -669,6 +685,30 @@ export interface ReactionExecuteResponse {
   product_smiles: string
   reaction_name: string
   reaction_class: string
+}
+
+// PMO Oracle Types
+export interface OracleStatusResponse {
+  configured: string[]
+  budget_used: number
+  budget_total: number
+  budget_remaining: number
+  cache_size: number
+  benchmark_mode: boolean
+  active: boolean
+}
+
+export interface OracleEvaluateResponse {
+  smiles: string
+  scores: Record<string, number>
+  cached: boolean
+}
+
+export interface OracleAvailableResponse {
+  oracles: string[]
+  bioactivity: string[]
+  pmo_tasks: string[]
+  loaded: string[]
 }
 
 export default api

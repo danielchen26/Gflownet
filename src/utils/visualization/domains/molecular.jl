@@ -16,10 +16,15 @@ mutable struct MolecularAdapter <: AbstractDomainAdapter
     max_fragments::Int
     fragment_library::Vector{FragmentAction}
     generated_molecules::Vector{Dict}
+    oracle_manager::Union{Nothing, OracleManager}
 end
 
+# Backward-compatible 3-arg constructor (no oracle_manager)
+MolecularAdapter(max_frags::Int, lib::Vector{FragmentAction}, mols::Vector{Dict}) =
+    MolecularAdapter(max_frags, lib, mols, nothing)
+
 # No-arg constructor for domain registry's list_domains()
-MolecularAdapter() = MolecularAdapter(8, FRAGMENT_LIBRARY, Dict[])
+MolecularAdapter() = MolecularAdapter(8, FRAGMENT_LIBRARY, Dict[], nothing)
 
 # ============================================
 # Required Interface Methods
@@ -70,7 +75,7 @@ function trajectory_to_viz_data(adapter::MolecularAdapter, traj::Trajectory, id:
 end
 
 function get_domain_config(adapter::MolecularAdapter)::Dict
-    return Dict(
+    config = Dict(
         "domain_type"          => "molecule",
         "max_fragments"        => adapter.max_fragments,
         "n_fragment_actions"   => length(adapter.fragment_library),
@@ -79,6 +84,10 @@ function get_domain_config(adapter::MolecularAdapter)::Dict
             "linkers" => 10, "starters" => 10
         ),
     )
+    if adapter.oracle_manager !== nothing
+        config["oracle_status"] = get_status(adapter.oracle_manager)
+    end
+    return config
 end
 
 function get_renderer_name(adapter::MolecularAdapter)::String
@@ -163,6 +172,15 @@ function store_molecules_from_trajectories!(adapter::MolecularAdapter,
             "fingerprint"     => terminal.fingerprint,
         )
 
+        # Add oracle scores if oracle_manager is configured
+        if adapter.oracle_manager !== nothing
+            oracle_scores = Dict{String,Float64}()
+            for config in adapter.oracle_manager.configs
+                oracle_scores[config.name] = lookup_score(adapter.oracle_manager, terminal.smiles, config.name)
+            end
+            mol_dict["oracle_scores"] = oracle_scores
+        end
+
         push!(adapter.generated_molecules, mol_dict)
         push!(new_mols, mol_dict)
     end
@@ -209,7 +227,7 @@ end
 
 function create_from_config(::Type{MolecularAdapter}, config::Dict)
     max_frag = get(config, "max_fragments", 8)
-    return MolecularAdapter(max_frag, FRAGMENT_LIBRARY, Dict[])
+    return MolecularAdapter(max_frag, FRAGMENT_LIBRARY, Dict[], nothing)
 end
 
 get_domain_tags(::MolecularAdapter) = ["Chemistry", "Drug Discovery", "Molecular Design"]
