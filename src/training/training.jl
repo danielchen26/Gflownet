@@ -9,7 +9,7 @@ using Random
 
 using ..GFlowNet: AbstractState, AbstractAction, GFlowNetModel, Trajectory
 using ..GFlowNet: TrainingConfig, TrainingHistory, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, TRAJECTORY_LIKELIHOOD_MAXIMIZATION
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB
 using ..GFlowNet: SamplingConfig
 using ..GFlowNet: state_to_features, reward, is_terminal_state, is_applicable
 using ..GFlowNet: get_applicable_actions, apply_action
@@ -92,6 +92,20 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
         if config.use_replay_buffer
             println("     - Replay buffer: $(config.replay_buffer_size) capacity, $(Int(config.replay_ratio * 100))% replay")
         end
+        # MOGFN-specific output
+        if config.objective == MULTI_OBJECTIVE_TB
+            println("   MOGFN-PC (Gap 5) Settings:")
+            println("     - Objectives: $(config.mogfn_n_objectives)")
+            println("     - Preference embedding dim: $(config.mogfn_preference_dim)")
+            println("     - Dirichlet alpha: $(config.mogfn_dirichlet_alpha)")
+            if isnothing(model.preference_encoder)
+                println("   WARNING: MOGFN requires preference_encoder!")
+                println("      Use create_mogfn_gflownet() or create_mogfn_molecular_gflownet()")
+            else
+                println("   Preference encoder detected")
+                println("   Z(w) network detected")
+            end
+        end
         # TLM-specific output
         if config.objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
             println("   TLM (ICLR 2025) Settings:")
@@ -129,7 +143,41 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
             )
 
             # Sample fresh trajectories with ε-uniform exploration
-            fresh_trajectories = [GFlowNet.sample_trajectory(model; config=sampling_config) for _ in 1:config.batch_size]
+            if config.objective == MULTI_OBJECTIVE_TB
+                # MOGFN-PC (Gap 5): Sample with preference-conditioned policy
+                # Each batch uses a single freshly sampled preference vector w from Dirichlet(α)
+                n_obj = config.mogfn_n_objectives
+                alpha = config.mogfn_dirichlet_alpha
+                w = if alpha == 1.0
+                    gammas = [randexp() for _ in 1:n_obj]
+                    gammas ./ sum(gammas)
+                else
+                    gammas = Float64[]
+                    for _ in 1:n_obj
+                        d = alpha - 1.0/3.0
+                        c = 1.0 / sqrt(9.0 * max(d, 1e-8))
+                        g = alpha >= 1.0 ? begin
+                            local v, x, u
+                            while true
+                                x = randn(); v = (1.0 + c * x)^3
+                                if v > 0.0
+                                    u = rand()
+                                    if u < 1.0 - 0.0331 * x^4 || log(u) < 0.5 * x^2 + d * (1.0 - v + log(v))
+                                        break
+                                    end
+                                end
+                            end
+                            d * v
+                        end : randexp()  # fallback for alpha < 1
+                        push!(gammas, g)
+                    end
+                    gammas ./ sum(gammas)
+                end
+                fresh_trajectories = [GFlowNet.sample_mogfn_trajectory(model, w; config=sampling_config)
+                                      for _ in 1:config.batch_size]
+            else
+                fresh_trajectories = [GFlowNet.sample_trajectory(model; config=sampling_config) for _ in 1:config.batch_size]
+            end
 
             # TLM (ICLR 2025): Add backward-sampled trajectories for extreme path asymmetry
             # This is the key mechanism that solves the 70:1 mode collapse problem

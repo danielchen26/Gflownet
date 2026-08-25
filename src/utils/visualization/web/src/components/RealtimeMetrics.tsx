@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, Zap, TrendingUp, Clock, Layers, Award, Shuffle } from 'lucide-react'
 import { api } from '../services/api'
 import { useChartColors, useThemeLayout } from '../contexts/ThemeContext'
-import { useWebSocket } from '../hooks/useWebSocket'
 import { useEffect, useState } from 'react'
 
 interface Metric {
@@ -39,7 +38,7 @@ function AnimatedNumber({ value }: { value: number }) {
     return () => clearInterval(interval)
   }, [value])
   
-  return <>{displayValue.toFixed(2)}</>
+  return <>{(displayValue ?? 0).toFixed(2)}</>
 }
 
 // Single metric display
@@ -128,48 +127,23 @@ function ProgressRing({ progress, size = 60, gridColor, gradientStart, gradientE
   )
 }
 
-export function RealtimeMetrics() {
+interface RealtimeMetricsProps {
+  trainingState?: any // Passed from parent to avoid duplicate polling
+}
+
+export function RealtimeMetrics({ trainingState: externalState }: RealtimeMetricsProps = {}) {
   const cc = useChartColors()
   const layout = useThemeLayout()
-  const [realtimeMetrics, setRealtimeMetrics] = useState({
-    currentLoss: 0,
-    currentReward: 0,
-    episodeCount: 0,
-    convergenceProgress: 0,
-  })
-  
-  const { lastMessage } = useWebSocket()
-  
-  const { data: metrics } = useQuery({
+
+  // Use parent-provided state; only poll if not provided (standalone usage)
+  const { data: fetchedState } = useQuery({
     queryKey: ['training-state'],
-    queryFn: async () => {
-      const state = await api.training.getState()
-      return state
-    },
-    refetchInterval: 250, // Update every 250ms for real-time feel
+    queryFn: () => api.training.getState(),
+    refetchInterval: 1000,
+    enabled: !externalState,
   })
 
-  const { data: trajectories } = useQuery({
-    queryKey: ['trajectories'],
-    queryFn: async () => {
-      const data = await api.trajectories.getRecent(10)
-      return { count: data.trajectories?.length || 0 }
-    },
-    refetchInterval: metrics?.is_training ? 1000 : 5000, // Update more frequently during training
-  })
-  
-  // Update from WebSocket
-  useEffect(() => {
-    if (lastMessage?.type === 'training.update') {
-      const data = lastMessage.data
-      setRealtimeMetrics(prev => ({
-        currentLoss: data.loss,
-        currentReward: data.reward,
-        episodeCount: data.episode,
-        convergenceProgress: Math.min(95, prev.convergenceProgress + Math.random() * 2),
-      }))
-    }
-  }, [lastMessage])
+  const metrics = externalState ?? fetchedState
   
   const displayMetrics: Metric[] = [
     {
@@ -196,7 +170,7 @@ export function RealtimeMetrics() {
       label: 'Gradient Norm',
       value: metrics?.latest_gradient_norm?.toFixed(2) || '0.00',
       icon: Zap,
-      color: 'from-gradient-orange-from to-gradient-orange-to',
+      color: 'from-orange-400 to-orange-600',
     },
     // Exploration metric (Phase 7: Mode Collapse Fix)
     {

@@ -59,6 +59,18 @@ test_groups = [
     ]),
     ("Supply Chain Application", [
         "applications/supply_chain/test_supply_chain.jl"
+    ]),
+    ("Molecular Generation", [
+        "applications/molecular/test_state_features.jl",
+        "applications/molecular/test_fragment_joining.jl",
+        "applications/molecular/test_reward_function.jl",
+        "applications/molecular/test_action_masking.jl",
+        "applications/molecular/test_fragment_library.jl",
+        "applications/molecular/test_diversity.jl",
+        "applications/molecular/test_docking.jl",
+        "applications/molecular/test_mogfn.jl",
+        "applications/molecular/test_reaction_constraints.jl",
+        "applications/molecular/test_integration.jl",
     ])
 ]
 

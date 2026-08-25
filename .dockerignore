@@ -1,0 +1,34 @@
+# Web frontend (deployed separately on Vercel)
+src/utils/visualization/web/node_modules/
+src/utils/visualization/web/dist/
+
+# IDE and system files
+.vscode/
+.idea/
+.cursor/
+.DS_Store
+.git/
+
+# Documentation
+docs/
+docbuild/
+
+# Test artifacts
+test_env/
+results/
+
+# Examples (not needed for server)
+examples/
+
+# Craft Agent / session files
+sessions/
+sources/
+skills/
+statuses/
+labels/
+.claude/
+.claude-plugin/
+.conductor/
+events.jsonl
+config.json
+views.json

@@ -3,10 +3,9 @@
 
 import axios from '../lib/axios'
 
-// Use empty string to use Vite proxy (recommended for development)
-// The Vite proxy in vite.config.ts forwards /api to http://localhost:8080
-// This avoids CORS issues in the browser
-const API_BASE_URL = ''
+// In production, VITE_API_URL points to the Railway backend (e.g., https://your-app.railway.app)
+// In development, empty string uses the Vite proxy (forwards /api to http://localhost:8080)
+const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 // Debug logging helper
 const logApiCall = (endpoint: string, data: any) => {
@@ -190,35 +189,216 @@ export const domainApi = {
   },
 }
 
+// Molecular Generation API — connected to real Julia backend
+export const molecularApi = {
+  async generate(config: MolecularGenerationConfig) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/generate`, config)
+    return response.data
+  },
+
+  async getMolecules(params?: { limit?: number; offset?: number; sort_by?: string; filter?: Record<string, unknown> }) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules`, { params })
+    return response.data
+  },
+
+  async getMolecule(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules/${id}`)
+    return response.data
+  },
+
+  async compareMolecules(ids: string[]) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/molecules/compare`, { ids })
+    return response.data
+  },
+
+  async getChemicalSpace(params?: { method?: 'umap' | 'tsne' | 'pca'; color_by?: string }) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/space`, { params })
+    return response.data
+  },
+
+  async getAttribution(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/attribution/${id}`)
+    return response.data
+  },
+
+  async getRewardDecomposition(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/reward-decomposition/${id}`)
+    return response.data
+  },
+
+  async getGenerationDAG(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/generation-dag/${id}`)
+    return response.data
+  },
+
+  async retrain(config: { molecule_ids: string[]; additional_config?: Record<string, unknown> }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/retrain`, config)
+    return response.data
+  },
+
+  async exportMolecules(params: { ids: string[]; format: 'smiles' | 'sdf' | 'csv' | 'png' }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/export`, params, {
+      responseType: params.format === 'png' ? 'blob' : 'text',
+    })
+    return response.data
+  },
+
+  async getADMET(id: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/admet/${id}`)
+    return response.data
+  },
+
+  async validateSmiles(smiles: string) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/validate-smiles`, { smiles })
+    return response.data
+  },
+
+  // Gap 1: Diversity Analysis
+  async getDiversity(params?: { ids?: string[]; sample_size?: number }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/diversity`, params || {})
+    return response.data
+  },
+
+  // Gap 3: Fragment Library
+  async getFragments() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/fragments`)
+    return response.data
+  },
+
+  async getFragmentsCurrent() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/fragments/current`)
+    return response.data as FragmentLibraryResponse
+  },
+
+  async getDiversityTraining() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/diversity/training`)
+    return response.data
+  },
+
+  // Gap 5: MOGFN Pareto Optimization
+  async generatePareto(params: {
+    preferences: Record<string, number>
+    n_molecules?: number
+  }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/generate-pareto`, params)
+    return response.data as ParetoGenerateResponse
+  },
+
+  async getParetoFront(params?: { session_id?: string }) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/pareto-front`, { params })
+    return response.data as ParetoFrontResponse
+  },
+
+  async getObjectives(moleculeId: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules/${moleculeId}/objectives`)
+    return response.data as ObjectivesResponse
+  },
+
+  // Gap 2: Docking-Based Reward
+  async getDockingTargets() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/targets`)
+    return response.data as DockingTargetsResponse
+  },
+
+  async dockMolecule(params: { smiles: string; target?: string; method?: 'proxy' | 'vina' }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/dock`, params)
+    return response.data as DockingResultResponse
+  },
+
+  async dockBatch(params: { ids: string[]; target?: string }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/dock-batch`, params)
+    return response.data as DockingBatchResponse
+  },
+
+  async setDockingTarget(targetId: string) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/docking/set-target`, { target_id: targetId })
+    return response.data
+  },
+
+  // Gap 4: Reaction Domain / Synthesis Routes
+  async getReactions() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/reactions`)
+    return response.data as ReactionsResponse
+  },
+
+  async getSynthesisRoute(moleculeId: string) {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/molecular/molecules/${moleculeId}/synthesis`)
+    return response.data as SynthesisRouteResponse
+  },
+
+  async executeReaction(params: { reaction_id: number; reactant1: string; reactant2?: string }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/reaction/execute`, params)
+    return response.data as ReactionExecuteResponse
+  },
+
+  async checkCompatibility(params: { smiles: string; reaction_id: number }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/molecular/reaction/check-compatibility`, params)
+    return response.data
+  },
+
+  // PMO Oracle API
+  async getOraclesAvailable() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/oracles/available`)
+    return response.data as OracleAvailableResponse
+  },
+
+  async getOracleStatus() {
+    const response = await axios.get(`${API_BASE_URL}/api/v2/oracles/status`)
+    return response.data as OracleStatusResponse
+  },
+
+  async evaluateOracle(params: { smiles: string; oracles?: string[] }) {
+    const response = await axios.post(`${API_BASE_URL}/api/v2/oracles/evaluate`, params)
+    return response.data as OracleEvaluateResponse
+  },
+}
+
 // Combined API object for convenience
 export const api = {
   training: trainingApi,
   trajectories: trajectoriesApi,
   analysis: analysisApi,
   domain: domainApi,
+  molecular: molecularApi,
 }
 
 // TypeScript types for API responses
 export interface TrainingState {
-  status: string
+  has_session: boolean
   current_iteration: number
   total_iterations: number
   is_training: boolean
   is_paused: boolean
-  loss: number
+  is_real_training?: boolean
+  progress?: number
+  // Latest scalar metrics (match backend field names)
   latest_loss?: number
-  mean_reward: number
-  gradient_norm: number
+  latest_reward?: number
   latest_gradient_norm?: number
-  learning_rate: number
   last_error: string | null
   error_count?: number
-  // Exploration metrics (Phase 7: Mode Collapse Fix)
+  // Exploration metrics
   current_epsilon?: number
   epsilon_decay?: boolean
+  entropy_weight?: number
+  z_learning_rate_multiplier?: number
+  // Computed aggregate metrics
   metrics?: {
     mean_reward?: number
     diversity_ratio?: number
+    mean_log_Z?: number
+    mean_trajectory_length?: number
+  }
+  domain_metrics?: Record<string, unknown>
+  // Molecular domain stats (returned inline when domain is molecule)
+  total_molecules?: number
+  unique_smiles?: number
+  // Flow statistics
+  flow_statistics?: {
+    mean_log_Z?: number
+    mean_reward?: number
+    progress?: number
+    mean_trajectory_length?: number
   }
 }
 
@@ -226,7 +406,7 @@ export interface TrainingHistory {
   losses: number[]
   rewards: number[]
   gradient_norms: number[]
-  iterations: number[]
+  iteration_times: number[]
 }
 
 export interface Trajectory {
@@ -267,6 +447,268 @@ export interface DomainInfo {
     supports_domain_metrics: boolean
   }
   config: any
+}
+
+// Molecular Generation Types
+export interface MolecularGenerationConfig {
+  method: 'de_novo' | 'scaffold_hopping' | 'fragment_linking' | 'r_group' | 'optimization' | 'grid_world'
+  seed_smiles?: string
+  scaffold_smiles?: string
+  constraints?: MolecularConstraints
+  gflownet_config?: {
+    objective: string
+    n_episodes: number
+    batch_size: number
+    learning_rate: number
+    hidden_dim?: number
+    temperature?: number
+    epsilon?: number
+    entropy_weight?: number
+  }
+  preset?: string
+}
+
+export interface MolecularConstraints {
+  mw_range?: [number, number]
+  logp_range?: [number, number]
+  qed_range?: [number, number]
+  sa_range?: [number, number]
+  tpsa_range?: [number, number]
+  rotatable_bonds_range?: [number, number]
+  hbd_range?: [number, number]
+  hba_range?: [number, number]
+  lipinski?: boolean
+  veber?: boolean
+  pains_filter?: boolean
+  brenk_filter?: boolean
+}
+
+export interface Molecule {
+  id: string
+  smiles: string
+  properties: MolecularProperties
+  reward: number
+  generation_step: number
+  method: string
+  svg_2d?: string
+  fingerprint?: number[]
+  created_at?: string
+  coords_3d?: Array<{ atom: string; x: number; y: number; z: number }>
+  bonds?: Array<{ from: number; to: number; order: number }>
+}
+
+export interface MolecularProperties {
+  molecular_weight: number
+  logp: number
+  qed: number
+  synthetic_accessibility: number
+  tpsa: number
+  rotatable_bonds: number
+  hbd: number
+  hba: number
+  num_rings: number
+  num_aromatic_rings: number
+  formula?: string
+}
+
+export interface ChemicalSpacePoint {
+  id: string
+  x: number
+  y: number
+  smiles: string
+  reward: number
+  properties: MolecularProperties
+  cluster_id?: number
+  generation_epoch?: number
+}
+
+export interface AtomAttribution {
+  molecule_id: string
+  smiles: string
+  atom_scores: number[]
+  bond_scores?: number[]
+  attribution_type: 'reward' | 'flow' | 'loss'
+}
+
+export interface RewardDecompositionData {
+  molecule_id: string
+  components: Array<{
+    name: string
+    value: number
+    weight: number
+    contribution: number
+  }>
+  total_reward: number
+}
+
+// Gap 3: Fragment Library Types
+export interface FragmentInfo {
+  id: number
+  smiles: string
+  name: string
+  category: string
+  is_starter: boolean
+  n_attachments: number
+  brics_labels: number[]
+}
+
+export interface FragmentLibraryResponse {
+  n_fragments: number
+  fragments: FragmentInfo[]
+}
+
+// Gap 5: MOGFN Pareto Optimization Types
+export interface ParetoPoint {
+  id: string
+  smiles: string
+  objectives: Record<string, number>
+  is_pareto_optimal: boolean
+  reward: number
+}
+
+export interface ParetoFrontResponse {
+  points: ParetoPoint[]
+  hypervolume: number
+  objective_names: string[]
+  objective_ranges: Record<string, [number, number]>
+}
+
+export interface ParetoGenerateResponse {
+  molecules: ParetoPoint[]
+  pareto_front: ParetoPoint[]
+  hypervolume: number
+  preferences_used: Record<string, number>
+  error?: string
+}
+
+export interface ObjectivesResponse {
+  molecule_id: string
+  objectives: Record<string, number>
+  objective_names: string[]
+}
+
+// Gap 1: Diversity Analysis Types
+export interface DiversityStats {
+  mean_pairwise: number
+  internal_diversity_1: number
+  internal_diversity_2: number
+  min_nn_distance: number
+  max_nn_distance: number
+  median_nn_distance: number
+  n_molecules: number
+  n_unique_scaffolds?: number
+  scaffold_entropy?: number
+}
+
+export interface DiversityResponse {
+  stats: DiversityStats
+  nearest_neighbors: Array<{ id: string; neighbor_id: string; similarity: number }>
+  similarity_matrix: number[][] | null
+}
+
+// Gap 2: Docking Types
+export interface DockingTarget {
+  id: string
+  name: string
+  pdb_id: string
+  description: string
+  has_receptor: boolean
+}
+
+export interface DockingTargetsResponse {
+  targets: DockingTarget[]
+  active_target: string
+  docking_available: boolean
+  proxy_available: boolean
+}
+
+export interface DockingResultResponse {
+  smiles: string
+  method: 'proxy' | 'vina'
+  normalized_score?: number
+  affinity_kcal?: number
+  n_poses?: number
+  runtime_ms?: number
+  target: string
+  error?: string
+}
+
+export interface DockingBatchResponse {
+  results: Array<{
+    id: string
+    smiles: string
+    normalized_score?: number
+    affinity_kcal?: number
+    method: string
+  }>
+  target: string
+  n_docked: number
+}
+
+// Gap 4: Reaction / Synthesis Route Types
+export interface ReactionTemplate {
+  id: number
+  name: string
+  class: string
+  yield_estimate: number
+  functional_groups: string[]
+}
+
+export interface ReactionsResponse {
+  reactions: ReactionTemplate[]
+  n_reactions: number
+  engine_available: boolean
+}
+
+export interface SynthesisStep {
+  step: number
+  reaction_id: number
+  reaction_name: string
+  reaction_class: string
+  yield_estimate: number
+  intermediate: string
+}
+
+export interface SynthesisRouteResponse {
+  molecule_id: string
+  smiles: string
+  has_synthesis: boolean
+  n_steps?: number
+  steps: SynthesisStep[]
+  cumulative_yield?: number
+  method?: string
+  message?: string
+}
+
+export interface ReactionExecuteResponse {
+  valid: boolean
+  product_smiles: string
+  reaction_name: string
+  reaction_class: string
+}
+
+// PMO Oracle Types
+export interface OracleStatusResponse {
+  configured: string[]
+  budget_used: number
+  budget_total: number
+  budget_remaining: number
+  cache_size: number
+  benchmark_mode: boolean
+  active: boolean
+}
+
+export interface OracleEvaluateResponse {
+  smiles: string
+  scores: Record<string, number>
+  cached: boolean
+}
+
+export interface OracleAvailableResponse {
+  oracles: string[]
+  bioactivity: string[]
+  pmo_tasks: string[]
+  loaded: string[]
 }
 
 export default api

@@ -217,13 +217,13 @@ export const BUILT_IN_DOMAINS: DomainOption[] = [
   {
     id: 'molecule',
     name: 'Molecular Design',
-    description: 'Atom-by-atom molecule construction with property optimization. Ideal for drug discovery.',
+    description: 'GFlowNet-powered molecular generation with property constraints, ADMET filters, and multiple generation strategies including de novo, scaffold hopping, and fragment linking.',
     icon: Atom,
     renderer: 'molecule3d',
     isBuiltIn: true,
     configSchema: moleculeSchema,
-    tags: ['chemistry', 'drug-discovery', 'advanced'],
-    isPopular: false
+    tags: ['chemistry', 'drug-discovery', 'generation'],
+    isPopular: true
   },
   {
     id: 'custom',

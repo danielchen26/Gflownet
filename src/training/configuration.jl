@@ -28,6 +28,7 @@ the fundamental flow conservation equation F(s) = Σ_{s'} P_F(s'|s) * F(s'):
     DIRECT_FLOW_OBJECTIVE
     COMBINED_OBJECTIVES
     TRAJECTORY_LIKELIHOOD_MAXIMIZATION  # TLM (ICLR 2025) - learns backward policy
+    MULTI_OBJECTIVE_TB                  # MOGFN-PC (Gap 5) - preference-conditioned TB
 end
 
 """
@@ -191,6 +192,13 @@ struct TrainingConfig
     tlm_update_frequency::Int            # Update backward policy every N iterations (default 1)
     tlm_entropy_coeff::Float64           # Entropy coefficient for backward policy (default 0.01)
 
+    # MOGFN-PC: Multi-Objective GFlowNet with Preference Conditioning (Gap 5, ICML 2023)
+    # Conditions the policy on a preference vector w ∈ Δ^K (K-simplex) so that a single
+    # trained model generates molecules for ANY preference weighting at inference time.
+    mogfn_n_objectives::Int              # Number of objectives K (default 4: QED, SA, LogP, MW)
+    mogfn_preference_dim::Int            # Preference embedding dimension (default 64)
+    mogfn_dirichlet_alpha::Float64       # Dirichlet concentration for preference sampling (default 1.0)
+
     function TrainingConfig(;
         objective::TrainingObjective=TRAJECTORY_BALANCE,
         partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION,
@@ -220,7 +228,11 @@ struct TrainingConfig
         # TLM parameters (ICLR 2025)
         tlm_backward_weight::Float64=1.0,      # Weight for backward likelihood loss
         tlm_update_frequency::Int=1,            # Update backward every N iterations
-        tlm_entropy_coeff::Float64=0.01         # Entropy coefficient for backward policy
+        tlm_entropy_coeff::Float64=0.01,        # Entropy coefficient for backward policy
+        # MOGFN-PC parameters (Gap 5, ICML 2023)
+        mogfn_n_objectives::Int=4,              # Number of objectives (QED, SA, LogP, MW)
+        mogfn_preference_dim::Int=64,           # Preference embedding dimension
+        mogfn_dirichlet_alpha::Float64=1.0      # Dirichlet concentration (1.0 = uniform simplex)
     )
         # Validation
         if n_iterations <= 0
@@ -276,6 +288,16 @@ struct TrainingConfig
         if tlm_entropy_coeff < 0
             throw(ArgumentError("tlm_entropy_coeff must be non-negative"))
         end
+        # MOGFN validation
+        if mogfn_n_objectives <= 0
+            throw(ArgumentError("mogfn_n_objectives must be positive"))
+        end
+        if mogfn_preference_dim <= 0
+            throw(ArgumentError("mogfn_preference_dim must be positive"))
+        end
+        if mogfn_dirichlet_alpha <= 0
+            throw(ArgumentError("mogfn_dirichlet_alpha must be positive"))
+        end
 
         new(objective, partition_function_method, optimization_method,
             n_iterations, batch_size, learning_rate,
@@ -284,7 +306,8 @@ struct TrainingConfig
             validation_frequency, checkpoint_frequency, early_stopping_patience, early_stopping_threshold,
             verbose, sub_trajectory_length, z_learning_rate_multiplier,
             use_replay_buffer, replay_buffer_size, replay_ratio, replay_priority_alpha,
-            tlm_backward_weight, tlm_update_frequency, tlm_entropy_coeff)
+            tlm_backward_weight, tlm_update_frequency, tlm_entropy_coeff,
+            mogfn_n_objectives, mogfn_preference_dim, mogfn_dirichlet_alpha)
     end
 end
 
@@ -421,6 +444,8 @@ function get_objective_requirements(objective::TrainingObjective)::Vector{String
         return ["forward_policy"]  # May require others depending on weights
     elseif objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
         return ["forward_policy", "backward_policy"]  # TLM requires both policies
+    elseif objective == MULTI_OBJECTIVE_TB
+        return ["forward_policy", "preference_encoder", "z_network"]  # MOGFN-PC
     else
         return String[]
     end
@@ -579,7 +604,8 @@ function Base.show(io::IO, objective::TrainingObjective)
         SUB_TRAJECTORY_BALANCE => "Sub-Trajectory Balance",
         DIRECT_FLOW_OBJECTIVE => "Direct Flow Objective",
         COMBINED_OBJECTIVES => "Combined Objectives",
-        TRAJECTORY_LIKELIHOOD_MAXIMIZATION => "TLM (ICLR 2025)"
+        TRAJECTORY_LIKELIHOOD_MAXIMIZATION => "TLM (ICLR 2025)",
+        MULTI_OBJECTIVE_TB => "MOGFN-PC (Gap 5)"
     )
     print(io, get(objective_names, objective, "Unknown Objective"))
 end

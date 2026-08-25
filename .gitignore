@@ -25,6 +25,16 @@
 *.swp
 *~
 
+# Database files
+*.db
+*.db-wal
+*.db-shm
+/data/
+
+# TDC oracle model files (large pickles, downloaded at runtime)
+oracle/
+data/tdc_cache/
+
 # Test artifacts
 /test_env/
 /results/
@@ -32,3 +42,28 @@
 # Web visualization build artifacts
 src/utils/visualization/web/dist/
 src/utils/visualization/web/node_modules/
+
+# Conda/Python environment
+.CondaPkg/
+__pycache__/
+*.pyc
+
+# Log files
+*.log
+backend.log
+frontend.log
+
+# Test results
+test-results/
+
+# Craft Agent workspace files
+.claude-plugin/
+.conductor/
+config.json
+events.jsonl
+labels/
+sessions/
+skills/
+sources/
+statuses/
+views.json

@@ -1,14 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Activity, Network, Maximize2, BarChart3, Settings, ChevronDown, ChevronUp, RotateCcw, Play, FastForward, Shield, Sparkles, Zap, Gauge, Database, Target } from 'lucide-react'
+import { Activity, Network, Maximize2, BarChart3, Settings, ChevronDown, ChevronUp, RotateCcw, Play, FastForward, Shield, Sparkles, Zap, Gauge, Database, Target, FlaskConical, TrendingUp, Fingerprint, Layers } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { GFlowNet2DTrajectory } from '../visualizations/GFlowNet2DTrajectory'
 import { GFlowNetTrainingDashboard } from './GFlowNetTrainingDashboard'
 import { RealtimeMetrics } from './RealtimeMetrics'
 import { ErrorPanel } from './ErrorPanel'
 import { TrainingControls } from './TrainingControls'
+import { MoleculeViewer2D } from './MoleculeViewer2D'
+import DiversityStats from './DiversityStats'
+import ParetoFrontExplorer from './ParetoFrontExplorer'
+import PreferenceSliders from './PreferenceSliders'
+import DockingPanel from './DockingPanel'
+import SynthesisRoute from './SynthesisRoute'
 import { api } from '../services/api'
-import { useThemeLayout } from '../contexts/ThemeContext'
+import type { Molecule } from '../services/api'
+import { useThemeLayout, useChartColors } from '../contexts/ThemeContext'
 
 interface MonitoringDashboardProps {
   problemConfig: any
@@ -56,7 +63,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
   const { data: trainingState } = useQuery({
     queryKey: ['training-state'],
     queryFn: () => api.training.getState(),
-    refetchInterval: 250,
+    refetchInterval: 1000,
   })
 
   const rawErrorCount = trainingState?.error_count || 0
@@ -64,6 +71,34 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
   const lastError = errorCount > 0 ? (trainingState?.last_error || null) : null
   const isTraining = trainingState?.is_training || false
   const isPaused = trainingState?.is_paused || false
+
+  // Detect molecular domain
+  const isMolecularDomain = problemConfig?.domain_type === 'molecule' || problemConfig?.domain === 'molecule'
+  // Detect MOGFN multi-objective mode
+  const isMOGFN = problemConfig?.training_objective === 'MULTI_OBJECTIVE_TB'
+  const chartColors = useChartColors()
+
+  // Fetch latest generated molecules for the live feed (molecular domain only)
+  const { data: moleculeData } = useQuery({
+    queryKey: ['molecule-feed'],
+    queryFn: () => api.molecular.getMolecules({ limit: 8, sort_by: 'generation_step' }),
+    refetchInterval: isMolecularDomain ? 2000 : false,
+    enabled: isMolecularDomain,
+  })
+
+  const feedMolecules: Molecule[] = moleculeData?.molecules ?? []
+
+  // Compute diversity metrics from the feed molecules
+  const diversityMetrics = useMemo(() => {
+    if (!feedMolecules.length) return { unique: 0, avgQED: 0, avgReward: 0, topReward: 0, scaffoldCount: 0 }
+    const uniqueSmiles = new Set(feedMolecules.map((m) => m.smiles))
+    const avgQED = feedMolecules.reduce((s, m) => s + (m.properties?.qed ?? 0), 0) / feedMolecules.length
+    const avgReward = feedMolecules.reduce((s, m) => s + (m.reward ?? 0), 0) / feedMolecules.length
+    const topReward = Math.max(...feedMolecules.map((m) => m.reward ?? 0))
+    // Approximate scaffold diversity by counting unique ring counts
+    const scaffolds = new Set(feedMolecules.map((m) => `${m.properties?.num_rings ?? 0}-${m.properties?.num_aromatic_rings ?? 0}`))
+    return { unique: uniqueSmiles.size, avgQED, avgReward, topReward, scaffoldCount: scaffolds.size }
+  }, [feedMolecules])
 
   // Guard: show placeholder when no training has been configured yet
   if (!problemConfig) {
@@ -107,9 +142,23 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
 
         {/* Config Summary + Toggle */}
         <div className={`flex items-center ${layout.compact ? 'gap-2' : 'gap-4'} ${layout.tinySize}`}>
-          <span className="text-muted-foreground">
-            Grid: {problemConfig.grid_size}×{problemConfig.grid_size}
-          </span>
+          {isMolecularDomain ? (
+            <>
+              <span className="text-muted-foreground flex items-center gap-1">
+                <FlaskConical className="w-3 h-3 text-neon-green" />
+                Molecular
+              </span>
+              {!layout.compact && feedMolecules.length > 0 && (
+                <span className="text-muted-foreground">
+                  Generated: <span className="text-neon-green font-mono">{moleculeData?.total ?? feedMolecules.length}</span>
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-muted-foreground">
+              Grid: {problemConfig.grid_size}×{problemConfig.grid_size}
+            </span>
+          )}
           {!layout.compact && (
             <span className="text-muted-foreground">
               Objective: <span className="text-neon-purple">{problemConfig.training_objective}</span>
@@ -153,6 +202,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
                   <option value="DETAILED_BALANCE">Detailed Balance (DB)</option>
                   <option value="FLOW_MATCHING">Flow Matching (FM)</option>
                   <option value="TRAJECTORY_LIKELIHOOD_MAXIMIZATION">TLM (ICLR 2025 - Backward Policy Training)</option>
+                  <option value="MULTI_OBJECTIVE_TB">MOGFN-PC (Multi-Objective Pareto)</option>
                 </select>
                 {editConfig.training_objective === 'TRAJECTORY_LIKELIHOOD_MAXIMIZATION' && (
                   <span className="px-1.5 py-0.5 text-[9px] bg-neon-cyan/20 text-neon-cyan rounded">
@@ -417,8 +467,56 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
         </div>
       )}
       
-      {/* Main Content - Two Rows Layout */}
-      <div className={`flex-1 flex flex-col ${layout.compact ? 'p-1 gap-1' : layout.spacious ? 'p-4 gap-4' : 'p-2 gap-2'} overflow-hidden`}>
+      {/* Molecular Diversity Metrics Row (shown when in molecular domain) */}
+      {isMolecularDomain && expandedView === 'none' && feedMolecules.length > 0 && (
+        <div className={`${layout.compact ? 'px-1 pt-1' : layout.spacious ? 'px-4 pt-4' : 'px-2 pt-2'}`}>
+          <div className={`grid grid-cols-5 ${layout.gap}`}>
+            <DiversityMetricCard
+              icon={<FlaskConical className="w-3.5 h-3.5" />}
+              label="Total Generated"
+              value={moleculeData?.total ?? feedMolecules.length}
+              color={chartColors.primary}
+              layout={layout}
+            />
+            <DiversityMetricCard
+              icon={<Fingerprint className="w-3.5 h-3.5" />}
+              label="Unique Molecules"
+              value={`${diversityMetrics.unique}/${feedMolecules.length}`}
+              sub={`${((diversityMetrics.unique / feedMolecules.length) * 100).toFixed(0)}%`}
+              color={chartColors.secondary}
+              layout={layout}
+            />
+            <DiversityMetricCard
+              icon={<TrendingUp className="w-3.5 h-3.5" />}
+              label="Top Reward"
+              value={diversityMetrics.topReward.toFixed(2)}
+              sub={`avg ${diversityMetrics.avgReward.toFixed(2)}`}
+              color={chartColors.green}
+              layout={layout}
+            />
+            <DiversityMetricCard
+              icon={<Sparkles className="w-3.5 h-3.5" />}
+              label="Avg QED"
+              value={diversityMetrics.avgQED.toFixed(3)}
+              color={chartColors.tertiary}
+              layout={layout}
+            />
+            <DiversityMetricCard
+              icon={<Layers className="w-3.5 h-3.5" />}
+              label="Scaffold Diversity"
+              value={diversityMetrics.scaffoldCount}
+              sub="unique scaffolds"
+              color={chartColors.primary}
+              layout={layout}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Main Content - Two Rows Layout (with optional molecule feed) */}
+      <div className={`flex-1 flex ${layout.compact ? 'p-1 gap-1' : layout.spacious ? 'p-4 gap-4' : 'p-2 gap-2'} overflow-hidden`}>
+        {/* Left: Training views */}
+        <div className={`flex-1 flex flex-col ${layout.compact ? 'gap-1' : layout.spacious ? 'gap-4' : 'gap-2'} min-w-0`}>
         {expandedView === 'none' ? (
           <>
             {/* Row 1: Trajectory Sampling and Metrics */}
@@ -440,11 +538,39 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
 
                 <h3 className={`${layout.headingSize} font-medium mb-2 flex items-center gap-2`}>
                   <Network className={`${layout.compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} text-neon-purple`} />
-                  Trajectory Sampling
+                  {isMolecularDomain ? 'Generated Molecules' : 'Trajectory Sampling'}
                 </h3>
 
                 <div className="h-[calc(100%-1.5rem)] min-h-0">
-                  <GFlowNet2DTrajectory />
+                  {isMolecularDomain ? (
+                    <div className="h-full overflow-y-auto scrollbar-thin">
+                      {feedMolecules.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          {feedMolecules.map((mol) => (
+                            <div key={mol.id} className="glass rounded-lg p-2 flex flex-col items-center">
+                              <div className="bg-white/5 rounded overflow-hidden">
+                                <MoleculeViewer2D smiles={mol.smiles} width={120} height={120} />
+                              </div>
+                              <div className="w-full mt-1.5 space-y-0.5">
+                                <div className="flex items-center justify-between text-[9px]">
+                                  <span className="text-neon-green font-mono font-bold">{(mol.reward ?? 0).toFixed(2)}</span>
+                                  <span className="text-muted-foreground">QED {(mol.properties?.qed ?? 0).toFixed(2)}</span>
+                                </div>
+                                <p className="text-[8px] font-mono text-muted-foreground truncate">{mol.smiles}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-center">
+                          <FlaskConical className="w-10 h-10 text-muted-foreground/20 mb-2" />
+                          <p className={`${layout.labelSize} text-muted-foreground`}>Waiting for molecules...</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <GFlowNet2DTrajectory />
+                  )}
                 </div>
               </motion.div>
 
@@ -454,7 +580,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
                 animate={{ opacity: 1, x: 0 }}
                 className="h-full overflow-auto"
               >
-                <RealtimeMetrics />
+                <RealtimeMetrics trainingState={trainingState} />
               </motion.div>
             </div>
 
@@ -480,7 +606,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
                 </h3>
 
                 <div className="h-[calc(100%-1.5rem)] min-h-0">
-                  <GFlowNetTrainingDashboard problemConfig={problemConfig} />
+                  <GFlowNetTrainingDashboard problemConfig={problemConfig} trainingState={trainingState} />
                 </div>
               </motion.div>
             </div>
@@ -516,11 +642,169 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
             </button>
             
             <div className="h-full">
-              <GFlowNetTrainingDashboard problemConfig={problemConfig} />
+              <GFlowNetTrainingDashboard problemConfig={problemConfig} trainingState={trainingState} />
             </div>
           </motion.div>
         )}
+        </div>
+
+        {/* Right: Molecule Feed Side Panel (molecular domain only) */}
+        {isMolecularDomain && expandedView === 'none' && (
+          <MoleculeFeedPanel molecules={feedMolecules} layout={layout} chartColors={chartColors} isMOGFN={isMOGFN} />
+        )}
       </div>
     </div>
+  )
+}
+
+// --- Helper Components ---
+
+function DiversityMetricCard({ icon, label, value, sub, color, layout }: {
+  icon: React.ReactNode
+  label: string
+  value: number | string
+  sub?: string
+  color: string
+  layout: ReturnType<typeof useThemeLayout>
+}) {
+  return (
+    <div className={`glass-dark rounded-lg ${layout.cardPad} flex items-center gap-2`}>
+      <div className="w-7 h-7 rounded-md bg-white/5 flex items-center justify-center flex-shrink-0" style={{ color }}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className={`${layout.tinySize} text-muted-foreground truncate`}>{label}</div>
+        <div className={`${layout.labelSize} font-bold font-mono`} style={{ color }}>
+          {typeof value === 'number' ? value.toLocaleString() : value}
+        </div>
+        {sub && <div className={`${layout.tinySize} text-muted-foreground/60`}>{sub}</div>}
+      </div>
+    </div>
+  )
+}
+
+function MoleculeFeedPanel({ molecules, layout, chartColors, isMOGFN }: {
+  molecules: Molecule[]
+  layout: ReturnType<typeof useThemeLayout>
+  chartColors: ReturnType<typeof useChartColors>
+  isMOGFN?: boolean
+}) {
+  const [selectedIdx, setSelectedIdx] = useState(0)
+  const selected = molecules[selectedIdx] ?? null
+
+  if (!molecules.length) {
+    return (
+      <div className={`w-64 flex-shrink-0 glass-dark rounded-lg ${layout.cardPad} flex flex-col items-center justify-center text-center`}>
+        <FlaskConical className="w-8 h-8 text-muted-foreground/30 mb-2" />
+        <span className={`${layout.labelSize} text-muted-foreground`}>Waiting for molecules...</span>
+      </div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className={`w-72 flex-shrink-0 glass-dark rounded-lg ${layout.cardPad} flex flex-col overflow-hidden`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <h3 className={`${layout.headingSize} font-medium flex items-center gap-1.5`}>
+          <FlaskConical className="w-3 h-3 text-neon-green" />
+          Live Molecule Feed
+        </h3>
+        <span className={`${layout.tinySize} px-1.5 py-0.5 rounded bg-neon-green/15 text-neon-green font-mono`}>
+          {molecules.length}
+        </span>
+      </div>
+
+      {/* Selected molecule detail */}
+      {selected && (
+        <div className="mb-2 p-2 rounded-lg bg-dark-bg/50 border border-dark-border/30">
+          <div className="flex gap-2">
+            <div className="w-24 h-24 flex-shrink-0 rounded bg-white/5 overflow-hidden">
+              <MoleculeViewer2D smiles={selected.smiles} width={96} height={96} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className={`${layout.tinySize} text-muted-foreground truncate font-mono`} title={selected.smiles}>
+                {selected.smiles.length > 20 ? selected.smiles.slice(0, 20) + '...' : selected.smiles}
+              </div>
+              <div className={`${layout.labelSize} font-bold mt-1`} style={{ color: chartColors.green }}>
+                Reward: {(selected.reward ?? 0).toFixed(2)}
+              </div>
+              <div className={`grid grid-cols-2 gap-x-2 gap-y-0.5 mt-1 ${layout.tinySize}`}>
+                <span className="text-muted-foreground">MW: <span className="font-mono text-foreground">{(selected.properties?.molecular_weight ?? 0).toFixed(0)}</span></span>
+                <span className="text-muted-foreground">QED: <span className="font-mono text-foreground">{(selected.properties?.qed ?? 0).toFixed(2)}</span></span>
+                <span className="text-muted-foreground">LogP: <span className="font-mono text-foreground">{(selected.properties?.logp ?? 0).toFixed(1)}</span></span>
+                <span className="text-muted-foreground">SA: <span className="font-mono text-foreground">{(selected.properties?.synthetic_accessibility ?? 0).toFixed(1)}</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Synthesis Route (Gap 4) */}
+      {selected && (
+        <div className="mb-2 border border-dark-border/20 rounded-md overflow-hidden bg-dark-bg/30">
+          <SynthesisRoute moleculeId={selected.id} compact />
+        </div>
+      )}
+
+      {/* Molecule list */}
+      <div className="flex-1 overflow-y-auto space-y-1 scrollbar-thin">
+        {molecules.map((mol, idx) => (
+          <button
+            key={mol.id}
+            onClick={() => setSelectedIdx(idx)}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all ${
+              idx === selectedIdx
+                ? 'bg-neon-green/10 border border-neon-green/30'
+                : 'hover:bg-white/5 border border-transparent'
+            }`}
+          >
+            <div className="w-10 h-10 flex-shrink-0 rounded bg-white/5 overflow-hidden">
+              <MoleculeViewer2D smiles={mol.smiles} width={40} height={40} />
+            </div>
+            <div className="flex-1 min-w-0 text-left">
+              <div className={`${layout.tinySize} font-mono truncate`}>
+                {mol.smiles.length > 16 ? mol.smiles.slice(0, 16) + '...' : mol.smiles}
+              </div>
+              <div className={`${layout.tinySize} flex items-center gap-2`}>
+                <span className="text-neon-green font-mono">{(mol.reward ?? 0).toFixed(1)}</span>
+                <span className="text-muted-foreground">QED {(mol.properties?.qed ?? 0).toFixed(2)}</span>
+              </div>
+            </div>
+            <div className={`w-1.5 h-6 rounded-full flex-shrink-0`}
+              style={{
+                backgroundColor: chartColors.green,
+                opacity: 0.2 + (mol.reward / 10) * 0.8,
+              }}
+            />
+          </button>
+        ))}
+      </div>
+
+      {/* Diversity Analysis (Gap 1) */}
+      <div className="border-t border-dark-border/30 mt-2">
+        <DiversityStats autoRefresh refreshInterval={30000} />
+      </div>
+
+      {/* Docking Panel (Gap 2) */}
+      <div className="border-t border-dark-border/30 mt-2">
+        <DockingPanel compact />
+      </div>
+
+      {/* MOGFN Pareto Optimization (Gap 5) */}
+      {isMOGFN && (
+        <>
+          <div className="border-t border-dark-border/30 mt-2">
+            <PreferenceSliders compact />
+          </div>
+          <div className="border-t border-dark-border/30 mt-2">
+            <ParetoFrontExplorer autoRefresh refreshInterval={15000} />
+          </div>
+        </>
+      )}
+    </motion.div>
   )
 }

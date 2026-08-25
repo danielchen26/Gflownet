@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Settings, Grid3x3, Target, Zap, Play, RefreshCw, Info, ChevronLeft, ChevronRight, Sparkles, BookOpen, Lightbulb, Shield, Gauge, Database, ChevronDown, Wrench, AlertTriangle } from 'lucide-react'
 import { DomainSelector, DomainOption, BUILT_IN_DOMAINS } from './DomainSelector'
 import { DomainConfigPanel } from './DomainConfigPanel'
+import { MolecularConfigPanel } from './MolecularConfigPanel'
 import { InfoTooltip, TOOLTIPS } from './InfoTooltip'
 import { useThemeLayout } from '../contexts/ThemeContext'
 
@@ -37,9 +38,11 @@ type SetupStep = 'domain' | 'configure' | 'train'
 
 interface ProblemSetupProps {
   onStart: (config: ProblemConfig) => void
+  initialDomainId?: string | null  // Pre-select domain from Home page
+  onDomainConsumed?: () => void    // Clear pending domain after consuming
 }
 
-export function ProblemSetup({ onStart }: ProblemSetupProps) {
+export function ProblemSetup({ onStart, initialDomainId, onDomainConsumed }: ProblemSetupProps) {
   const layout = useThemeLayout()
   const [currentStep, setCurrentStep] = useState<SetupStep>('domain')
   const [selectedDomain, setSelectedDomain] = useState<DomainOption | null>(
@@ -47,6 +50,19 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
   )
   const [domainConfig, setDomainConfig] = useState<Record<string, unknown>>({})
   const [isDomainConfigValid, setIsDomainConfigValid] = useState(true)
+  const consumedRef = useRef<string | null>(null)
+
+  // Auto-select domain when coming from Home page
+  useEffect(() => {
+    if (initialDomainId && initialDomainId !== consumedRef.current) {
+      consumedRef.current = initialDomainId
+      const domain = BUILT_IN_DOMAINS.find(d => d.id === initialDomainId)
+      if (domain) {
+        handleDomainSelect(domain)
+      }
+      onDomainConsumed?.()
+    }
+  }, [initialDomainId])
 
   const [config, setConfig] = useState<ProblemConfig>({
     domain_type: 'grid_world',
@@ -82,13 +98,39 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
 
   const handleDomainSelect = (domain: DomainOption) => {
     setSelectedDomain(domain)
-    setConfig(prev => ({ ...prev, domain_type: domain.id }))
-    if (domain.id === 'grid_world') {
+    if (domain.id === 'molecule') {
+      // Molecular domain needs larger network (1042-dim input) and lower LR
+      setConfig(prev => ({
+        ...prev,
+        domain_type: domain.id,
+        hidden_dim: 256,
+        learning_rate: 0.001,
+        n_episodes: 500,
+        batch_size: 16,
+        temperature: 1.0,
+      }))
+      setCurrentStep('configure')
+    } else if (domain.id === 'grid_world') {
+      // Reset to grid-world defaults
+      setConfig(prev => ({
+        ...prev,
+        domain_type: domain.id,
+        hidden_dim: 64,
+        learning_rate: 0.005,
+        n_episodes: 1000,
+        batch_size: 32,
+        temperature: 1.0,
+      }))
       setCurrentStep('train')
     } else {
+      setConfig(prev => ({ ...prev, domain_type: domain.id }))
       setCurrentStep('configure')
     }
   }
+
+  // Check if the training step should show grid-world-specific UI
+  const isGridWorld = selectedDomain?.id === 'grid_world'
+  const isMolecule = selectedDomain?.id === 'molecule'
 
   const handleDomainConfigChange = (newConfig: Record<string, unknown>) => {
     setDomainConfig(newConfig)
@@ -237,12 +279,21 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
             exit={{ opacity: 0, x: 20 }}
             className="glass-dark rounded-xl p-6"
           >
-            <DomainConfigPanel
-              domain={selectedDomain}
-              config={domainConfig}
-              onConfigChange={handleDomainConfigChange}
-              onValidationChange={setIsDomainConfigValid}
-            />
+            {isMolecule ? (
+              <MolecularConfigPanel
+                domain={selectedDomain}
+                config={domainConfig}
+                onConfigChange={handleDomainConfigChange}
+                onValidationChange={setIsDomainConfigValid}
+              />
+            ) : (
+              <DomainConfigPanel
+                domain={selectedDomain}
+                config={domainConfig}
+                onConfigChange={handleDomainConfigChange}
+                onValidationChange={setIsDomainConfigValid}
+              />
+            )}
 
             <div className="flex justify-between mt-6">
               <button
@@ -294,7 +345,9 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
 
             {/* ═══════════════════════════════════════════════════════════════
                 ROW 1: Two-column — Grid Config (left) + Objective & Peaks (right)
+                Only shown for grid_world domain
                ═══════════════════════════════════════════════════════════════ */}
+            {isGridWorld && (
             <div className={`grid grid-cols-1 lg:grid-cols-2 ${layout.sectionGap} ${layout.compact ? 'mb-3' : layout.spacious ? 'mb-8' : 'mb-6'}`}>
 
               {/* Left Column: Grid Configuration */}
@@ -603,6 +656,33 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                 </div>
               </motion.div>
             </div>
+            )}
+
+            {/* Domain config summary for non-grid domains */}
+            {!isGridWorld && selectedDomain && (
+              <div className={`glass-dark rounded-xl ${layout.sectionPad} ${layout.compact ? 'mb-3' : layout.spacious ? 'mb-8' : 'mb-6'}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  {(() => { const DIcon = selectedDomain.icon; return <DIcon className="w-5 h-5 text-neon-purple" /> })()}
+                  <h2 className={`${layout.compact ? 'text-base' : layout.spacious ? 'text-2xl' : 'text-xl'} font-semibold`}>
+                    {selectedDomain.name} Domain
+                  </h2>
+                  <span className="px-2 py-0.5 text-[10px] bg-neon-green/15 text-neon-green rounded-full">Configured</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {selectedDomain.description}
+                </p>
+                {Object.keys(domainConfig).length > 0 && (
+                  <details className="mt-3">
+                    <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-white transition-colors">
+                      View domain configuration
+                    </summary>
+                    <pre className="mt-2 p-2 bg-dark-panel/50 rounded text-[10px] font-mono overflow-x-auto">
+                      {JSON.stringify(domainConfig, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
 
             {/* ═══════════════════════════════════════════════════════════════
                 SECTION 1: Core Training Parameters
@@ -1093,18 +1173,18 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                         <input
                           type="range"
                           min={32}
-                          max={256}
+                          max={512}
                           step={32}
-                          value={config.hidden_dim ?? 64}
+                          value={config.hidden_dim ?? (isMolecule ? 256 : 64)}
                           onChange={(e) => setConfig({ ...config, hidden_dim: Number(e.target.value) })}
                           className="w-full mb-1"
                         />
                         <div className="flex justify-between text-[9px] text-muted-foreground">
                           <span>32 (fast)</span>
-                          <span>256 (expressive)</span>
+                          <span>512 (expressive)</span>
                         </div>
                         <p className="text-[10px] text-muted-foreground mt-2">
-                          Neural network width. Larger = more capacity but slower. 64 sufficient for grids.
+                          Neural network width. 64 for grids, 256 recommended for molecular (1042-dim input).
                         </p>
                       </div>
                     </div>
@@ -1126,10 +1206,10 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={startTraining}
-                disabled={isRunning || config.reward_peaks.length === 0}
+                disabled={isRunning || (isGridWorld && config.reward_peaks.length === 0)}
                 className={`
                   w-full ${layout.compact ? 'py-2.5 text-sm' : layout.spacious ? 'py-4 text-xl' : 'py-3.5 text-lg'} rounded-xl font-medium flex items-center justify-center gap-2
-                  ${isRunning || config.reward_peaks.length === 0
+                  ${isRunning || (isGridWorld && config.reward_peaks.length === 0)
                     ? 'bg-dark-panel text-muted-foreground cursor-not-allowed'
                     : 'bg-gradient-to-r from-neon-purple to-neon-blue text-white hover:shadow-lg hover:shadow-neon-purple/50'
                   }
@@ -1148,7 +1228,7 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                 )}
               </motion.button>
 
-              {config.reward_peaks.length === 0 && (
+              {isGridWorld && config.reward_peaks.length === 0 && (
                 <p className="text-xs text-red-500 text-center mt-2">
                   Please add at least one reward peak by clicking on the grid
                 </p>
@@ -1174,10 +1254,18 @@ export function ProblemSetup({ onStart }: ProblemSetupProps) {
                   <span className="text-[10px] text-muted-foreground block">Domain</span>
                   <span className="text-sm font-medium">{selectedDomain?.name || 'Grid World'}</span>
                 </div>
+                {isGridWorld && (
                 <div className="p-2 bg-dark-panel/50 rounded-lg border-l-2 border-neon-purple">
                   <span className="text-[10px] text-muted-foreground block">Grid</span>
                   <span className="text-sm font-medium">{config.grid_size}×{config.grid_size}</span>
                 </div>
+                )}
+                {isMolecule && typeof domainConfig.method === 'string' && (
+                <div className="p-2 bg-dark-panel/50 rounded-lg border-l-2 border-neon-purple">
+                  <span className="text-[10px] text-muted-foreground block">Method</span>
+                  <span className="text-sm font-medium capitalize">{domainConfig.method.replace(/_/g, ' ')}</span>
+                </div>
+                )}
                 <div className="p-2 bg-dark-panel/50 rounded-lg border-l-2 border-neon-green">
                   <span className="text-[10px] text-muted-foreground block">Objective</span>
                   <span className="text-sm font-medium">{config.training_objective.split('_').map(w => w[0]).join('')}</span>

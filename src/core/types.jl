@@ -142,6 +142,8 @@ issues while maintaining all mathematical properties.
 - `parameters::ComponentArray` - Neural network parameters
 - `optimizer` - Optimizer state (from Optimisers.jl)
 - `states::NamedTuple` - Neural network states (for Lux)
+- `preference_encoder` - MOGFN preference encoder (optional, Gap 5)
+- `z_network` - MOGFN Z(w) network (optional, Gap 5)
 
 # On-Demand DAG Properties
 The DAG structure is defined by:
@@ -159,7 +161,11 @@ mutable struct GFlowNetModel
     parameters::ComponentArray
     optimizer
     states::NamedTuple
+    # MOGFN extensions (Gap 5) — Lux.Chain objects for preference-conditioned training
+    preference_encoder   # Union{Nothing, Any} — maps w ∈ R^K → R^d (shared encoder)
+    z_network            # Union{Nothing, Any} — maps w_embed → log Z(w) (scalar)
 
+    # Full constructor with MOGFN fields (backward-compatible: defaults to nothing)
     function GFlowNetModel(
         initial_state::AbstractState,
         all_actions::Vector{<:AbstractAction},
@@ -169,13 +175,16 @@ mutable struct GFlowNetModel
         log_partition_function::Union{Nothing,Float64},
         parameters::ComponentArray,
         optimizer,
-        states::NamedTuple
+        states::NamedTuple,
+        preference_encoder=nothing,
+        z_network=nothing
     )
         if isempty(all_actions)
             throw(ArgumentError("all_actions cannot be empty"))
         end
         new(initial_state, all_actions, forward_policy, backward_policy, flow_estimator,
-            log_partition_function, parameters, optimizer, states)
+            log_partition_function, parameters, optimizer, states,
+            preference_encoder, z_network)
     end
 end
 

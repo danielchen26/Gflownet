@@ -76,11 +76,17 @@ obj = parse_objective("TRAJECTORY_BALANCE")
 function parse_objective(name::String)::TrainingObjective
     mapping = Dict(
         "TRAJECTORY_BALANCE"               => TRAJECTORY_BALANCE,
+        "TB"                               => TRAJECTORY_BALANCE,
         "DETAILED_BALANCE"                 => DETAILED_BALANCE,
+        "DB"                               => DETAILED_BALANCE,
         "FLOW_MATCHING"                    => FLOW_MATCHING,
+        "FM"                               => FLOW_MATCHING,
         "SUB_TRAJECTORY_BALANCE"           => SUB_TRAJECTORY_BALANCE,
+        "STB"                              => SUB_TRAJECTORY_BALANCE,
         "DIRECT_FLOW_OBJECTIVE"            => DIRECT_FLOW_OBJECTIVE,
+        "DFO"                              => DIRECT_FLOW_OBJECTIVE,
         "TRAJECTORY_LIKELIHOOD_MAXIMIZATION" => TRAJECTORY_LIKELIHOOD_MAXIMIZATION,
+        "TLM"                              => TRAJECTORY_LIKELIHOOD_MAXIMIZATION,
     )
     upper = uppercase(strip(name))
     haskey(mapping, upper) || error("Unknown objective: $name. Valid: $(join(keys(mapping), ", "))")
@@ -270,6 +276,26 @@ function step!(session::TrainingSession)::Dict
             (trajectories=fresh_trajectories, weights=ones(length(fresh_trajectories)), use_weights=false)
         end
 
+        # ---- 4b. Batch pre-compute oracle scores for terminal molecules ----
+        # This happens OUTSIDE the gradient computation — one PythonCall crossing per oracle.
+        # Oracle scores are cached so that reward() reads from cache during Zygote.withgradient.
+        if session.adapter isa MolecularAdapter && session.adapter.oracle_manager !== nothing
+            oracle_mgr = session.adapter.oracle_manager
+            if budget_remaining(oracle_mgr) > 0
+                terminal_smiles = String[]
+                all_trajs = training_data.trajectories
+                for traj in all_trajs
+                    terminal = traj.states[end]
+                    if hasproperty(terminal, :smiles) && !isempty(terminal.smiles)
+                        push!(terminal_smiles, terminal.smiles)
+                    end
+                end
+                if !isempty(terminal_smiles)
+                    evaluate_molecules!(oracle_mgr, unique(terminal_smiles))
+                end
+            end
+        end
+
         # ---- 5. Gradient descent step (weighted if replay active) ----
         loss_val, grad_norm = if training_data.use_weights
             GFlowNet.train_step_weighted!(model, training_data.trajectories, training_data.weights, config)
@@ -293,23 +319,60 @@ function step!(session::TrainingSession)::Dict
             end
         end
 
+        # Store molecules if this is a molecular domain
+        if hasproperty(session.adapter, :generated_molecules)
+            try
+                store_molecules_from_trajectories!(session.adapter, fresh_trajectories, session.current_iteration; session_id=session.id)
+            catch e
+                @warn "Molecule storage failed" exception=e
+            end
+        end
+
         # Compute rewards from terminal states
         batch_rewards = Float64[reward(t.states[end]) for t in fresh_trajectories]
         push!(session.rewards, mean(batch_rewards))
+
+        # Gap 1: Compute per-batch diversity from fingerprints
+        batch_diversity = nothing
+        try
+            batch_fps = Vector{Float32}[]
+            for t in fresh_trajectories
+                terminal = t.states[end]
+                if GFlowNet.is_terminal_state(terminal) && !isempty(terminal.smiles)
+                    if !isempty(terminal.fingerprint) && length(terminal.fingerprint) > 0
+                        push!(batch_fps, terminal.fingerprint)
+                    end
+                end
+            end
+            if length(batch_fps) >= 2
+                div_stats = RDKitBridge.compute_diversity_stats(batch_fps)
+                batch_diversity = Dict(
+                    "internal_diversity_1" => div_stats["internal_diversity_1"],
+                    "mean_pairwise"        => div_stats["mean_pairwise"],
+                    "n_molecules"          => div_stats["n_molecules"],
+                )
+            end
+        catch
+            # Diversity computation is non-critical
+        end
 
         # Check if done
         if session.current_iteration >= session.total_iterations
             session.is_training = false
         end
 
-        return Dict(
+        result = Dict(
             "status"         => "ok",
             "iteration"      => session.current_iteration,
             "loss"           => loss_val,
             "gradient_norm"  => grad_norm,
             "mean_reward"    => mean(batch_rewards),
-            "iteration_time" => iteration_time
+            "iteration_time" => iteration_time,
         )
+        if batch_diversity !== nothing
+            result["batch_diversity"] = batch_diversity
+        end
+        return result
 
     catch e
         session.error_count += 1

@@ -10,13 +10,11 @@ interface TrainingData {
   episodes: number[]
   losses: number[]
   rewards: number[]
-  tb_losses: number[]
-  flow_losses: number[]
+  gradient_norms: number[]
   metrics: {
     mean_loss: number
     mean_reward: number
-    mean_tb_loss: number
-    mean_flow_loss: number
+    mean_gradient_norm: number
     total_episodes: number
     convergence_estimate: number
   }
@@ -30,7 +28,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         <p className="text-xs text-muted-foreground mb-1">Episode {label}</p>
         {payload.map((entry: any, index: number) => (
           <p key={index} className="text-xs font-medium" style={{ color: entry.color }}>
-            {entry.name}: {entry.value.toFixed(4)}
+            {entry.name}: {(entry.value ?? 0).toFixed(4)}
           </p>
         ))}
       </div>
@@ -43,23 +41,24 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 interface GFlowNetTrainingDashboardProps {
   problemConfig?: any
+  trainingState?: any // Passed from parent to avoid duplicate polling
 }
 
-export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDashboardProps) {
+export function GFlowNetTrainingDashboard({ problemConfig, trainingState: externalState }: GFlowNetTrainingDashboardProps) {
   const [brushStartIndex, setBrushStartIndex] = useState<number | null>(null)
   const [brushEndIndex, setBrushEndIndex] = useState<number | null>(null)
   const cc = useChartColors()
   const layout = useThemeLayout()
-  
-  // Poll for current training state
-  const { data: trainingState } = useQuery({
+
+  // Use parent-provided state; only poll if not provided (standalone usage)
+  const { data: fetchedState } = useQuery({
     queryKey: ['training-state'],
-    queryFn: async () => {
-      return await api.training.getState()
-    },
-    refetchInterval: 250, // Fast updates for smooth animation
+    queryFn: () => api.training.getState(),
+    refetchInterval: 1000,
+    enabled: !externalState,
   })
 
+  const trainingState = externalState ?? fetchedState
   const isTraining = trainingState?.is_training || false
 
   // Get full training history from v2 API
@@ -77,28 +76,19 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
     // Backend returns {losses: [], rewards: [], gradient_norms: [], iteration_times: []}
     // We need to transform this to our expected format
 
-    console.log('📊 Training history raw data:', {
-      hasHistoryRaw: !!historyRaw,
-      hasLosses: historyRaw?.losses?.length > 0,
-      hasRewards: historyRaw?.rewards?.length > 0,
-      lossesLength: historyRaw?.losses?.length || 0,
-      rewardsLength: historyRaw?.rewards?.length || 0,
-    })
-
     // Check if backend returned historical arrays
     if (historyRaw && historyRaw.losses && historyRaw.losses.length > 0) {
       const length = historyRaw.losses.length
+      const gradNorms = historyRaw.gradient_norms || Array(length).fill(0)
       return {
-        episodes: Array.from({ length }, (_, i) => i + 1), // 1, 2, 3, ..., n
+        episodes: Array.from({ length }, (_, i) => i + 1),
         losses: historyRaw.losses,
         rewards: historyRaw.rewards || Array(length).fill(0),
-        tb_losses: historyRaw.losses, // V2 doesn't separate loss components
-        flow_losses: Array(length).fill(0),
+        gradient_norms: gradNorms,
         metrics: {
           mean_loss: historyRaw.losses.reduce((a:number, b:number) => a + b, 0) / length,
           mean_reward: historyRaw.rewards ? historyRaw.rewards.reduce((a:number, b:number) => a + b, 0) / length : 0,
-          mean_tb_loss: 0,
-          mean_flow_loss: 0,
+          mean_gradient_norm: gradNorms.reduce((a:number, b:number) => a + b, 0) / length,
           total_episodes: length,
           convergence_estimate: (trainingState?.current_iteration || 0) / (trainingState?.total_iterations || 1),
         }
@@ -107,25 +97,21 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
 
     // Fallback: If no history, create a single-point dataset from current training state
     if (trainingState && trainingState.current_iteration > 0) {
-      console.log('📊 Using fallback: creating single-point history from current state')
       return {
         episodes: [trainingState.current_iteration],
         losses: [trainingState.latest_loss || 0],
         rewards: [trainingState.latest_reward || 0],
-        tb_losses: [trainingState.latest_loss || 0],
-        flow_losses: [0],
+        gradient_norms: [trainingState.latest_gradient_norm || 0],
         metrics: {
           mean_loss: trainingState.latest_loss || 0,
           mean_reward: trainingState.metrics?.mean_reward || 0,
-          mean_tb_loss: 0,
-          mean_flow_loss: 0,
+          mean_gradient_norm: trainingState.latest_gradient_norm || 0,
           total_episodes: trainingState.current_iteration,
           convergence_estimate: trainingState.current_iteration / (trainingState.total_iterations || 1),
         }
       }
     }
 
-    console.log('📊 No history data available')
     return undefined
   }, [historyRaw, trainingState])
   
@@ -137,8 +123,7 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
       episode: episode,
       loss: history.losses[i],
       reward: history.rewards[i],
-      tb_loss: history.tb_losses[i],
-      flow_loss: history.flow_losses[i],
+      gradient_norm: history.gradient_norms[i],
     }))
   }, [history])
 
@@ -196,25 +181,7 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
                   stroke={cc.primary}
                   strokeWidth={2}
                   dot={false}
-                  name="Total"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="tb_loss"
-                  stroke={cc.secondary}
-                  strokeWidth={2}
-                  dot={false}
-                  name="TB"
-                  strokeDasharray="5 5"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="flow_loss"
-                  stroke={cc.tertiary}
-                  strokeWidth={2}
-                  dot={false}
-                  name="Flow"
-                  strokeDasharray="3 3"
+                  name="Loss"
                 />
                 <Legend
                   verticalAlign="top"
@@ -302,7 +269,7 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
           className={`glass-dark rounded-lg ${layout.compact ? 'p-1' : layout.spacious ? 'p-4' : 'p-2'}`}
         >
           <h3 className={`${layout.headingSize} font-medium text-muted-foreground ${layout.compact ? 'mb-1' : 'mb-2'}`}>
-            Loss Components Comparison
+            Gradient Norms
           </h3>
           <div style={{ width: '100%', height: `calc(100% - ${layout.compact ? '20px' : layout.spacious ? '40px' : '32px'})` }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -322,11 +289,7 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
                 <Tooltip content={<CustomTooltip />} />
 
                 <defs>
-                  <linearGradient id="tbGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={cc.secondary} stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor={cc.secondary} stopOpacity={0.1}/>
-                  </linearGradient>
-                  <linearGradient id="flowGradient" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="gradNormGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={cc.tertiary} stopOpacity={0.8}/>
                     <stop offset="95%" stopColor={cc.tertiary} stopOpacity={0.1}/>
                   </linearGradient>
@@ -334,22 +297,13 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
 
                 <Area
                   type="monotone"
-                  dataKey="tb_loss"
-                  stackId="1"
-                  stroke={cc.secondary}
-                  fill="url(#tbGradient)"
-                  name="TB Loss"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="flow_loss"
-                  stackId="1"
+                  dataKey="gradient_norm"
                   stroke={cc.tertiary}
-                  fill="url(#flowGradient)"
-                  name="Flow Loss"
+                  fill="url(#gradNormGradient)"
+                  name="Gradient Norm"
                 />
-                
-                <Legend 
+
+                <Legend
                   verticalAlign="top"
                   align="right"
                   height={20}
@@ -383,14 +337,18 @@ export function GFlowNetTrainingDashboard({ problemConfig }: GFlowNetTrainingDas
             </div>
 
             {/* Rolling Averages */}
-            <div className={`grid grid-cols-2 ${layout.compact ? 'gap-0.5' : 'gap-1.5'}`}>
+            <div className={`grid grid-cols-3 ${layout.compact ? 'gap-0.5' : 'gap-1.5'}`}>
               <div className={`glass-dark rounded ${layout.compact ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
                 <div className={`${layout.tinySize} text-muted-foreground`}>Mean Loss</div>
-                <div className={`${layout.labelSize} font-mono font-medium text-neon-blue`}>{metrics.mean_loss.toFixed(2)}</div>
+                <div className={`${layout.labelSize} font-mono font-medium text-neon-blue`}>{(metrics.mean_loss ?? 0).toFixed(2)}</div>
               </div>
               <div className={`glass-dark rounded ${layout.compact ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
                 <div className={`${layout.tinySize} text-muted-foreground`}>Mean Reward</div>
-                <div className={`${layout.labelSize} font-mono font-medium text-neon-green`}>{metrics.mean_reward.toFixed(2)}</div>
+                <div className={`${layout.labelSize} font-mono font-medium text-neon-green`}>{(metrics.mean_reward ?? 0).toFixed(2)}</div>
+              </div>
+              <div className={`glass-dark rounded ${layout.compact ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
+                <div className={`${layout.tinySize} text-muted-foreground`}>Grad Norm</div>
+                <div className={`${layout.labelSize} font-mono font-medium text-neon-orange`}>{(metrics.mean_gradient_norm ?? 0).toFixed(2)}</div>
               </div>
             </div>
 
