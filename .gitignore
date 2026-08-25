@@ -5,14 +5,10 @@
 .DS_Store
 /Manifest.toml
 /docs/Manifest.toml
-!/docs/Manifest.toml
 
 # Documentation build files
 /docbuild/
 /docs/build/
-
-# System files
-.DS_Store
 
 # IDE files
 .vscode/
