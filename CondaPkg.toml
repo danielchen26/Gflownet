@@ -1,5 +1,16 @@
 # Python dependencies for PythonCall (used by rdkit_bridge.jl)
 # CondaPkg automatically resolves and installs these when PythonCall loads.
+#
+# Everything here is a conda dependency ON PURPOSE. Do not reintroduce a
+# [pip.deps] section: mixing pip and conda dependencies forces pixi to fetch a
+# conda -> PyPI name mapping from the network, and that fetch fails hard with
+#   "failed to map conda packages to their PyPI equivalents
+#    ... Cache error: Request failed after 3 retries"
+# which aborts `using PythonCall`, which in turn makes
+# src/utils/visualization/python/rdkit_bridge.jl:9 unloadable and takes the
+# whole Oxygen server down (unified_server.jl:20 includes it outside the
+# try/catch at :35-42). All three former pip packages are available on
+# conda-forge, so the mix bought us nothing.
 
 [deps]
 python = ">=3.9,<3.13"
@@ -16,13 +27,22 @@ channel = "conda-forge"
 version = ">=1.2,<1.3"  # TDC pretrained models (DRD2, GSK3B, JNK3) require scikit-learn 1.2.x
 channel = "conda-forge"
 
-[pip.deps]
-umap-learn = ">=0.5"
-# PyTDC runtime deps — safe to install globally (no rdkit conflict)
-requests = ">=2.28"
-fuzzywuzzy = ">=0.18"
-# PyTDC itself is installed lazily by oracle_bridge.jl with --no-deps
-# (PyTDC pins rdkit<2024 but works fine with newer rdkit from conda-forge)
+# Chemical-space UMAP projection — rdkit_bridge.jl calls pyimport("umap")
+[deps.umap-learn]
+version = ">=0.5"
+channel = "conda-forge"
+
+# PyTDC runtime deps. PyTDC itself is still installed lazily by
+# oracle_bridge.jl with --no-deps (it pins rdkit<2024 but works fine with the
+# newer conda-forge rdkit above).
+[deps.requests]
+version = ">=2.28"
+channel = "conda-forge"
+
+[deps.fuzzywuzzy]
+version = ">=0.18"
+channel = "conda-forge"
+
 # meeko and vina require Boost C++ headers — install separately if needed:
-# meeko = ">=0.5"        # SMILES → PDBQT conversion for AutoDock Vina (Gap 2)
-# vina = ">=1.2.5"       # AutoDock Vina Python bindings (Gap 2)
+#   meeko >=0.5   # SMILES -> PDBQT conversion for AutoDock Vina (Gap 2)
+#   vina  >=1.2.5 # AutoDock Vina Python bindings (Gap 2)
