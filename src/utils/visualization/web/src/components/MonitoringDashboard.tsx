@@ -60,7 +60,7 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
 
   // Fetch training state for error info and status
   // NOTE: All hooks must be called before any conditional returns (React Rules of Hooks)
-  const { data: trainingState } = useQuery({
+  const { data: trainingState, isLoading: trainingStateLoading } = useQuery({
     queryKey: ['training-state'],
     queryFn: () => api.training.getState(),
     refetchInterval: 1000,
@@ -100,14 +100,33 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
     return { unique: uniqueSmiles.size, avgQED, avgReward, topReward, scaffoldCount: scaffolds.size }
   }, [feedMolecules])
 
-  // Guard: show placeholder when no training has been configured yet
-  if (!problemConfig) {
+  // Whether a run exists is decided by the SERVER, not by local React state.
+  //
+  // This used to be `if (!problemConfig)`. problemConfig is set in App.tsx only
+  // when training is started from this UI, so it was null after any page
+  // reload, and null for a run started through the API. The dashboard then
+  // claimed "No Training Active" while the backend was genuinely training --
+  // GET /api/v2/training/state reporting is_training: true, has_session: true.
+  const hasActiveSession = Boolean(
+    trainingState?.has_session ?? (trainingState?.is_training || trainingState?.current_iteration > 0)
+  ) || Boolean(problemConfig)
+
+  if (trainingStateLoading && !problemConfig) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-dark-bg text-center py-20">
+        <Activity className="w-12 h-12 text-muted-foreground mb-4 opacity-30 animate-pulse" />
+        <h2 className="text-lg font-semibold text-muted-foreground mb-2">Loading training state…</h2>
+      </div>
+    )
+  }
+
+  if (!hasActiveSession) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-dark-bg text-center py-20">
         <Activity className="w-12 h-12 text-muted-foreground mb-4 opacity-30" />
         <h2 className="text-lg font-semibold text-muted-foreground mb-2">No Training Active</h2>
         <p className="text-sm text-muted-foreground/60 max-w-md">
-          Go to the <span className="text-neon-purple font-medium">Setup</span> tab to configure your domain and start training.
+          Go to the <span className="text-neon-purple font-medium">Configure</span> tab to set up your domain and start training.
         </p>
       </div>
     )
@@ -156,16 +175,19 @@ export function MonitoringDashboard({ problemConfig, onRestart }: MonitoringDash
             </>
           ) : (
             <span className="text-muted-foreground">
-              Grid: {problemConfig.grid_size}×{problemConfig.grid_size}
+              {/* problemConfig is null for a run started via the API or after a
+                  page reload; these used to be unguarded dereferences and threw
+                  "Cannot read properties of null (reading 'grid_size')". */}
+              Grid: {problemConfig?.grid_size ?? '—'}×{problemConfig?.grid_size ?? '—'}
             </span>
           )}
           {!layout.compact && (
             <span className="text-muted-foreground">
-              Objective: <span className="text-neon-purple">{problemConfig.training_objective}</span>
+              Objective: <span className="text-neon-purple">{problemConfig?.training_objective ?? '—'}</span>
             </span>
           )}
           <span className="text-muted-foreground">
-            Ep: <span className="text-neon-blue">{problemConfig.n_episodes}</span>
+            Ep: <span className="text-neon-blue">{problemConfig?.n_episodes ?? trainingState?.total_iterations ?? '—'}</span>
           </span>
           <button
             onClick={() => setShowConfig(!showConfig)}

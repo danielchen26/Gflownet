@@ -28,8 +28,19 @@ version = ">=1.2,<1.3"  # TDC pretrained models (DRD2, GSK3B, JNK3) require scik
 channel = "conda-forge"
 
 # Chemical-space UMAP projection — rdkit_bridge.jl calls pyimport("umap")
+#
+# The upper bound is REQUIRED and coupled to the scikit-learn pin above.
+# umap-learn 0.5.8+ calls sklearn's check_array(..., ensure_all_finite=...), a
+# keyword that only exists from scikit-learn 1.6; 1.2.2 still names it
+# force_all_finite. With umap-learn 0.5.12 installed,
+# GET /api/v2/molecular/space returned
+#   {"points":[],"error":"...TypeError(\"check_array() got an unexpected
+#    keyword argument 'ensure_all_finite'\")"}
+# so the Chemical Space Explorer showed "No molecules in chemical space yet"
+# even with ~1900 molecules generated. If the scikit-learn pin is ever raised
+# past 1.6, this bound can be dropped.
 [deps.umap-learn]
-version = ">=0.5"
+version = ">=0.5,<0.5.7"
 channel = "conda-forge"
 
 # PyTDC runtime deps. PyTDC itself is still installed lazily by
