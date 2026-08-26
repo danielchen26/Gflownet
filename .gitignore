@@ -47,6 +47,15 @@ data/tdc_cache/
 /test_env/
 /results/
 
+# Regenerable example output. `/results/` above only matches the repo root, so
+# examples/grid_world/results/ (10 files, 988 KB, dated 2025-07-28) stayed
+# tracked. grid_world.jl:258,279 mkpath and rewrite it on every run.
+# NOTE: examples/feature_acquisition/archive/ is deliberately NOT listed --
+# those figures are not reproducible (their runners are broken by dead
+# include paths) and their fate is an owner decision.
+examples/*/results/
+examples/core_features/*/results/
+
 # Web visualization build artifacts
 src/utils/visualization/web/dist/
 src/utils/visualization/web/node_modules/
