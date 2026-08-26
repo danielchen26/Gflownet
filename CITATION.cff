@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software in academic work, please cite it as below."
+title: "GFlowNet.jl: A Julia Framework for Generative Flow Networks"
+abstract: >-
+  GFlowNet.jl is a Julia implementation of Generative Flow Networks (GFlowNets),
+  a class of generative models that learn to sample compositional objects with
+  probability proportional to a reward function. The package provides multiple
+  training objectives (Trajectory Balance, Detailed Balance, Flow Matching,
+  Sub-Trajectory Balance, Direct Flow), a domain-adapter architecture for
+  applying GFlowNets to new problem spaces, and applications spanning grid
+  worlds, molecular design, and combinatorial optimization.
+type: software
+authors:
+  - family-names: "Chen"
+    given-names: "Tianchi"
+version: "1.0.0"
+date-released: "2026-08-26"
+url: "https://github.com/danielchen26/Gflownet"
+repository-code: "https://github.com/danielchen26/Gflownet"
+license: MIT
+keywords:
+  - generative-flow-networks
+  - gflownet
+  - julia
+  - machine-learning
+  - probabilistic-inference
+  - molecular-design
+  - generative-models
