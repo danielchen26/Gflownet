@@ -10,11 +10,12 @@ println("Setting up GFlowNet example environments...")
 # exactly why five of them carried a fabricated GFlowNet UUID for so long --
 # this script never touched them, so nobody ever saw them fail to resolve.
 examples = String[]
-for (root, _, files) in walkdir(@__DIR__)
-    root == @__DIR__ && continue          # the examples/ root has no Project.toml
-    occursin("archive", root) && continue  # frozen v1/v2/v3 lineage, not runnable
+const _EXAMPLES_ROOT = @__DIR__   # bind it: `x == @__DIR__ && y` makes the macro swallow `&& y`
+for (root, _, files) in walkdir(_EXAMPLES_ROOT)
+    root == _EXAMPLES_ROOT && continue      # the examples/ root has no Project.toml
+    occursin("archive", root) && continue   # frozen v1/v2/v3 lineage, not runnable
     "Project.toml" in files || continue
-    push!(examples, relpath(root, @__DIR__))
+    push!(examples, relpath(root, _EXAMPLES_ROOT))
 end
 sort!(examples)
 println("Discovered $(length(examples)) example environment(s): ", join(examples, ", "))
