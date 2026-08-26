@@ -15,9 +15,17 @@ authors:
     given-names: "Tianchi"
 version: "1.0.0"
 date-released: "2026-08-26"
-url: "https://github.com/danielchen26/Gflownet"
+doi: "10.5281/zenodo.22117533"
+url: "https://doi.org/10.5281/zenodo.22117533"
 repository-code: "https://github.com/danielchen26/Gflownet"
 license: MIT
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22117533"
+    description: "Concept DOI - always resolves to the latest release"
+  - type: doi
+    value: "10.5281/zenodo.22117534"
+    description: "DOI for version 1.0.0"
 keywords:
   - generative-flow-networks
   - gflownet

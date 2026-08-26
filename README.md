@@ -5,6 +5,7 @@
 [![Version](https://img.shields.io/badge/Version-1.0.0-brightgreen.svg)](CHANGELOG.md)
 [![Julia](https://img.shields.io/badge/Julia-1.9+-blue.svg)](https://julialang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22117533.svg)](https://doi.org/10.5281/zenodo.22117533)
 [![Status](https://img.shields.io/badge/Status-Production_Ready-success.svg)](#production-ready-features)
 
 > **🎉 NEW: Version 1.0.0 Release!** Complete transformation to production-grade package with revolutionary visualizations, comprehensive data export, and publication-ready output.
@@ -455,19 +456,25 @@ license text.
 **Citation**: If you use GFlowNet.jl in academic work, please cite:
 
 > Tianchi Chen. *GFlowNet.jl: A Julia Framework for Generative Flow Networks*.
-> Version 1.0.0, 2026. https://github.com/danielchen26/Gflownet
+> Version 1.0.0, 2026. https://doi.org/10.5281/zenodo.22117533
 
 BibTeX:
 ```bibtex
 @software{chen_gflownet_jl_2026,
-  author  = {Chen, Tianchi},
-  title   = {GFlowNet.jl: A Julia Framework for Generative Flow Networks},
-  version = {1.0.0},
-  year    = {2026},
-  url     = {https://github.com/danielchen26/Gflownet},
-  license = {MIT}
+  author    = {Chen, Tianchi},
+  title     = {GFlowNet.jl: A Julia Framework for Generative Flow Networks},
+  version   = {1.0.0},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.22117533},
+  url       = {https://doi.org/10.5281/zenodo.22117533},
+  license   = {MIT}
 }
 ```
+
+**DOI**: [`10.5281/zenodo.22117533`](https://doi.org/10.5281/zenodo.22117533)
+always resolves to the latest release. To cite this exact version, use the
+v1.0.0 DOI [`10.5281/zenodo.22117534`](https://doi.org/10.5281/zenodo.22117534).
 
 Machine-readable citation metadata lives in [CITATION.cff](CITATION.cff);
 GitHub renders a "Cite this repository" button from it.
