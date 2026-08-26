@@ -446,19 +446,31 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 
 ## 📄 License & Citation
 
-**License**: MIT License - see [LICENSE](LICENSE) file for details.
+**License**: MIT License, Copyright (c) 2025–2026 Tianchi Chen - see [LICENSE](LICENSE) for details.
 
-**Citation**:
+Under the MIT License, any copy, modification, or redistribution of this code
+(or substantial portions of it) must retain the copyright notice and the full
+license text.
+
+**Citation**: If you use GFlowNet.jl in academic work, please cite:
+
+> Tianchi Chen. *GFlowNet.jl: A Julia Framework for Generative Flow Networks*.
+> Version 1.0.0, 2026. https://github.com/danielchen26/Gflownet
+
+BibTeX:
 ```bibtex
-@software{gflownet_jl_2025,
-  title={GFlowNet.jl: Production-Ready Generative Flow Networks},
-  author={Chen, Tianchi},
-  version={1.0.0},
-  year={2025},
-  url={https://github.com/danielchen26/Gflownet},
-  note={Professional implementation with comprehensive tooling}
+@software{chen_gflownet_jl_2026,
+  author  = {Chen, Tianchi},
+  title   = {GFlowNet.jl: A Julia Framework for Generative Flow Networks},
+  version = {1.0.0},
+  year    = {2026},
+  url     = {https://github.com/danielchen26/Gflownet},
+  license = {MIT}
 }
 ```
+
+Machine-readable citation metadata lives in [CITATION.cff](CITATION.cff);
+GitHub renders a "Cite this repository" button from it.
 
 ## 🌟 Transformation Showcase
 
