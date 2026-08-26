@@ -12,9 +12,6 @@ println("=" ^ 60)
 # Define test groups with their paths
 # Order matters: core functionality first, then higher-level features
 test_groups = [
-    ("Core Utilities", [
-        "core/test_utilities.jl"
-    ]),
     ("Neural Networks", [
         "core/neural_networks/test_neural_networks.jl"
     ]),

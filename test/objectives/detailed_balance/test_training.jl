@@ -1,3 +1,4 @@
+using Test
 using GFlowNet
 using GFlowNet: compute_trajectory_loss
 
@@ -17,22 +18,18 @@ config = TrainingConfig(
     learning_rate=0.01
 )
 
-println("Testing DETAILED_BALANCE training...")
+@testset "DETAILED_BALANCE training" begin
+    history = train_gflownet(model, config; verbose=false)
 
-# Train
-history = train_gflownet(model, config; verbose=true)
+    # Training must produce one loss per iteration, and at least one of them
+    # must be a real number. Previously this file only printed history.losses.
+    @test length(history.losses) == config.n_iterations
+    @test any(!isnan, history.losses)
 
-println("\nTraining history:")
-println("Losses: $(history.losses)")
-println("Valid losses: $(filter(!isnan, history.losses))")
-
-# Test a single step manually
-println("\nTesting single training step...")
-trajectories = [sample_trajectory(model) for _ in 1:4]
-
-try
+    # A single manual step must compute a finite loss. This was wrapped in
+    # try/catch that printed "✗ Error in single step" and let the file pass,
+    # so a broken DETAILED_BALANCE objective reported green.
+    trajectories = [sample_trajectory(model) for _ in 1:4]
     loss = compute_trajectory_loss(model, trajectories, model.parameters, config)
-    println("✓ Single step loss: $loss")
-catch e
-    println("✗ Error in single step: $e")
+    @test isfinite(loss)
 end

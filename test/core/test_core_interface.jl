@@ -43,13 +43,13 @@ using Random
         # This test is removed because forward_action_probabilities, sample_forward_action, 
         # and forward_probability don't exist as model methods in the current interface.
         # The actual functions exist in policies.jl but require different signatures.
-        @test true  # Placeholder to keep test structure
+        @test_broken false  # real assertions were deleted; see the note above
     end
     
     @testset "Flow Functions" begin
         # This test is removed because flow_estimate doesn't exist as a model method.
         # The actual function exists in policies.jl but requires different signature.
-        @test true  # Placeholder to keep test structure
+        @test_broken false  # real assertions were deleted; see the note above
     end
     
     @testset "Trajectory Functions" begin
@@ -118,6 +118,6 @@ using Random
     @testset "Validation Functions" begin
         # These specific validation functions don't exist in the current interface.
         # The actual validation is done through other mechanisms.
-        @test true  # Placeholder to keep test structure
+        @test_broken false  # real assertions were deleted; see the note above
     end
 end
