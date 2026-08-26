@@ -29,6 +29,7 @@ the fundamental flow conservation equation F(s) = Σ_{s'} P_F(s'|s) * F(s'):
     COMBINED_OBJECTIVES
     TRAJECTORY_LIKELIHOOD_MAXIMIZATION  # TLM (ICLR 2025) - learns backward policy
     MULTI_OBJECTIVE_TB                  # MOGFN-PC (Gap 5) - preference-conditioned TB
+    SHIFTED_COSH_TB                     # CAFE-GFN: Shifted-Cosh TB loss (ICLR 2025 Theorem 4.7)
 end
 
 """
@@ -74,25 +75,6 @@ config = TrainingConfig(
     SAMPLING_ESTIMATION
     LEARNABLE_ESTIMATION
     ADAPTIVE_ESTIMATION
-end
-
-"""
-    OptimizationMethod
-
-Neural network optimization algorithms.
-
-# Mathematical Foundation
-Different optimization strategies for minimizing L(θ):
-- ADAM: Adaptive moment estimation with bias correction
-- RMSPROP: Root mean square propagation
-- SGD: Stochastic gradient descent
-- ADAMW: Adam with weight decay regularization
-"""
-@enum OptimizationMethod begin
-    ADAM
-    RMSPROP
-    SGD
-    ADAMW
 end
 
 # =============================================================================
@@ -146,7 +128,6 @@ struct TrainingConfig
     # Core training parameters
     objective::TrainingObjective
     partition_function_method::PartitionFunctionMethod
-    optimization_method::OptimizationMethod
 
     # Training schedule
     n_iterations::Int
@@ -199,10 +180,19 @@ struct TrainingConfig
     mogfn_preference_dim::Int            # Preference embedding dimension (default 64)
     mogfn_dirichlet_alpha::Float64       # Dirichlet concentration for preference sampling (default 1.0)
 
+    # CAFE-GFN: Shifted-Cosh TB loss and advanced training (ICLR 2025)
+    loss_type::Symbol                    # :mse (default) or :shifted_cosh
+    cosh_delta_threshold::Float64        # Hybrid linear extension threshold (default 15.0)
+    kl_weight::Float64                   # KL regularization weight for fine-tuning (default 0.0)
+    kl_decay_schedule::Symbol            # :none, :cosine, :linear (default :none)
+
+    # QGFN: Q-function guided inference (NeurIPS 2024)
+    q_learning_rate_multiplier::Float64  # Learning rate multiplier for Q-function (default 1.0)
+    q_masking_quantile::Float64          # p-quantile masking threshold (0.0 = off, default 0.0)
+
     function TrainingConfig(;
         objective::TrainingObjective=TRAJECTORY_BALANCE,
         partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION,
-        optimization_method::OptimizationMethod=ADAM,
         n_iterations::Int=1000,
         batch_size::Int=32,
         learning_rate::Float64=1e-3,
@@ -232,7 +222,15 @@ struct TrainingConfig
         # MOGFN-PC parameters (Gap 5, ICML 2023)
         mogfn_n_objectives::Int=4,              # Number of objectives (QED, SA, LogP, MW)
         mogfn_preference_dim::Int=64,           # Preference embedding dimension
-        mogfn_dirichlet_alpha::Float64=1.0      # Dirichlet concentration (1.0 = uniform simplex)
+        mogfn_dirichlet_alpha::Float64=1.0,     # Dirichlet concentration (1.0 = uniform simplex)
+        # CAFE-GFN parameters
+        loss_type::Symbol=:mse,                 # :mse or :shifted_cosh
+        cosh_delta_threshold::Float64=15.0,     # Hybrid linear extension threshold
+        kl_weight::Float64=0.0,                 # KL regularization weight (0 = off)
+        kl_decay_schedule::Symbol=:none,        # :none, :cosine, :linear
+        # QGFN parameters
+        q_learning_rate_multiplier::Float64=1.0,  # Q-function learning rate multiplier
+        q_masking_quantile::Float64=0.0         # p-quantile masking (0 = off)
     )
         # Validation
         if n_iterations <= 0
@@ -298,8 +296,32 @@ struct TrainingConfig
         if mogfn_dirichlet_alpha <= 0
             throw(ArgumentError("mogfn_dirichlet_alpha must be positive"))
         end
+        # CAFE-GFN validation
+        # Auto-set loss_type when using SHIFTED_COSH_TB objective
+        if objective == SHIFTED_COSH_TB
+            loss_type = :shifted_cosh
+        end
+        if !(loss_type in (:mse, :shifted_cosh))
+            throw(ArgumentError("loss_type must be :mse or :shifted_cosh"))
+        end
+        if cosh_delta_threshold <= 0
+            throw(ArgumentError("cosh_delta_threshold must be positive"))
+        end
+        if kl_weight < 0
+            throw(ArgumentError("kl_weight must be non-negative"))
+        end
+        if !(kl_decay_schedule in (:none, :cosine, :linear))
+            throw(ArgumentError("kl_decay_schedule must be :none, :cosine, or :linear"))
+        end
+        # QGFN validation
+        if q_learning_rate_multiplier <= 0
+            throw(ArgumentError("q_learning_rate_multiplier must be positive"))
+        end
+        if !(0.0 <= q_masking_quantile <= 1.0)
+            throw(ArgumentError("q_masking_quantile must be in [0.0, 1.0]"))
+        end
 
-        new(objective, partition_function_method, optimization_method,
+        new(objective, partition_function_method,
             n_iterations, batch_size, learning_rate,
             entropy_weight, parameter_regularization, gradient_clip_norm,
             temperature, exploration_noise, epsilon, epsilon_decay,
@@ -307,7 +329,9 @@ struct TrainingConfig
             verbose, sub_trajectory_length, z_learning_rate_multiplier,
             use_replay_buffer, replay_buffer_size, replay_ratio, replay_priority_alpha,
             tlm_backward_weight, tlm_update_frequency, tlm_entropy_coeff,
-            mogfn_n_objectives, mogfn_preference_dim, mogfn_dirichlet_alpha)
+            mogfn_n_objectives, mogfn_preference_dim, mogfn_dirichlet_alpha,
+            loss_type, cosh_delta_threshold, kl_weight, kl_decay_schedule,
+            q_learning_rate_multiplier, q_masking_quantile)
     end
 end
 
@@ -446,6 +470,8 @@ function get_objective_requirements(objective::TrainingObjective)::Vector{String
         return ["forward_policy", "backward_policy"]  # TLM requires both policies
     elseif objective == MULTI_OBJECTIVE_TB
         return ["forward_policy", "preference_encoder", "z_network"]  # MOGFN-PC
+    elseif objective == SHIFTED_COSH_TB
+        return ["forward_policy"]  # Same as TB, just different loss function
     else
         return String[]
     end
@@ -491,31 +517,6 @@ function estimate_training_time(config::TrainingConfig, model::GFlowNetModel)::F
     total_time = time_per_iteration * config.n_iterations
 
     return total_time
-end
-
-"""
-    create_optimizer(method::OptimizationMethod, learning_rate::Float64)
-
-Create optimizer instance for the specified method.
-
-# Mathematical Foundation
-Different optimizers implement different update rules:
-- Adam: Uses adaptive learning rates with momentum
-- RMSprop: Scales learning rate by running average of gradients
-- SGD: Simple gradient descent with optional momentum
-"""
-function create_optimizer(method::OptimizationMethod, learning_rate::Float64)
-    if method == ADAM
-        return Optimisers.Adam(learning_rate)
-    elseif method == RMSPROP
-        return Optimisers.RMSprop(learning_rate)
-    elseif method == SGD
-        return Optimisers.Descent(learning_rate)
-    elseif method == ADAMW
-        return Optimisers.AdamW(learning_rate)
-    else
-        throw(ArgumentError("Unknown optimization method: $method"))
-    end
 end
 
 # =============================================================================
@@ -605,7 +606,8 @@ function Base.show(io::IO, objective::TrainingObjective)
         DIRECT_FLOW_OBJECTIVE => "Direct Flow Objective",
         COMBINED_OBJECTIVES => "Combined Objectives",
         TRAJECTORY_LIKELIHOOD_MAXIMIZATION => "TLM (ICLR 2025)",
-        MULTI_OBJECTIVE_TB => "MOGFN-PC (Gap 5)"
+        MULTI_OBJECTIVE_TB => "MOGFN-PC (Gap 5)",
+        SHIFTED_COSH_TB => "Shifted-Cosh TB (CAFE-GFN)"
     )
     print(io, get(objective_names, objective, "Unknown Objective"))
 end
@@ -620,10 +622,6 @@ function Base.show(io::IO, method::PartitionFunctionMethod)
     print(io, get(method_names, method, "Unknown Method"))
 end
 
-function Base.show(io::IO, opt_method::OptimizationMethod)
-    print(io, string(opt_method))
-end
-
 function Base.show(io::IO, config::TrainingConfig)
     print(io, "TrainingConfig($(config.objective), lr=$(config.learning_rate), batch=$(config.batch_size), iter=$(config.n_iterations), ε=$(config.epsilon))")
 end
@@ -631,7 +629,6 @@ end
 function Base.show(io::IO, ::MIME"text/plain", config::TrainingConfig)
     println(io, "GFlowNet Training Configuration:")
     println(io, "  Objective: $(config.objective)")
-    println(io, "  Optimization: $(config.optimization_method)")
     println(io, "  Iterations: $(config.n_iterations)")
     println(io, "  Batch size: $(config.batch_size)")
     println(io, "  Learning rate: $(config.learning_rate)")

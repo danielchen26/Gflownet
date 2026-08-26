@@ -5,7 +5,7 @@ using Zygote
 using Statistics
 
 using ..GFlowNet: GFlowNetModel, Trajectory, TrainingConfig, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB, SHIFTED_COSH_TB
 using ..GFlowNet: AbstractState, AbstractAction
 using ..GFlowNet: state_to_features, is_terminal_state, reward, is_applicable, apply_action
 using ..GFlowNet: get_applicable_actions, is_valid_trajectory
@@ -13,6 +13,43 @@ using ..GFlowNet: forward_action_probabilities, compute_backward_probability
 using ..GFlowNet: forward_transition_probability, backward_transition_probability
 using ..GFlowNet: flow, flow_estimate, compute_flow_estimate
 using ..GFlowNet: sub_trajectory_balance_loss_batch, direct_flow_loss_batch
+
+# =============================================================================
+# Loss Functions — TB Error → Scalar Loss
+# =============================================================================
+
+"""
+    apply_tb_loss(delta, loss_type; threshold=15.0)
+
+Apply the chosen loss function to a trajectory balance error δ = log Z + log P_F - log R.
+
+# Loss Types
+- `:mse` — Standard squared error: δ²
+- `:shifted_cosh` — Hybrid Shifted-Cosh (ICLR 2025 Theorem 4.7):
+  - For |δ| ≤ threshold: 2(cosh(δ) - 1) — mode-covering AND mode-seeking
+  - For |δ| > threshold: smooth linear extension to prevent gradient explosion
+
+  The shifted-cosh loss g(δ) = e^δ + e^{-δ} - 2 has the property that
+  g'(δ) = sinh(δ), which grows exponentially. The hybrid extension caps
+  the gradient at sinh(threshold) for numerical stability.
+"""
+function apply_tb_loss(delta, loss_type::Symbol=:mse; threshold::Float64=15.0)
+    if loss_type == :mse
+        return delta^2
+    elseif loss_type == :shifted_cosh
+        abs_d = abs(delta)
+        if abs_d <= threshold
+            return 2.0 * (cosh(delta) - 1.0)
+        else
+            # Smooth linear extension: constant gradient beyond threshold
+            L_th = 2.0 * (cosh(threshold) - 1.0)
+            dL_th = 2.0 * sinh(threshold)
+            return L_th + dL_th * (abs_d - threshold)
+        end
+    else
+        error("Unknown loss_type: $loss_type. Use :mse or :shifted_cosh")
+    end
+end
 
 # =============================================================================
 # Loss Computation - Mathematically Correct Implementations
@@ -31,7 +68,7 @@ Supports:
 function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Trajectory},
                                 params, config::TrainingConfig)
 
-    if config.objective == TRAJECTORY_BALANCE
+    if config.objective == TRAJECTORY_BALANCE || config.objective == SHIFTED_COSH_TB
         # Filter valid trajectories (discrete validation - non-differentiable)
         valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
 
@@ -40,7 +77,7 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         end
 
         # Compute losses using Zygote-safe operations
-        losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
+        losses = [compute_single_trajectory_loss(model, traj, params, config) for traj in valid_trajectories]
 
         # Filter out infinite losses
         finite_losses = filter(!isinf, losses)
@@ -311,7 +348,7 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         end
 
         # Compute forward loss (standard TB loss)
-        forward_losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
+        forward_losses = [compute_single_trajectory_loss(model, traj, params, config) for traj in valid_trajectories]
         finite_forward = filter(!isinf, forward_losses)
         forward_loss = isempty(finite_forward) ? Inf : mean(finite_forward)
 
@@ -404,11 +441,13 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
 end
 
 """
-    compute_single_trajectory_loss(model, trajectory, params)
+    compute_single_trajectory_loss(model, trajectory, params[, config])
 
 Compute loss for single trajectory with CORRECTED trajectory balance.
+Supports MSE (default) and Shifted-Cosh loss via config.loss_type.
 """
-function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajectory, params)
+function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajectory, params,
+                                        config::Union{TrainingConfig, Nothing}=nothing)
 
     # Compute log probability of trajectory
     log_prob_sum = 0.0
@@ -483,7 +522,10 @@ function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajec
     
     trajectory_balance_error = log_Z + log_prob_sum - log_reward
 
-    return trajectory_balance_error^2
+    # Apply configured loss function (MSE default, Shifted-Cosh for CAFE-GFN)
+    loss_type = isnothing(config) ? :mse : config.loss_type
+    threshold = isnothing(config) ? 15.0 : config.cosh_delta_threshold
+    return apply_tb_loss(trajectory_balance_error, loss_type; threshold=threshold)
 end
 
 # =============================================================================
@@ -620,8 +662,8 @@ function compute_weighted_trajectory_loss(model::GFlowNetModel,
     valid_weights = [d[2] for d in valid_data]
 
     # Compute individual losses (same as compute_trajectory_loss but for TB only currently)
-    if config.objective == TRAJECTORY_BALANCE
-        losses = [compute_single_trajectory_loss(model, traj, params) for traj in valid_trajectories]
+    if config.objective == TRAJECTORY_BALANCE || config.objective == SHIFTED_COSH_TB
+        losses = [compute_single_trajectory_loss(model, traj, params, config) for traj in valid_trajectories]
 
         # Apply importance weights
         weighted_losses = losses .* valid_weights
@@ -882,7 +924,7 @@ function compute_mogfn_single_trajectory_loss(model::GFlowNetModel,
 
     # MOGFN Trajectory Balance Loss
     trajectory_balance_error = log_Z + log_prob_sum - log_reward
-    return trajectory_balance_error^2
+    return apply_tb_loss(trajectory_balance_error, :mse)
 end
 
 """
@@ -934,6 +976,114 @@ function compute_mogfn_entropy_loss(model::GFlowNetModel, trajectories::Vector{T
     end
 
     return n_states > 0 ? -(total_entropy / n_states) : 0.0
+end
+
+# =============================================================================
+# KL Regularization for Fine-Tuning (CAFE-GFN)
+# =============================================================================
+
+"""
+    compute_kl_regularization_loss(model, trajectories, params, ref_params, ref_states)
+
+Compute KL divergence between current policy and frozen reference policy.
+
+KL(π_θ || π₀) = Σ_s Σ_a π_θ(a|s) [log π_θ(a|s) - log π₀(a|s)]
+
+This prevents the fine-tuned policy from diverging too far from the pretrained
+distribution, maintaining chemical validity while optimizing for the target property.
+
+The reference policy parameters are frozen (wrapped in Zygote.@ignore).
+
+# Arguments
+- `model`: GFlowNet model with forward policy
+- `trajectories`: Trajectories from the current policy
+- `params`: Current model parameters (differentiable)
+- `ref_params`: Frozen reference policy parameters
+- `ref_states`: Frozen reference Lux states
+
+# Returns
+Average per-step KL divergence
+"""
+function compute_kl_regularization_loss(model::GFlowNetModel,
+                                         trajectories::Vector{Trajectory},
+                                         params, ref_params, ref_states)
+    kl_sum = 0.0
+    n_steps = 0
+
+    for traj in trajectories
+        for i in 1:(length(traj.states) - 1)
+            state = traj.states[i]
+
+            if Zygote.@ignore is_terminal_state(state)
+                continue
+            end
+
+            features = Zygote.@ignore state_to_features(state)
+
+            applicable_indices = Zygote.@ignore begin
+                applicable = get_applicable_actions(state, model.all_actions)
+                isempty(applicable) ? Int[] : [idx for (idx, a) in enumerate(model.all_actions) if a in applicable]
+            end
+
+            if isempty(applicable_indices)
+                continue
+            end
+
+            # Current policy logits (differentiable)
+            logits_theta, _ = model.forward_policy.model(features, params.forward, model.states.forward)
+            applicable_logits_theta = logits_theta[applicable_indices]
+            log_probs_theta = applicable_logits_theta .- logsumexp(applicable_logits_theta)
+
+            # Reference policy logits (frozen — no gradient)
+            log_probs_0 = Zygote.@ignore begin
+                logits_0, _ = model.forward_policy.model(features, ref_params.forward, ref_states.forward)
+                applicable_logits_0 = logits_0[applicable_indices]
+                applicable_logits_0 .- logsumexp(applicable_logits_0)
+            end
+
+            # KL divergence: Σ_a p_θ(a|s) * [log p_θ(a|s) - log p_0(a|s)]
+            probs_theta = exp.(log_probs_theta)
+            for (p, lp_theta, lp_0) in zip(probs_theta, log_probs_theta, log_probs_0)
+                if p > 1e-10
+                    kl_sum += p * (lp_theta - lp_0)
+                end
+            end
+            n_steps += 1
+        end
+    end
+
+    return n_steps > 0 ? kl_sum / n_steps : 0.0
+end
+
+"""
+    compute_kl_weight(config::TrainingConfig, iteration::Int, n_iterations::Int)
+
+Compute the KL regularization weight with optional decay schedule.
+
+# Schedules
+- `:none` — constant weight
+- `:cosine` — cosine annealing from kl_weight to 0
+- `:linear` — linear decay from kl_weight to 0
+"""
+function compute_kl_weight(config, iteration::Int, n_iterations::Int)::Float64
+    base_weight = config.kl_weight
+
+    if base_weight <= 0.0
+        return 0.0
+    end
+
+    schedule = config.kl_decay_schedule
+    progress = iteration / max(n_iterations, 1)
+
+    if schedule == :none
+        return base_weight
+    elseif schedule == :cosine
+        return base_weight * 0.5 * (1.0 + cos(π * progress))
+    elseif schedule == :linear
+        return base_weight * (1.0 - progress)
+    else
+        return base_weight
+    end
 end
 
 """Helper: Sample from Gamma(alpha, 1) for non-unit Dirichlet (used in MOGFN loss)."""

@@ -9,7 +9,7 @@ using Random
 
 using ..GFlowNet: AbstractState, AbstractAction, GFlowNetModel, Trajectory
 using ..GFlowNet: TrainingConfig, TrainingHistory, TrainingObjective
-using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB
+using ..GFlowNet: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB, SHIFTED_COSH_TB
 using ..GFlowNet: SamplingConfig
 using ..GFlowNet: state_to_features, reward, is_terminal_state, is_applicable
 using ..GFlowNet: get_applicable_actions, apply_action
@@ -338,6 +338,14 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
         grads[1]
     end
 
+    # Apply gradient clipping (critical for Shifted-Cosh stability)
+    # The gradient_clip_norm field existed in config but was never applied — fixing this latent bug
+    scaled_norm = compute_gradient_norm(scaled_grads)
+    if scaled_norm > config.gradient_clip_norm
+        clip_scale = config.gradient_clip_norm / scaled_norm
+        scaled_grads = clip_scale .* scaled_grads
+    end
+
     # Update parameters using Optimisers.jl
     optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, scaled_grads)
 
@@ -443,6 +451,13 @@ function train_step_weighted!(model::GFlowNetModel, trajectories::Vector{Traject
         scale_z_gradient(grads[1], config.z_learning_rate_multiplier)
     else
         grads[1]
+    end
+
+    # Apply gradient clipping
+    scaled_norm = compute_gradient_norm(scaled_grads)
+    if scaled_norm > config.gradient_clip_norm
+        clip_scale = config.gradient_clip_norm / scaled_norm
+        scaled_grads = clip_scale .* scaled_grads
     end
 
     # Update parameters using Optimisers.jl
