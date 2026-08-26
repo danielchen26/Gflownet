@@ -173,10 +173,16 @@ println("\n🔧 Testing Training Code Reorganization...")
     @testset "Gradient Computation After Reorganization" begin
         println("  Testing gradient computation...")
         
+        # include_flow_estimator is REQUIRED: the objective loop below includes
+        # FLOW_MATCHING, whose loss reads parameters.flow. Without it the access
+        # happens inside Zygote.withgradient, which turned a plain
+        # "type NamedTuple has no field flow" into an intermittent
+        # `signal 11 (2): Segmentation fault` that crashed the whole suite.
         model = create_grid_world_gflownet(
             grid_size = 3,
             hidden_dim = 16,
             include_backward = true,
+            include_flow_estimator = true,
             partition_function_method = LEARNABLE_ESTIMATION
         )
         
