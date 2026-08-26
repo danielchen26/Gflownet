@@ -1340,7 +1340,7 @@ end
     ))
 end
 
-@get "/api/v2/molecular/molecules/:id/objectives" function(req, id)
+@get "/api/v2/molecular/molecules/{id}/objectives" function(req, id::String)
     # Compute objectives for a specific molecule
     session = CURRENT_SESSION[]
     if session === nothing
