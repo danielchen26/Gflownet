@@ -2,6 +2,9 @@
 Oxygen = "df9a0d86-3283-4920-82dc-4555fc0d1d8b"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+# show_visualization.jl and all three demo_*.jl files do `using GFlowNet` under
+# this environment, but it was never declared here.
+GFlowNet = "2d7ca041-c8ad-46e9-a25d-4e8f55c0c8f5"
 
 [compat]
 Oxygen = "1.5"

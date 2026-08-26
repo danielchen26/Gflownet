@@ -5,6 +5,10 @@
 .DS_Store
 /Manifest.toml
 /docs/Manifest.toml
+# Same policy for every example environment. Tracking these caused exactly the
+# breakage fixed in the Task 1 commit: a manifest resolved on one Julia version
+# cannot be instantiated on another. Pin through [compat] instead.
+examples/**/Manifest.toml
 
 # Documentation build files
 /docbuild/

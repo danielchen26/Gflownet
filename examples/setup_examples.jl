@@ -5,13 +5,19 @@
 
 println("Setting up GFlowNet example environments...")
 
-examples = [
-    "grid_world",
-    "molecule_design",
-    "causal_discovery",
-    "active_learning",
-    "feature_acquisition"
-]
+# Discover every example environment instead of hardcoding a list. The old
+# hardcoded list omitted all seven core_features/* environments, which is
+# exactly why five of them carried a fabricated GFlowNet UUID for so long --
+# this script never touched them, so nobody ever saw them fail to resolve.
+examples = String[]
+for (root, _, files) in walkdir(@__DIR__)
+    root == @__DIR__ && continue          # the examples/ root has no Project.toml
+    occursin("archive", root) && continue  # frozen v1/v2/v3 lineage, not runnable
+    "Project.toml" in files || continue
+    push!(examples, relpath(root, @__DIR__))
+end
+sort!(examples)
+println("Discovered $(length(examples)) example environment(s): ", join(examples, ", "))
 
 using Pkg
 
@@ -84,7 +90,7 @@ if successful_setups > 0
         "molecule_design" => "molecule_example.jl",
         "causal_discovery" => "causal_discovery.jl",
         "active_learning" => "active_learning.jl",
-        "feature_acquisition" => "feature_acquisition.jl"
+        "feature_acquisition" => "main.jl"
     )
     
     for example in examples
