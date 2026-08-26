@@ -50,6 +50,16 @@ test_groups = [
         "objectives/learnable_z/test_learnable_z.jl",
         "objectives/learnable_z/test_perfect_z_learning.jl"
     ]),
+    # Previously orphaned: present on disk but never included. Both verified
+    # green standalone before wiring (24 and 20 assertions respectively).
+    # NOT wired, because they fail standalone and need a real fix first:
+    #   objectives/direct_flow/test_direct_flow.jl            17 pass, 2 fail
+    #   objectives/sub_trajectory_balance/...                 ArgumentError:
+    #     "Invalid trajectory: length(states) must equal length(actions) + 1"
+    ("Exploration", [
+        "exploration/test_exploration_improvements.jl",
+        "exploration/test_z_learning_rate_multiplier.jl"
+    ]),
     ("Multi-Start GFlowNets", [
         "core/multi_start/test_multi_start.jl"
     ]),
