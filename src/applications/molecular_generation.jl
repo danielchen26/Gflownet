@@ -12,6 +12,13 @@ using Random
 using GFlowNet: AbstractState, AbstractAction, GFlowNetModel
 using GFlowNet: ForwardPolicy, PartitionFunctionMethod, LEARNABLE_ESTIMATION
 
+# JSON3 is used by load_fragment_library at :256. It previously resolved only
+# because unified_server.jl:5 happens to have `using JSON3` at Main scope; the
+# file's other two consumers (scripts/validate_all_gaps.jl and
+# experiments/objective_comparison_drd2.jl) do not, so load_fragment_library
+# threw "UndefVarError: `JSON3` not defined" there.
+using JSON3
+
 # ============================================
 # State Type
 # ============================================
