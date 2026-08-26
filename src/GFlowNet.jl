@@ -88,9 +88,62 @@ include("utils/visualization.jl")
 include("utils/report.jl")
 
 # =============================================================================
+# SMILES Representations (CAFE-GFN)
+# =============================================================================
+
+include("representations/smiles/tokenizer.jl")
+include("representations/smiles/smiles_state.jl")
+include("representations/smiles/smiles_policy.jl")
+
+# =============================================================================
+# Advanced Training (CAFE-GFN)
+# =============================================================================
+
+include("training/pretraining.jl")
+include("training/smiles_replay_buffer.jl")
+include("training/molecular_frontier_buffer.jl")
+include("training/frontier_sampling.jl")
+include("training/hierarchical_controller_dataset.jl")
+include("training/hierarchical_controller_models.jl")
+include("training/hierarchical_controller_training.jl")
+include("training/edit_operators.jl")
+include("training/edit_trajectory_buffer.jl")
+include("training/finetuning.jl")
+include("training/genetic_operations.jl")
+include("training/scaffold_aware.jl")
+include("training/boosting.jl")
+include("data/zinc_loader.jl")
+include("inference/qgfn.jl")
+
+# =============================================================================
+# GPU Acceleration (Metal)
+# =============================================================================
+include("training/metal_accel.jl")
+
+# =============================================================================
 # Applications and Extensions
 # =============================================================================
 
+include("applications/smiles_gflownet.jl")
+include("applications/hierarchical_edit_gflownet.jl")
+include("training/parent_controller_dataset.jl")
+include("training/parent_controller_models.jl")
+include("training/parent_controller_training.jl")
+include("training/operator_controller_dataset.jl")
+include("training/operator_controller_models.jl")
+include("training/operator_controller_training.jl")
+include("training/option_value_dataset.jl")
+include("training/option_value_models.jl")
+include("training/option_value_training.jl")
+include("training/edit_tb_dataset.jl")
+include("training/edit_tb_model.jl")
+include("training/edit_tb_loss.jl")
+include("training/edit_tb_training.jl")
+include("training/option_flow_dataset.jl")
+include("training/option_flow_model.jl")
+include("training/option_flow_loss.jl")
+include("training/option_flow_training.jl")
+include("training/option_flow_real_catalog.jl")
 include("applications/molecular_design.jl")
 include("applications/causal_discovery.jl")
 include("applications/active_learning.jl")
@@ -218,14 +271,13 @@ export compute_gradients, clip_gradients!
 
 # Training configuration
 export TrainingConfig, TrainingState, TrainingMetrics, TrainingHistory
-export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB
-export PartitionFunctionMethod, OptimizationMethod
+export TrainingObjective, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE, COMBINED_OBJECTIVES, TRAJECTORY_LIKELIHOOD_MAXIMIZATION, MULTI_OBJECTIVE_TB, SHIFTED_COSH_TB
+export PartitionFunctionMethod
 export SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, LEARNABLE_ESTIMATION, ADAPTIVE_ESTIMATION
-export ADAM, RMSPROP, SGD, ADAMW
 
 # Configuration utilities
 export validate_training_config, get_objective_requirements, estimate_training_time
-export create_optimizer, create_default_config, create_fast_config, create_robust_config
+export create_default_config, create_fast_config, create_robust_config
 
 # Training execution
 export train_gflownet
@@ -335,6 +387,177 @@ export create_gflownet, to_component_array
 # Multi-start GFlowNets
 export MultiStartGFlowNetModel, create_multi_start_gflownet
 export sample_initial_state, get_initial_state_distribution
+
+# =============================================================================
+# CAFE-GFN: SMILES GFlowNet (ICLR 2025)
+# =============================================================================
+
+# SMILES tokenizer
+export SMILESVocabulary, tokenize_smiles, encode, decode
+export pad_sequence, batch_encode, PAD_TOKEN, START_TOKEN, END_TOKEN
+export has_token, get_or_add_token!
+
+# SMILES state and actions
+export SMILESState, SMILESTokenAction, create_initial_smiles_state, create_smiles_actions
+export state_to_smiles, smiles_to_state
+
+# GRU policy
+export SMILESPolicyModel, create_smiles_policy, create_smiles_gru_layers
+export compute_log_probs_teacher_forced, sample_smiles_autoregressive, sample_smiles_batch
+export compute_mle_loss_batched
+export has_term_head, convert_to_term_head_params
+
+# Loss functions
+export apply_tb_loss, compute_kl_regularization_loss, compute_kl_weight
+
+# Pretraining
+export PretrainingConfig, PretrainingHistory, pretrain_smiles_gflownet
+export compute_mle_loss, compute_tb_pretrain_loss
+
+# Fine-tuning
+export FinetuningConfig, FinetuningHistory, finetune_smiles_gflownet
+export compute_tb_finetune_loss, compute_kl_smiles_loss, compute_rwmle_loss, compute_replay_loss
+
+# SMILES Replay Buffer
+export SMILESReplayEntry, SMILESReplayBuffer
+export add_to_replay!, add_batch_to_replay!, sample_replay, sample_replay_with_delta
+export update_deltas!, get_top_molecules, replay_stats
+
+# Molecular Frontier Buffer
+export MolecularFrontierEntry, MolecularFrontierBuffer
+export canonicalize_smiles_identity, add_to_frontier!, update_frontier_delta!, sample_frontier, frontier_topk, frontier_stats, frontier_source_summary
+
+# Frontier Sampling / Hierarchical Search
+export FrontierSnapshotEntry, FrontierSnapshot, BasinSummary, ScoredBasinCandidate, ScoredParentCandidate
+export compute_frontier_snapshot_id, create_frontier_snapshot, summarize_basins, basin_score, candidate_basins, sample_scored_basin, sample_basin
+export parent_score, candidate_parents, sample_scored_parent, sample_parent
+
+# Basin Controller Dataset / Models / Training
+export BasinDecisionCandidate, BasinDecisionLog, BasinAttemptOutcomeSummary, BasinDecisionRecord, BasinControllerDataset
+export build_basin_decision_candidates, frontier_feature_vector, basin_candidate_feature_vector
+export summarize_basin_attempt_outcomes, compute_basin_target, audit_basin_dataset_coverage
+export extract_basin_controller_dataset, split_basin_controller_dataset, basin_controller_dataset_stats
+export LearnedBasinController, MLPBasinController, create_learned_basin_controller, create_mlp_basin_controller
+export basin_candidate_score, score_basin_candidates, select_basin
+export save_learned_basin_controller, load_learned_basin_controller
+export BasinControllerTrainingConfig, train_basin_controller, evaluate_basin_controller, compare_basin_regressors
+
+# Parent Controller Dataset / Models / Training
+export ParentAttemptOutcomeSummary, ParentDecisionRecord, ParentControllerDataset
+export summarize_parent_attempt_outcomes, compute_parent_target, parent_context_feature_vector, parent_candidate_feature_vector
+export audit_parent_dataset_coverage, extract_parent_controller_dataset, split_parent_controller_dataset, parent_controller_dataset_stats
+export HeuristicTopParentController, LearnedParentController, MLPParentController, AnchoredParentController
+export create_learned_parent_controller, create_mlp_parent_controller, create_anchored_parent_controller
+export parent_candidate_score, score_parent_candidates, select_parent
+export save_learned_parent_controller, load_learned_parent_controller
+export ParentControllerTrainingConfig, train_parent_controller, evaluate_parent_controller, compare_parent_regressors
+
+# Operator Controller Dataset / Models / Training
+export OperatorAttemptOutcomeSummary, OperatorDecisionRecord, OperatorControllerDataset
+export summarize_operator_attempt_outcomes, compute_operator_target, operator_eligibility_feature_vector, operator_context_feature_vector, operator_candidate_feature_vector
+export audit_operator_dataset_coverage, extract_operator_controller_dataset, split_operator_controller_dataset, operator_controller_dataset_stats
+export LearnedOperatorEligibilityModel, HeuristicTopOperatorController, LearnedOperatorController, AnchoredOperatorController, EligibilityGatedOperatorController
+export create_learned_operator_eligibility_model, create_learned_operator_controller, create_anchored_operator_controller, create_gated_operator_controller
+export operator_eligibility_score, operator_candidate_score, score_operator_candidates, select_operator, operator_selection_metadata
+export save_learned_operator_controller, load_learned_operator_controller
+export OperatorControllerTrainingConfig, filter_operator_controller_dataset, train_operator_eligibility_model, evaluate_operator_eligibility_model, train_operator_controller, evaluate_operator_controller
+
+# Option Value Dataset / Models / Training
+export OptionValueRecord, OptionValueDataset
+export option_value_feature_vector, option_override_feature_vector, extract_option_value_dataset, split_option_value_dataset, option_value_dataset_stats
+export LearnedOptionValueModel, CalibratedOrdinalOptionPolicy, create_learned_option_value_model, create_calibrated_ordinal_option_policy
+export option_value_score, option_override_confidence
+export save_learned_option_value_model, load_learned_option_value_model, save_calibrated_ordinal_option_policy, load_calibrated_ordinal_option_policy
+export OptionValueTrainingConfig, OptionCalibrationConfig, train_option_value_model, train_option_override_confidence_model, train_calibrated_ordinal_option_policy, evaluate_option_value_model
+
+# Edit Operators
+export AbstractEditOperator, MutateOperator, CrossoverOperator, AddFragmentOperator
+export ReplaceFragmentOperator, DeleteFragmentOperator, TerminateOperator
+export EditProposal, trusted_edit_operators, experimental_fragment_operators
+export available_edit_operators, propose_edit, propose_edit_with_diagnostics, choose_partner, unique_child_proposals
+
+# Edit Trajectory Buffer
+export EditTrajectoryEntry, EditTrajectoryBuffer
+export add_edit_trajectory!, sample_edit_trajectories, edit_trajectory_stats
+
+# Genetic Operations & Augmentation
+export augment_smiles_rdkit, create_augment_fn
+export smiles_crossover_rdkit, smiles_mutate_rdkit, smiles_mutate_tokens
+export ScaffoldFilter, get_scaffold, should_add_molecule, register_molecule!
+export scaffold_diversity_stats, generate_genetic_molecules
+
+# QGFN
+export QFunctionNetwork, create_q_function, compute_q_values
+export apply_q_masking, QTrainingBuffer, train_q_function!, compute_p_quantile
+export add_q_transition!, sample_q_batch
+export fill_transitions_with_reward!, collect_and_fill_q_buffer!
+
+# Boosting
+export BoostedGFlowNet, BoostedModelCheckpoint, n_rounds, ensemble_Z
+export add_boosting_round!, should_continue_boosting, sample_from_ensemble
+export cached_oracle_call, compute_residual_reward, get_ensemble_stats
+export run_boosting_round!, run_boosted_training
+
+# Data loading
+export load_zinc_smiles, prepare_zinc_dataset, create_batch_iterator, load_pretrained_checkpoint
+
+# Factory
+export SMILESGFlowNetConfig, create_smiles_gflownet, create_smiles_training_config
+
+# Hierarchical Edit Framework
+export HierarchicalEditConfig, FrontierCommitRecord, HierarchicalEditStep, HierarchicalEditEpisode
+export HierarchicalEditDecisionLog, HierarchicalEditProposalLog, ParentDecisionCandidate, ParentDecisionLog, OperatorDecisionCandidate, OperatorDecisionLog, HierarchicalEditDiagnosticsBuffer
+export add_decision_log!, add_proposal_log!, add_basin_log!, add_parent_log!, add_operator_log!, decision_log_stats, proposal_log_stats
+export choose_basin, choose_parent, choose_operator, choose_operator_action, frontier_quality_summary, compute_frontier_utility_delta
+export run_hierarchical_edit_episode!, probe_parent_interventions, probe_coupled_hierarchy_options, probe_frontier_allocation_opportunities
+export extract_option_subtrajectory_records, compare_option_value_surfaces
+export FrontierAllocationRegionRecord, FrontierAllocationSnapshotRecord, FrontierAllocationDataset
+export FrontierAllocationLinearModel, SelectiveFrontierAllocator
+export extract_frontier_allocation_dataset, frontier_allocation_dataset_stats
+export frontier_allocation_override_score, frontier_allocation_region_score
+export evaluate_selective_frontier_allocator, train_selective_frontier_allocator
+export OpportunityStateRecord, OpportunityStateDataset, OpportunityStateDetector
+export extract_opportunity_state_dataset, opportunity_state_dataset_stats, opportunity_state_score
+export evaluate_opportunity_state_detector, evaluate_opportunity_state_conditional_oracle
+export opportunity_state_threshold_stability, evaluate_opportunity_state_repeatability
+export select_sparse_positive_operating_point, evaluate_sparse_positive_operating_point, evaluate_sparse_positive_operating_points
+export OpportunityRepairAuditRecord, OpportunityRepairAuditDataset
+export extract_opportunity_repair_audit_dataset, opportunity_repair_audit_dataset_stats
+export evaluate_opportunity_repair_binary_probe, evaluate_opportunity_repair_ordinal_probe
+export evaluate_opportunity_representation_semantics_repair
+export extract_intervention_geometry_atlas, intervention_geometry_atlas_stats, compare_intervention_geometry_atlas
+export train_opportunity_state_detector
+
+# Edit-TB: Factored Within-HE Edit Policy Pilot
+export EditTBBasinChoice, EditTBParentChoice, EditTBOperatorChoice, EditTBStep, EditTBTrajectory
+export EditTBConfig, EditTBDataset
+export build_edit_tb_frontier_features, build_edit_tb_basin_candidate_features
+export build_edit_tb_parent_candidate_features, build_edit_tb_operator_candidate_features
+export compute_edit_tb_terminal_reward, load_edit_tb_dataset
+export create_edit_policy, init_edit_policy, count_edit_policy_params
+export compute_edit_rwmle_loss, compute_edit_tb_style_loss
+export train_edit_policy!, choose_with_edit_policy
+export EditTBPolicyController, set_edit_tb_task!
+export save_edit_policy, load_edit_policy
+
+# Option-Flow v0 POC
+export OptionFlowCandidate, OptionFlowCatalog, OptionFlowMLPConfig, OptionFlowTrainingConfig
+export normalize_option_utilities, make_option_flow_catalog, validate_option_flow_catalog
+export option_flow_state_dim, option_flow_option_dim, option_flow_input_dim, option_flow_input_matrix, option_flow_utilities
+export grouped_split_option_flow_catalogs, synthetic_option_flow_catalogs, option_flow_catalog_stats
+export create_option_flow_mlp, init_option_flow_params, option_flow_logits, option_flow_log_probs, option_flow_probs, option_flow_param_count
+export catalog_cross_entropy_loss, mean_catalog_cross_entropy_loss, uniform_catalog_cross_entropy, catalog_kl_to_target
+export option_entropy, flow_residual_diagnostics, top_utility_mass, uniform_top_utility_mass, rank_correlation, option_utility_rank_correlation
+export evaluate_option_flow_model, train_option_flow_model
+export OptionFlowRealEncoding, discover_he_summary_files, load_he_summary_rows, option_flow_real_artifact_audit
+export build_option_flow_real_encoding, build_summary_proxy_catalogs, filter_real_headline_catalogs
+export infer_option_flow_source_family, option_flow_proxy_group_key, option_flow_real_state_features, option_flow_real_option_features
+export option_flow_real_utility, catalog_has_option_feature_variation, evaluate_real_option_flow_model
+export typed_path_feature_vector, augment_rows_with_typed_path_features
+export evaluate_metadata_prior_baseline, uniform_policy_metrics, real_catalog_task_breakdown, summarize_real_catalog_collection, e1_summary_proxy_gate
+
+# GPU Acceleration (Metal)
+export init_metal_accel!, metal_available, to_metal, from_metal
 
 # =============================================================================
 # Legacy Compatibility and Aliases

@@ -664,7 +664,7 @@ function create_supply_chain_actions(network::SupplyChainNetwork)
     end
     
     # Time advancement action
-    push!(actions, AdvanceTimeAction())
+    push!(actions, NextMonthAction())
     
     return actions
 end
@@ -674,7 +674,7 @@ end
 # =============================================================================
 
 export Drug, Facility, PatientRegion, TransportRoute, SupplyChainNetwork
-export SupplyChainState, SupplyChainAction, ProduceAction, ShipAction, ServeAction, AdvanceTimeAction
+export SupplyChainState, SupplyChainAction, ProduceAction, ShipAction, ServeAction, NextMonthAction
 export create_supply_chain_network, create_supply_chain_gflownet
 
 # Supply chain optimization implementation complete
