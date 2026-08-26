@@ -51,10 +51,13 @@ makedocs(
             "applications/active_learning.md"
         ],
         "Internals" => [
-            "internals/architecture.md",
-            "internals/design_decisions.md", 
-            "internals/known_limitations.md",
-            "internals/flow_functions_multistart.md"
+            # These four were reorganized into subdirectories but make.jl was
+            # never updated, so makedocs died on the first one and the docs
+            # build has been broken ever since. No CI, so nobody noticed.
+            "internals/architecture/architecture.md",
+            "internals/architecture/design_decisions.md",
+            "internals/development_guides/known_limitations.md",
+            "internals/implementation_notes/flow_functions_multistart.md"
         ],
         "Extensions" => [
             "extensions/continuous.md",
