@@ -29,12 +29,16 @@
 
 ## 📦 Current State
 
-- **Branch**: core-development
-- **Just Completed**: DIRECT_FLOW_OBJECTIVE implementation
-- **All Training Objectives**: TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING, SUB_TRAJECTORY_BALANCE, DIRECT_FLOW_OBJECTIVE
-- **Training Reorganized**: All training code now in src/training/
-- **Tests Pass**: All core functionality working
-- **Next Up**: GPU acceleration, debugging tools, or variance reduction
+- **Branch**: `main` — the single integration branch. `core-development` was fully
+  merged into `main` and then deleted; do not branch from it.
+- **Training objectives**: `TRAJECTORY_BALANCE` and `MULTI_OBJECTIVE_TB` (MOGFN-PC)
+  are the two that actually train. `FLOW_MATCHING`, `DETAILED_BALANCE`,
+  `SUB_TRAJECTORY_BALANCE` and `DIRECT_FLOW_OBJECTIVE` exist as enum branches but
+  their coded losses deviate from the published equations and do not converge —
+  see the "Known issues" section of `CHANGELOG.md`.
+- **Tests**: `Pkg.test()` runs without Python; chemistry assertions are opt-in via
+  `GFLOWNET_TEST_RDKIT=true`. The suite is NOT fully green — see `CHANGELOG.md`.
+- **Training reorganized**: all training code lives in `src/training/`.
 
 ## 🚀 Quick Commands
 
