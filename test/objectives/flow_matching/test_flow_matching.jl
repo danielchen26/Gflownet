@@ -19,7 +19,7 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
     
     @testset "Flow Matching Loss Computation" begin
         # Create a simple grid world model with flow estimator
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 32,
             include_backward = false
@@ -58,7 +58,7 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
     
     @testset "Flow Matching Training" begin
         # Create model for training
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 32,
             learning_rate = 0.01
@@ -93,7 +93,7 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
     
     @testset "Flow Conservation Validation" begin
         # Train a model to convergence
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 64,
             learning_rate = 0.001
@@ -148,7 +148,7 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
     
     @testset "Flow Matching with Different Configurations" begin
         # Test with learnable partition function
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 32,
             partition_function_method = LEARNABLE_ESTIMATION
@@ -194,7 +194,7 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
     
     @testset "Integration with Training System" begin
         # Test that FLOW_MATCHING integrates properly with the training system
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 4,
             hidden_dim = 64
         )
@@ -211,8 +211,8 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
     
     @testset "Comparison with Other Objectives" begin
         # Create identical models
-        model_tb = create_grid_world_gflownet(grid_size = 3, hidden_dim = 32)
-        model_fm = create_grid_world_gflownet(grid_size = 3, hidden_dim = 32)
+        model_tb = create_grid_world_gflownet(include_flow_estimator = true, grid_size = 3, hidden_dim = 32)
+        model_fm = create_grid_world_gflownet(include_flow_estimator = true, grid_size = 3, hidden_dim = 32)
         
         # Train with different objectives
         config_tb = TrainingConfig(

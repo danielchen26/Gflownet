@@ -16,7 +16,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
     
     @testset "Mathematical Properties" begin
         # Test that flow matching loss has correct mathematical properties
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 4,
             hidden_dim = 32
         )
@@ -38,7 +38,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
     
     @testset "Convergence Analysis" begin
         # Test that FLOW_MATCHING converges to correct flow values
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 64,
             learning_rate = 0.001
@@ -99,7 +99,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
             ("FM", FLOW_MATCHING, false),
             ("DB", DETAILED_BALANCE, true)
         ]
-            model = create_grid_world_gflownet(
+            model = create_grid_world_gflownet(include_flow_estimator = true, 
                 grid_size = 4,
                 hidden_dim = 64,
                 include_backward = include_backward
@@ -135,7 +135,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
     
     @testset "Flow Conservation Verification" begin
         # After training, verify flow conservation is satisfied
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 128,
             learning_rate = 0.0005
@@ -193,7 +193,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
     
     @testset "Edge Cases and Robustness" begin
         # Test with very small grid
-        model_small = create_grid_world_gflownet(
+        model_small = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 2,
             hidden_dim = 16
         )
@@ -209,7 +209,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
         @test all(isfinite.(filter(!isnan, history.losses)))
         
         # Test with very large hidden dimension
-        model_large = create_grid_world_gflownet(
+        model_large = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 256
         )
@@ -226,7 +226,7 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
     
     @testset "Integration with Learnable Z" begin
         # Test FLOW_MATCHING with learnable partition function
-        model = create_grid_world_gflownet(
+        model = create_grid_world_gflownet(include_flow_estimator = true, 
             grid_size = 3,
             hidden_dim = 64,
             partition_function_method = LEARNABLE_ESTIMATION

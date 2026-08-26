@@ -77,7 +77,11 @@ using Optimisers
     
     @testset "Policy Functions" begin
         # Create a simple model for testing
-        model = create_grid_world_gflownet(grid_size=3, hidden_dim=8)
+        # include_flow_estimator is required by the "flow_estimate" testset at
+        # :132, which reads model.flow_estimator / parameters.flow / states.flow.
+        # Without it those fields do not exist and the testset errored with
+        # "type NamedTuple has no field flow".
+        model = create_grid_world_gflownet(grid_size=3, hidden_dim=8, include_flow_estimator=true)
         state = GridState(2, 2, false)
         
         @testset "forward_probability" begin
