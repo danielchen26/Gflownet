@@ -5,7 +5,7 @@ makedocs(
     sitename = "GFlowNet.jl",
     format = Documenter.HTML(
         prettyurls = false,  # Use simple URLs
-        canonical = "https://yourusername.github.io/GFlowNet.jl"
+        canonical = "https://danielchen26.github.io/Gflownet"
     ),
     clean = false,  # Don't clean build directory due to permission issues
     build = "../docbuild",
@@ -69,6 +69,6 @@ makedocs(
 
 # Uncomment this when ready to deploy
 # deploydocs(
-#     repo = "github.com/yourusername/GFlowNet.jl.git",
+#     repo = "github.com/danielchen26/Gflownet.git",
 #     devbranch = "main"
 # ) 

@@ -61,10 +61,10 @@ src/
 │   └── utils.jl                  # General utility functions
 ├── applications/                  # 🟢 Domain Implementations
 │   ├── grid_world.jl             # Grid navigation (flagship example)
-│   ├── molecular_design.jl       # Chemical synthesis
+│   ├── molecular_design.jl       # Atom-level chemical synthesis (legacy)
+│   ├── molecular_generation.jl   # Fragment-based generation (BRICS, MOGFN)
 │   ├── causal_discovery.jl       # DAG structure learning
-│   ├── active_learning.jl        # Experiment selection
-│   └── feature_acquisition.jl    # Strategic feature selection
+│   └── active_learning.jl        # Experiment selection
 └── extensions/                    # 🟣 Advanced Features
     ├── continuous.jl             # Continuous state spaces
     ├── non_acyclic.jl            # Non-DAG structures
@@ -182,10 +182,10 @@ Professional Tooling
 
 Applications (Domain-Specific)
 ├── grid_world.jl → Flagship example, uses core + utils
-├── molecular_design.jl → Chemistry domain
+├── molecular_design.jl → Atom-level chemistry (legacy)
+├── molecular_generation.jl → Fragment-based chemistry (BRICS, MOGFN, oracles)
 ├── causal_discovery.jl → Statistical learning
-├── active_learning.jl → Experiment design
-└── feature_acquisition.jl → Feature selection
+└── active_learning.jl → Experiment design
 
 Extensions (Advanced Features)
 ├── continuous.jl → Extends core for continuous spaces
@@ -254,9 +254,26 @@ Each application demonstrates GFlowNet usage in specific domains:
 ## 🚀 Quick Start
 
 ### Installation
+
+Requires **Julia 1.11 or newer** (`Project.toml` `[compat] julia = "1.11"`).
+
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/yourusername/GFlowNet.jl.git")
+Pkg.develop(url = "https://github.com/danielchen26/Gflownet.git")
+Pkg.instantiate()
+```
+
+`Pkg.instantiate()` is required, not optional: `Manifest.toml` is untracked by
+policy, so dependencies are resolved on your machine.
+
+The molecular-design pipeline needs RDKit, which arrives through `PythonCall` +
+`CondaPkg`. Instantiating builds that conda environment automatically from
+`CondaPkg.toml` (Python, RDKit, NumPy, scikit-learn, umap-learn — roughly 1 GB,
+one time). Verify it:
+
+```julia
+using PythonCall
+pyimport("rdkit").__version__     # e.g. "2026.03.5"
 ```
 
 ### 30-Second Professional Demo
@@ -328,11 +345,42 @@ julia --project=../.. causal_discovery.jl
 
 ### ⚛️ Molecular Design
 ```bash
-cd examples/molecular_design
+cd examples/molecule_design
 julia --project=../.. molecule_example.jl
 ```
 
 **Demonstrates**: Constraint handling, domain expertise, chemical validity
+
+## 🧪 Molecular Design Pipeline
+
+Fragment-based molecular generation, merged from the `core-development` branch.
+None of this is reachable through the atom-level `molecular_design.jl` legacy
+path — it lives in its own load graph, entered by the visualization server.
+
+| Capability | Implementation |
+|---|---|
+| Fragment-based generation (BRICS) | `src/applications/molecular_generation.jl` |
+| Reaction-constrained generation | `src/utils/visualization/domains/reaction_molecular.jl` |
+| RDKit bridge (fingerprints, scaffolds, properties, docking) | `src/utils/visualization/python/rdkit_bridge.jl` |
+| TDC oracles + budget tracking | `src/utils/visualization/python/oracle_bridge.jl`, `core/oracle_manager.jl` |
+| PMO 23-task benchmark | `src/utils/visualization/core/pmo_benchmark.jl` |
+| SQLite persistence for generated molecules | `src/utils/visualization/core/database.jl` |
+| Multi-objective (MOGFN) and Pareto fronts | `molecular_generation.jl`, `pmo_benchmark.jl` |
+
+Python dependencies are declared in `CondaPkg.toml` and built automatically by
+`Pkg.instantiate()`. Do **not** add a `[pip.deps]` section: mixing pip and conda
+dependencies makes pixi fetch a conda→PyPI mapping over the network, and that
+failure is fatal to `using PythonCall`, which takes the whole server down.
+
+Chemistry-dependent tests are opt-in so that `Pkg.test()` needs no Python:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'                      # pure Julia
+GFLOWNET_TEST_RDKIT=true julia --project=. -e 'using Pkg; Pkg.test()'
+GFLOWNET_TEST_TDC=true   julia --project=. -e 'using Pkg; Pkg.test()'  # network
+```
+
+Benchmark results: [`reports/2026-03-01_molecular_generation_benchmark_report.md`](reports/2026-03-01_molecular_generation_benchmark_report.md).
 
 ## 📈 Performance & Validation
 
@@ -390,7 +438,7 @@ We welcome contributions! Please:
 ### Development Workflow
 ```bash
 # Fork and clone
-git clone https://github.com/yourusername/GFlowNet.jl.git
+git clone https://github.com/danielchen26/Gflownet.git
 cd GFlowNet.jl
 
 # Test core functionality
@@ -411,10 +459,10 @@ ls results/  # Should see HTML, PNG, and CSV files
 ```bibtex
 @software{gflownet_jl_2025,
   title={GFlowNet.jl: Production-Ready Generative Flow Networks},
-  author={Your Name},
+  author={Chen, Tianchi},
   version={1.0.0},
   year={2025},
-  url={https://github.com/yourusername/GFlowNet.jl},
+  url={https://github.com/danielchen26/Gflownet},
   note={Professional implementation with comprehensive tooling}
 }
 ```

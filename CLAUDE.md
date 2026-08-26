@@ -5,7 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Session Continuity
 
 When starting a conversation:
-1. Check `.claude/sessions/` for recent session logs
+1. Check `.claude/sessions/` for recent session logs — note this directory is
+   gitignored, so it is absent in a fresh clone. See `CONTRIBUTING.md` for the
+   setup, test and serve commands that a fresh clone does need.
 2. Load the latest session context if user requests it
 3. Continue from previous TODOs and decisions
 4. See `.claude/docs/CONVERSATION_PERSISTENCE.md` for details
@@ -74,11 +76,16 @@ GFlowNet.jl is a production-ready Julia implementation of Generative Flow Networ
      - Three main views: Training Monitor, 3D Distribution, Policy Flow
      - Production-ready React + TypeScript implementation
      - Smooth animations, interactive controls, responsive design
-   - **Backend**: Mock simulation for demonstration
-     - Julia Oxygen.jl server with simulated training data
-     - **Note**: Real GFlowNet training integration NOT yet implemented
-     - Integration plan exists: `docs/src/internals/development_guides/real_training_visualization_plan.md`
-   - Located in `examples/core_features/visualization/`
+   - **Backend**: real GFlowNet training, not a mock
+     - Julia Oxygen.jl server at `src/utils/visualization/api/unified_server.jl`,
+       50 HTTP routes, `GET /health` reports `"real_training": true`
+     - Domains registered at startup: `grid_world`, `molecule`, `reaction_molecule`
+     - RDKit reaches Julia via PythonCall (`python/rdkit_bridge.jl`); startup logs
+       `RDKitBridge initialized successfully` and `All 50 fragments validated`
+     - There is NO WebSocket route; the frontend polls, and connection status
+       comes from `GET /health` via `hooks/useBackendHealth.ts`
+   - Launch with `julia --project=. start_server.jl` (honors `PORT` and `HOST`)
+   - Frontend dev server is Vite on **5173**, not 3000
 
 11. **Visualization Frontend Enhancements** ✅ (January 2025)
    - **Monitor Tab**: Two-row layout, real-time trajectory sampling, optimized space usage
@@ -785,7 +792,7 @@ examples/core_features/visualization/
   - Implementation notes in `internals/implementation_notes/`
   - Development guidelines in `internals/development_guides/`
 - Interactive examples with visualization
-- Visualization changelog in `src/utils/visualization/CHANGELOG.md`
+- Visualization changelog in `docs/src/guide/visualization/CHANGELOG.md`
 
 ## Code Style
 

@@ -16,7 +16,7 @@ This package provides a flexible framework for implementing and training GFlowNe
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/yourusername/GFlowNet.jl")
+Pkg.add(url="https://github.com/danielchen26/Gflownet")
 ```
 
 ## Quick Start
