@@ -3,24 +3,24 @@ module GFlowNetUtils
 using Optimisers  # Add Optimisers package
 using ..GFlowNet  # Import the parent module to access GFlowNetModel
 
-# Logging utilities
-export GFlowNetLogger
-export log_metric!, log_iteration!, get_metric, get_last_metric, reset!, save_metrics
+# NOTE: logging.jl and report.jl are included by src/GFlowNet.jl:86,88 at
+# package level. They used to be included HERE as well, which compiled
+# GFlowNetLogger (logging.jl:9) and ReportData (report.jl:17) into two distinct
+# types with the same name -- GFlowNet.GFlowNetLogger !== 
+# GFlowNet.GFlowNetUtils.GFlowNetLogger. This module therefore no longer owns
+# those names and must not re-export them.
+#
+# visualization/visualization.jl below is NOT a duplicate: GFlowNet.jl:87
+# includes the sibling file utils/visualization.jl, which is a different file.
 
 # Performance utilities
-export summarize_performance, time_execution, benchmark_sampling
+export summarize_performance, time_execution
 
 # Visualization utilities (domain-specific)
 export visualize_molecular_state, visualize_causal_graph, visualize_experiment_selection
 
-# Include logging utilities
-include("logging.jl")
-
 # Include visualization utilities
 include("visualization/visualization.jl")
-
-# Include HTML report system
-include("report.jl")
 
 # Mathematical utilities
 """
