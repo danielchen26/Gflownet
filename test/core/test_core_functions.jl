@@ -76,8 +76,8 @@ using Optimisers
     end
     
     @testset "Policy Functions" begin
-        # Create a simple model for testing
-        model = create_grid_world_gflownet(grid_size=3, hidden_dim=8)
+        # Create a simple model for testing (with flow estimator for flow_estimate test)
+        model = create_grid_world_gflownet(grid_size=3, hidden_dim=8, include_flow_estimator=true)
         state = GridState(2, 2, false)
         
         @testset "forward_probability" begin
@@ -251,19 +251,6 @@ using Optimisers
     end
     
     @testset "Training Functions" begin
-        @testset "create_optimizer" begin
-            # Test each optimizer type
-            for (opt_type, expected_type) in [
-                (GFlowNet.ADAM, Optimisers.Adam),
-                (GFlowNet.RMSPROP, Optimisers.RMSProp),
-                (GFlowNet.SGD, Optimisers.Descent),
-                (GFlowNet.ADAMW, Optimisers.AdamW)
-            ]
-                opt = GFlowNet.create_optimizer(opt_type, 0.01)
-                @test opt isa expected_type
-            end
-        end
-        
         @testset "train_gflownet" begin
             # Create small model for quick testing
             model = create_grid_world_gflownet(

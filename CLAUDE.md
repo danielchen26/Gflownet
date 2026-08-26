@@ -670,6 +670,16 @@ Track common query patterns to optimize future routing:
 - Queries resolved without agent launch: 75%
 - Critical context prevented bugs: 90%+
 
+## CAFE-GFN Development Analysis (Auto-Trigger)
+
+**IMPORTANT**: After every experiment run, code change, or before context compression, automatically run the `/deep-analysis` skill workflow:
+1. Show comprehensive analysis to user (with mermaid diagrams, datatables)
+2. Append a new dated `## Analysis #N` entry to `research/DEVELOPMENT_LOG.md`
+3. Update `MEMORY.md` with new results
+4. The development log is the permanent record — it must ALWAYS be current
+
+The skill is at `skills/deep-analysis/SKILL.md`. Read it for the full workflow.
+
 ## Development Guidance
 
 - Remember that example folders are associated with different domains and for the examples related to the core development, you should put them into the core features sub folder

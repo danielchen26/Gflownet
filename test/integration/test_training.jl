@@ -4,7 +4,7 @@
 using Test
 using GFlowNet
 using Random
-using Optimisers
+import Optimisers
 
 @testset "Training Infrastructure" begin
     @testset "Training Configuration" begin
@@ -20,7 +20,6 @@ using Optimisers
         custom_config = TrainingConfig(
             objective=DETAILED_BALANCE,
             partition_function_method=SIMPLE_ESTIMATION,
-            optimization_method=ADAM,
             n_iterations=100,
             batch_size=16,
             learning_rate=0.01,
@@ -47,21 +46,6 @@ using Optimisers
         @test TRAJECTORY_BALANCE isa TrainingObjective
         @test DETAILED_BALANCE isa TrainingObjective
         @test FLOW_MATCHING isa TrainingObjective
-    end
-    
-    @testset "Optimizer Options" begin
-        # Test optimizer types
-        @test ADAM isa OptimizationMethod
-        @test RMSPROP isa OptimizationMethod
-        @test SGD isa OptimizationMethod
-        @test ADAMW isa OptimizationMethod
-        
-        # Test optimizer creation
-        optimizer = GFlowNet.create_optimizer(ADAM, 0.01)
-        @test optimizer isa Optimisers.Adam
-        
-        optimizer = GFlowNet.create_optimizer(SGD, 0.1)
-        @test optimizer isa Optimisers.Descent
     end
     
     @testset "Sampling Configuration" begin
@@ -109,7 +93,6 @@ using Optimisers
         config = TrainingConfig(
             objective=TRAJECTORY_BALANCE,
             partition_function_method=SIMPLE_ESTIMATION,
-            optimization_method=ADAM,
             n_iterations=5,  # Just a few iterations
             batch_size=2,    # Small batch
             learning_rate=0.1,

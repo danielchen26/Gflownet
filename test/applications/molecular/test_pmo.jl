@@ -48,6 +48,20 @@ end
         @test result.diversity == 0.65
         @test result.n_oracle_calls == 10000
         @test result.unique_molecules == 5000
+        @test result.oracle_call_breakdown == Dict{String,Int}()
+        @test result.provenance_summary == Dict{String,Any}()
+        @test result.artifact_paths == Dict{String,String}()
+        @test result.diagnostics_summary == Dict{String,Any}()
+
+        rich = PMOResult(
+            "drd2", 0.80, 0.97, 0.90, 0.66, 3000, 1200,
+            Dict("seed" => 120, "frontier_bootstrap" => 32, "model" => 2068, "ga" => 500, "he_warmup" => 140, "he_interleaved" => 140, "total" => 3000),
+            Dict("topk_source_fractions" => Dict("tb" => 0.4, "ga" => 0.3, "he" => 0.2, "seed" => 0.05, "bootstrap" => 0.05))
+        )
+        @test rich.oracle_call_breakdown["ga"] == 500
+        @test rich.provenance_summary["topk_source_fractions"]["he"] == 0.2
+        @test rich.artifact_paths == Dict{String,String}()
+        @test rich.diagnostics_summary == Dict{String,Any}()
     end
 
     @testset "PMOBenchmarkReport struct" begin
@@ -63,7 +77,13 @@ end
     end
 
     @testset "benchmark_results_to_dict" begin
-        results = [PMOResult("drd2", 0.75, 0.95, 0.88, 0.65, 10000, 5000)]
+        results = [PMOResult(
+            "drd2", 0.75, 0.95, 0.88, 0.65, 10000, 5000,
+            Dict("seed" => 100, "frontier_bootstrap" => 32, "model" => 9268, "ga" => 600, "total" => 10000),
+            Dict("topk_source_fractions" => Dict("tb" => 0.5, "ga" => 0.3, "he" => 0.05, "seed" => 0.1, "bootstrap" => 0.05)),
+            Dict("episode_summary" => "/tmp/he_episode_summary.jls"),
+            Dict("run_capacity" => Dict("episode_count" => 4, "total_he_calls" => 180))
+        )]
         report = PMOBenchmarkReport(results, 0.75, 5, 10000)
 
         dict = benchmark_results_to_dict(report)
@@ -81,6 +101,35 @@ end
         @test task["task_name"] == "drd2"
         @test task["auc_top10"] == 0.75
         @test task["top1"] == 0.95
+        @test task["oracle_call_breakdown"]["ga"] == 600
+        @test task["provenance_summary"]["topk_source_fractions"]["tb"] == 0.5
+        @test task["artifact_paths"]["episode_summary"] == "/tmp/he_episode_summary.jls"
+        @test task["diagnostics_summary"]["run_capacity"]["episode_count"] == 4
+    end
+
+    @testset "Stage B prime provenance helpers" begin
+        frontier = MolecularFrontierBuffer(32)
+        add_to_frontier!(frontier, "CCO"; reward=0.7, source=:model, operator=:sample)
+        add_to_frontier!(frontier, "CCN"; reward=0.8, source=:ga, operator=:mutation)
+        add_to_frontier!(frontier, "CCC"; reward=0.9, source=:edit, operator=:mutate)
+        add_to_frontier!(frontier, "CCF"; reward=0.6, source=:warmup, operator=:crossover)
+        add_to_frontier!(frontier, "CCCl"; reward=0.5, source=:seed, operator=:seed)
+        add_to_frontier!(frontier, "CCBr"; reward=0.55, source=:bootstrap, operator=:bootstrap)
+
+        summary = _pmo_provenance_summary(frontier)
+        @test summary["overall_source_counts"]["tb"] == 1
+        @test summary["overall_source_counts"]["ga"] == 1
+        @test summary["overall_source_counts"]["he"] == 2
+        @test summary["overall_source_counts"]["seed"] == 1
+        @test summary["overall_source_counts"]["bootstrap"] == 1
+        @test isapprox(summary["topk_source_fractions"]["he"], 2 / 6; atol=1e-8)
+    end
+
+    @testset "Stage B prime HE guardrails" begin
+        @test_nowarn _assert_heuristic_he_config(HierarchicalEditConfig())
+        @test_throws ErrorException _assert_heuristic_he_config(HierarchicalEditConfig(; use_learned_parent=true))
+        @test_throws ErrorException _assert_heuristic_he_config(HierarchicalEditConfig(; allow_fragment_ops=true))
+        @test_throws ErrorException _assert_heuristic_he_config(HierarchicalEditConfig(; operators=[:mutate, :add_fragment]))
     end
 
     @testset "AUC top-10 computation edge cases" begin

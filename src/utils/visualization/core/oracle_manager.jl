@@ -5,7 +5,7 @@
 #
 # Key design decisions:
 # 1. SMILES-level cache: canonical SMILES → {oracle_name → score}
-# 2. Budget counts unique SMILES only (replayed molecules don't waste budget)
+# 2. Budget counts unique graph identities only (replayed molecules don't waste budget)
 # 3. Two modes: benchmark_mode (oracle-only reward) vs normal (multi-objective)
 
 """
@@ -26,8 +26,8 @@ Manages oracle evaluation, caching, and budget tracking.
 # Fields
 - `configs`: Vector of oracle configurations (name + weight)
 - `budget`: Maximum oracle calls allowed (10000 for PMO benchmark)
-- `calls_used`: Number of unique SMILES evaluated so far
-- `cache`: SMILES → {oracle_name → score} mapping
+- `calls_used`: Number of unique graph identities evaluated so far
+- `cache`: canonical SMILES → {oracle_name → score} mapping
 - `benchmark_mode`: If true, oracle scores are the ONLY reward (PMO-compliant)
 - `top_scores`: Sorted list of top-K scores for AUC computation
 """
@@ -57,53 +57,57 @@ end
     evaluate_molecules!(mgr, smiles_list)
 
 Batch evaluate all configured oracles for a list of molecules.
-Only evaluates uncached SMILES. Updates cache in-place.
+Only evaluates uncached graph identities. Updates cache in-place.
 Respects budget limits.
 """
 function evaluate_molecules!(mgr::OracleManager, smiles_list::Vector{String})
+    canonical_pairs = Tuple{String,String}[]
+    seen = Set{String}()
+    for smiles in smiles_list
+        canonical = canonicalize_smiles_identity(smiles)
+        isempty(canonical) && continue
+        canonical in seen && continue
+        push!(canonical_pairs, (canonical, smiles))
+        push!(seen, canonical)
+    end
+
     for config in mgr.configs
-        # Filter to uncached SMILES for this oracle
-        uncached = String[]
-        for s in smiles_list
-            oracle_cache = get(mgr.cache, s, nothing)
+        uncached_pairs = Tuple{String,String}[]
+        for (canonical, raw_smiles) in canonical_pairs
+            oracle_cache = get(mgr.cache, canonical, nothing)
             if oracle_cache === nothing || !haskey(oracle_cache, config.name)
-                push!(uncached, s)
+                push!(uncached_pairs, (canonical, raw_smiles))
             end
         end
-        unique_uncached = unique(uncached)
 
-        if isempty(unique_uncached) || mgr.calls_used >= mgr.budget
+        if isempty(uncached_pairs) || mgr.calls_used >= mgr.budget
             continue
         end
 
-        # Respect budget — only evaluate what we can afford
-        n_affordable = min(length(unique_uncached), mgr.budget - mgr.calls_used)
-        batch = unique_uncached[1:n_affordable]
+        n_affordable = min(length(uncached_pairs), mgr.budget - mgr.calls_used)
+        batch_pairs = uncached_pairs[1:n_affordable]
+        batch_raw = [raw for (_canonical, raw) in batch_pairs]
 
-        # Single PythonCall crossing for entire batch
         scores = try
-            OracleBridge.evaluate_batch(batch, config.name)
+            OracleBridge.evaluate_batch(batch_raw, config.name)
         catch e
             @warn "Oracle evaluation failed for $(config.name)" exception=e
-            fill(0.5, length(batch))  # Neutral fallback
+            fill(0.5, length(batch_raw))
         end
 
-        # Update cache
-        for (smi, score) in zip(batch, scores)
-            if !haskey(mgr.cache, smi)
-                mgr.cache[smi] = Dict{String,Float64}()
+        for ((canonical, _raw_smiles), score) in zip(batch_pairs, scores)
+            if !haskey(mgr.cache, canonical)
+                mgr.cache[canonical] = Dict{String,Float64}()
             end
-            mgr.cache[smi][config.name] = score
+            mgr.cache[canonical][config.name] = score
         end
-        mgr.calls_used += length(batch)
+        mgr.calls_used += length(batch_pairs)
 
-        # Track top scores for AUC computation (benchmark mode)
         if mgr.benchmark_mode
             for score in scores
                 _update_top_scores!(mgr, score)
             end
-            # Checkpoint every 100 calls
-            if mgr.calls_used > 0 && mgr.calls_used % 100 < length(batch)
+            if mgr.calls_used > 0 && mgr.calls_used % 100 < length(batch_pairs)
                 _record_auc_checkpoint!(mgr)
             end
         end
@@ -114,9 +118,11 @@ end
     lookup_score(mgr, smiles, oracle_name) → Float64
 
 Look up a cached oracle score. Returns 0.5 (neutral) if not cached.
+SMILES is canonicalized before lookup.
 """
 function lookup_score(mgr::OracleManager, smiles::String, oracle_name::String)::Float64
-    oracle_cache = get(mgr.cache, smiles, nothing)
+    canonical = canonicalize_smiles_identity(smiles)
+    oracle_cache = get(mgr.cache, canonical, nothing)
     oracle_cache === nothing && return 0.5
     return get(oracle_cache, oracle_name, 0.5)
 end
@@ -124,7 +130,7 @@ end
 """
     budget_remaining(mgr) → Int
 
-Return the number of oracle calls remaining in the budget.
+How many oracle calls remain?
 """
 function budget_remaining(mgr::OracleManager)::Int
     return max(0, mgr.budget - mgr.calls_used)
@@ -133,87 +139,63 @@ end
 """
     budget_exhausted(mgr) → Bool
 
-Check if the oracle budget has been exhausted.
+Whether the oracle budget is exhausted.
 """
 function budget_exhausted(mgr::OracleManager)::Bool
     return mgr.calls_used >= mgr.budget
 end
 
 """
-    get_objective_names(mgr) → Vector{String}
+    get_oracle_reward(mgr, smiles) → Float64
 
-Return the names of configured oracles.
+Get the combined reward for a molecule from all configured oracles.
+In benchmark_mode, returns the first oracle's score directly.
+Otherwise returns weighted scalarization.
 """
-function get_objective_names(mgr::OracleManager)::Vector{String}
-    return [c.name for c in mgr.configs]
+function get_oracle_reward(mgr::OracleManager, smiles::String)::Float64
+    canonical = canonicalize_smiles_identity(smiles)
+    oracle_cache = get(mgr.cache, canonical, nothing)
+    if oracle_cache === nothing
+        return 0.5
+    end
+
+    if mgr.benchmark_mode
+        isempty(mgr.configs) && return 0.5
+        return get(oracle_cache, mgr.configs[1].name, 0.5)
+    end
+
+    total_weight = sum(c.weight for c in mgr.configs)
+    total_weight <= 0 && return 0.5
+
+    reward = 0.0
+    for config in mgr.configs
+        reward += config.weight * get(oracle_cache, config.name, 0.5)
+    end
+    return reward / total_weight
 end
 
-"""
-    get_objective_weights(mgr) → Vector{Float64}
-
-Return the weights of configured oracles.
-"""
-function get_objective_weights(mgr::OracleManager)::Vector{Float64}
-    return [c.weight for c in mgr.configs]
-end
-
-"""
-    get_status(mgr) → Dict
-
-Return oracle manager status for API responses.
-"""
-function get_status(mgr::OracleManager)::Dict
-    return Dict(
-        "configured" => get_objective_names(mgr),
-        "budget_used" => mgr.calls_used,
-        "budget_total" => mgr.budget,
-        "budget_remaining" => budget_remaining(mgr),
-        "cache_size" => length(mgr.cache),
-        "benchmark_mode" => mgr.benchmark_mode,
-        "n_auc_checkpoints" => length(mgr.auc_checkpoints),
-    )
-end
-
-# ============================================
-# AUC Top-10 Tracking (PMO Protocol)
-# ============================================
-
-"""Update the sorted top-10 scores list."""
 function _update_top_scores!(mgr::OracleManager, score::Float64)
     push!(mgr.top_scores, score)
     sort!(mgr.top_scores, rev=true)
-    # Keep only top-10
     if length(mgr.top_scores) > 10
         resize!(mgr.top_scores, 10)
     end
+    return nothing
 end
 
-"""Record AUC checkpoint (mean of top-10 at current budget usage)."""
 function _record_auc_checkpoint!(mgr::OracleManager)
-    if isempty(mgr.top_scores)
-        push!(mgr.auc_checkpoints, 0.0)
-    else
-        n = min(10, length(mgr.top_scores))
-        push!(mgr.auc_checkpoints, sum(mgr.top_scores[1:n]) / n)
-    end
+    top10_mean = isempty(mgr.top_scores) ? 0.0 : sum(mgr.top_scores) / length(mgr.top_scores)
+    push!(mgr.auc_checkpoints, top10_mean)
+    return nothing
 end
 
 """
     compute_auc_top10(mgr) → Float64
 
-Compute the AUC of top-10 average score curve.
-This is the primary PMO benchmark metric.
+Compute PMO AUC top-10 score from checkpointed top-10 means.
+Follows the Gao et al. NeurIPS 2022 PMO protocol.
 """
 function compute_auc_top10(mgr::OracleManager)::Float64
     isempty(mgr.auc_checkpoints) && return 0.0
-    # Trapezoidal integration normalized by budget
-    n = length(mgr.auc_checkpoints)
-    if n == 1
-        return mgr.auc_checkpoints[1]
-    end
-    auc = 0.0
-    for i in 1:(n-1)
-        auc += (mgr.auc_checkpoints[i] + mgr.auc_checkpoints[i+1]) / 2.0
-    end
-    return auc / n
+    return sum(mgr.auc_checkpoints) / length(mgr.auc_checkpoints)
 end

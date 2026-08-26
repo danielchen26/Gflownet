@@ -71,6 +71,10 @@ test_groups = [
         "applications/molecular/test_mogfn.jl",
         "applications/molecular/test_reaction_constraints.jl",
         "applications/molecular/test_integration.jl",
+        "applications/molecular/test_pmo.jl",
+    ]),
+    ("SMILES GFlowNet", [
+        "smiles_gflownet/runtests.jl"
     ])
 ]
 
