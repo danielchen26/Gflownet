@@ -12,7 +12,8 @@ include(joinpath(@__DIR__, "test_setup.jl"))
         model = create_molecular_gflownet(rng=Random.MersenneTwister(42))
 
         @test model isa GFlowNetModel
-        @test length(model.all_actions) == 51  # 50 fragments + 1 terminate
+        # one action per fragment, plus the terminate action
+        @test length(model.all_actions) == EXPECTED_FRAGMENT_COUNT + 1
         @test model.initial_state isa MolState
         @test model.initial_state.smiles == ""
         @test !isnothing(model.forward_policy)

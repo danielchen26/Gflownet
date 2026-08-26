@@ -6,9 +6,9 @@ using Test
 
 include(joinpath(@__DIR__, "test_setup.jl"))
 
-# RDKitBridge is only available when the server/visualization layer is loaded.
-# Guard all RDKitBridge-dependent tests.
-const _rdkit_available = isdefined(Main, :RDKitBridge)
+# RDKit availability comes from the single gate in test/fixtures/molecular.jl
+# (loaded by test_setup.jl above), which also logs WHY it is unavailable.
+const _rdkit_available = RDKIT_AVAILABLE
 
 @testset "Docking Integration" begin
 

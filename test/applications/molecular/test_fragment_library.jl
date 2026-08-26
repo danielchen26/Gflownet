@@ -132,10 +132,10 @@ include(joinpath(@__DIR__, "test_setup.jl"))
     end
 
     @testset "legacy FRAGMENT_LIBRARY" begin
-        @test length(FRAGMENT_LIBRARY) == 50
+        @test length(FRAGMENT_LIBRARY) == EXPECTED_FRAGMENT_COUNT
         # First fragment should be benzene
         @test FRAGMENT_LIBRARY[1].fragment_name == "benzene"
         # Last fragment should be a starter
-        @test FRAGMENT_LIBRARY[50].fragment_name == "2,3-disubstituted_thiophene"
+        @test FRAGMENT_LIBRARY[EXPECTED_FRAGMENT_COUNT].fragment_name == "2,3-disubstituted_thiophene"
     end
 end

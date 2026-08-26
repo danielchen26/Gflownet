@@ -60,13 +60,13 @@ const _rdkit_avail_joining = @isdefined(RDKitBridge)
     end
 
     @testset "fragment library validation" begin
-        @test length(FRAGMENT_LIBRARY) == 50
+        @test length(FRAGMENT_LIBRARY) == EXPECTED_FRAGMENT_COUNT
 
         # All fragments should have unique IDs
         ids = [f.fragment_id for f in FRAGMENT_LIBRARY]
-        @test length(unique(ids)) == 50
+        @test length(unique(ids)) == EXPECTED_FRAGMENT_COUNT
         @test minimum(ids) == 1
-        @test maximum(ids) == 50
+        @test maximum(ids) == EXPECTED_FRAGMENT_COUNT
 
         # All fragments should have non-empty SMILES
         for frag in FRAGMENT_LIBRARY

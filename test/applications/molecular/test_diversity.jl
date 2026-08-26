@@ -5,13 +5,11 @@ using Test
 
 include(joinpath(@__DIR__, "test_setup.jl"))
 
-# RDKitBridge is only available when the server/visualization layer is loaded.
-# All tests in this file depend on RDKitBridge functions.
-const _rdkit_available = isdefined(Main, :RDKitBridge)
-
-if !_rdkit_available
-    @info "Skipping Tanimoto Diversity tests (RDKitBridge not loaded)"
-end
+# RDKit availability comes from the single gate in test/fixtures/molecular.jl
+# (loaded by test_setup.jl above), which also logs WHY it is unavailable.
+# Previously this read `isdefined(Main, :RDKitBridge)` while sibling files used
+# `@isdefined(RDKitBridge)` — three idioms for one condition.
+const _rdkit_available = RDKIT_AVAILABLE
 
 @testset "Tanimoto Diversity Metrics" begin
 

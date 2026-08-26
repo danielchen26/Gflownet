@@ -15,3 +15,16 @@ if !@isdefined(MolState)
     const _MOLGEN_PATH = joinpath(@__DIR__, "..", "..", "..", "src", "applications", "molecular_generation.jl")
     include(_MOLGEN_PATH)
 end
+
+# Shared RDKit gate and expected-value constants. Loading this reports WHY
+# chemistry assertions are skipped -- previously they were skipped silently, so
+# test_reward_function.jl and test_diversity.jl ran zero real assertions and
+# still looked green.
+include(joinpath(@__DIR__, "..", "..", "fixtures", "molecular.jl"))
+using .MolecularFixture: RDKIT_AVAILABLE, EXPECTED_FRAGMENT_COUNT, rdkit_reason
+
+if RDKIT_AVAILABLE
+    @info "Molecular tests: RDKit available — chemistry assertions will run"
+else
+    @warn "Molecular tests: RDKit assertions SKIPPED" reason = rdkit_reason()
+end
