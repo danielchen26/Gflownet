@@ -2,7 +2,7 @@
 
 *Production-ready Generative Flow Networks implementation in Julia with comprehensive architecture and professional tooling*
 
-[![Version](https://img.shields.io/badge/Version-1.0.0-brightgreen.svg)](RELEASE_NOTES.md)
+[![Version](https://img.shields.io/badge/Version-1.0.0-brightgreen.svg)](CHANGELOG.md)
 [![Julia](https://img.shields.io/badge/Julia-1.9+-blue.svg)](https://julialang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Production_Ready-success.svg)](#production-ready-features)
@@ -428,27 +428,20 @@ Benchmark results: [`reports/2026-03-01_molecular_generation_benchmark_report.md
 
 ## 🤝 Contributing
 
-We welcome contributions! Please:
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the setup, test, server, frontend
+and docs commands, plus the rules that keep the suite honest (registering new
+test files, the `GFLOWNET_TEST_RDKIT` gate, and why `CondaPkg.toml` must not
+gain a `[pip.deps]` section).
 
-1. **Understand the Architecture**: Review the mind map and component relationships
-2. **Follow High-Level Interface**: Use `create_*_gflownet()` functions
-3. **Maintain Quality**: Include professional visualizations and tests
-4. **Document Thoroughly**: Update both code and architectural documentation
+Release history is in **[CHANGELOG.md](CHANGELOG.md)**.
 
-### Development Workflow
+Quick start for contributors:
+
 ```bash
-# Fork and clone
 git clone https://github.com/danielchen26/Gflownet.git
-cd GFlowNet.jl
-
-# Test core functionality
-julia --project -e "using Pkg; Pkg.test()"
-
-# Run flagship example
-cd examples/grid_world && julia --project=../.. grid_world.jl
-
-# Verify professional output quality
-ls results/  # Should see HTML, PNG, and CSV files
+cd Gflownet
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
 ## 📄 License & Citation
