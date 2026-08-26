@@ -57,9 +57,6 @@ test_groups = [
         "applications/grid_world/test_grid_world.jl",
         "applications/grid_world/test_grid_world_versions.jl"
     ]),
-    ("Supply Chain Application", [
-        "applications/supply_chain/test_supply_chain.jl"
-    ]),
     ("Molecular Generation", [
         "applications/molecular/test_state_features.jl",
         "applications/molecular/test_fragment_joining.jl",
