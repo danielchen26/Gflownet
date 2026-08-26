@@ -467,6 +467,32 @@ end
         end
     end
 
+    # Run the FIRST training step on the main thread, before spawning the loop.
+    #
+    # Task stacks are far smaller than the main thread's. Type-inferring and
+    # compiling the Zygote pullback for train_step! recurses deeply enough
+    # (typeinf_edge -> typeinf -> abstract_call_method, hundreds deep) to
+    # overflow a Task stack, which killed the entire server with
+    #   [pid] signal 11 (2): Segmentation fault: 11
+    #   ... withgradient -> pullback -> jl_type_infer -> typeinf_ext_toplevel
+    #   train_step! at src/training/training.jl:322
+    #   step! at core/training_session.jl:303
+    #   #125 at api/unified_server.jl -> start_task
+    # i.e. POST /api/v2/training/start returned 200 and then the process died.
+    #
+    # Doing one step here forces that compilation where there is stack headroom;
+    # the async loop below then only executes already-compiled code. The step is
+    # real work the loop would have done anyway, so nothing is duplicated.
+    try
+        if session.is_training && session.current_iteration < session.total_iterations
+            step!(session)
+        end
+    catch e
+        @error "First training step failed" exception = (e, catch_backtrace())
+        session.last_error = sprint(showerror, e)
+        session.is_training = false
+    end
+
     # Launch async training loop
     # NOTE: @async runs cooperatively on the same thread as Oxygen,
     # so session field reads/writes are safe without locks.
