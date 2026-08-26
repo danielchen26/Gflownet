@@ -1,6 +1,10 @@
-# Web frontend (deployed separately on Vercel)
-src/utils/visualization/web/node_modules/
-src/utils/visualization/web/dist/
+# Web frontend (deployed separately). The image serves only the Julia API --
+# railway.toml healthchecks /health and nothing in the image serves static
+# files -- so exclude the WHOLE web tree, not just node_modules/dist. It
+# carries a 6.7 MB public/RDKit_minimal.wasm and ~5.6 MB of
+# templates/theme_examples PNGs that `COPY src/ src/` would otherwise drag
+# into the image.
+src/utils/visualization/web/
 
 # IDE and system files
 .vscode/
