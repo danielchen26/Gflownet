@@ -163,7 +163,7 @@ start_real_training_server(port=8080)
 Server will display:
 ```
 Starting real GFlowNet training visualization server on port 8080
-Frontend: http://localhost:3000 (Vite dev server)
+Frontend: http://localhost:5173 (Vite dev server)
 API base: http://localhost:8080/api/v2/
 
 Available endpoints:

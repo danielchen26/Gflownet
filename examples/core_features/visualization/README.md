@@ -19,7 +19,7 @@ julia show_visualization.jl
 
 This will:
 1. Start the API server at `http://localhost:8080`
-2. Launch the web dashboard at `http://localhost:3000`
+2. Launch the web dashboard at `http://localhost:5173`
 3. Open your browser automatically
 
 ## Features

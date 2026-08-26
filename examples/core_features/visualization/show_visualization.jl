@@ -85,18 +85,18 @@ sleep(3)
 # Open browser
 println("🌐 Opening browser...")
 if Sys.isapple()
-    run(`open http://localhost:3000`)
+    run(`open http://localhost:5173`)
 elseif Sys.islinux()
-    try run(`xdg-open http://localhost:3000`) catch end
+    try run(`xdg-open http://localhost:5173`) catch end
 elseif Sys.iswindows()
-    run(`cmd /c start http://localhost:3000`)
+    run(`cmd /c start http://localhost:5173`)
 end
 
 println("""
 
 ✅ Visualization is running!
 
-📍 View at: http://localhost:3000
+📍 View at: http://localhost:5173
 
 🎮 Features:
 • 3D trajectories with WebGL effects

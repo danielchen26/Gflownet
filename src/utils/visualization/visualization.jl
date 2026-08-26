@@ -53,5 +53,5 @@ To start the visualization dashboard:
 Or manually:
 1. Start the real training server: `julia --project -e 'include("src/utils/visualization/api/unified_server.jl"); start_real_training_server()'`
 2. Start the web dashboard: `cd src/utils/visualization/web && npm run dev`
-3. Open http://localhost:3000
+3. Open http://localhost:5173
 """

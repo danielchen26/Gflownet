@@ -652,7 +652,7 @@ The GFlowNet.jl visualization system provides powerful tools for monitoring trai
 # Start training with visualization
 cd("examples/core_features/visualization")
 run(`julia show_visualization.jl`)
-# Browser opens automatically at http://localhost:3000
+# Browser opens automatically at http://localhost:5173
 ```
 
 ### Key Visualization Features for Training

@@ -1818,7 +1818,7 @@ function start_real_training_server(; port::Int = 8080, host::String = "127.0.0.
     end
 
     @info "Starting real GFlowNet training visualization server on $host:$port"
-    @info "Frontend: http://localhost:3000 (Vite dev server)"
+    @info "Frontend: http://localhost:5173 (Vite dev server)"
     @info "API base: http://$host:$port/api/v2/"
     @info ""
     @info "Available endpoints:"

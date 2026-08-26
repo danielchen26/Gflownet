@@ -25,7 +25,15 @@
 *.db
 *.db-wal
 *.db-shm
-/data/
+# Ignore data/ CONTENTS, not the directory itself: git cannot re-include a file
+# whose parent directory is excluded, so `/data/` + `!/data/.gitkeep` silently
+# fails. unified_server.jl:1811 (SQLite db), :1167 and :1207
+# (fragment_libraries), :198/:1743 and pmo_benchmark.jl:80 (tdc_cache) all
+# resolve into data/. core/database.jl:28 mkpaths the db, but the fragments
+# route at :1170 has an isdir guard and silently returned an empty library when
+# data/ was absent.
+/data/*
+!/data/.gitkeep
 
 # TDC oracle model files (large pickles, downloaded at runtime)
 oracle/

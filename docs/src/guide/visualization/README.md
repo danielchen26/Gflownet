@@ -77,7 +77,7 @@ cd src/utils/visualization/web
 npm run dev
 ```
 
-The web dashboard will be available at `http://localhost:3000`
+The web dashboard will be available at `http://localhost:5173`
 
 ## API Endpoints
 
