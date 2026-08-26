@@ -8,7 +8,7 @@ import { Sidebar, type ViewId } from './components/Sidebar'
 import { StatusBar } from './components/StatusBar'
 import { CommandPalette } from './components/CommandPalette'
 import { ThemeProvider, useThemeLayout } from './contexts/ThemeContext'
-import { useWebSocket } from './hooks/useWebSocket'
+import { useBackendHealth } from './hooks/useBackendHealth'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AIAssistant } from './components/AIAssistant'
 import { api } from './services/api'
@@ -27,7 +27,7 @@ function AppContent() {
   const [activeView, setActiveView] = useState<ViewId>('home')
   const [problemConfig, setProblemConfig] = useState<any>(null)
   const [pendingDomainId, setPendingDomainId] = useState<string | null>(null)
-  const { isConnected } = useWebSocket()
+  const { isConnected } = useBackendHealth()
   const layout = useThemeLayout()
 
   const handleNavigate = useCallback((view: ViewId) => {

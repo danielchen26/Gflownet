@@ -17,10 +17,14 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      '/ws': {
-        target: 'ws://localhost:8080',
-        ws: true,
+      // useBackendHealth polls GET /health (unified_server.jl:342), which is
+      // NOT under /api and so needs its own proxy entry.
+      '/health': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
       },
+      // No '/ws' entry: the backend registers no @websocket route, and the
+      // useWebSocket stub that pretended otherwise has been removed.
     },
   },
 })
