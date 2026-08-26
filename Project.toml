@@ -59,7 +59,8 @@ BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-# Lux, Random, Statistics and Zygote are runtime [deps]; listing them here
-# documents that the suite imports them directly, so a future dep cleanup
-# cannot silently break the tests.
-test = ["Test", "BenchmarkTools", "Lux", "Random", "Statistics", "Zygote"]
+# Only [extras] names may appear here — Julia errors with "declared as a `test`
+# dependency, but no such entry in `extras` or `weakdeps`" otherwise. The
+# suite's other imports (Lux, Random, Statistics, Zygote) are runtime [deps]
+# and are therefore already visible to the test environment.
+test = ["BenchmarkTools", "Test"]

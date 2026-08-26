@@ -2289,6 +2289,60 @@ changelog with paths that no longer exist."
 
 ---
 
+## Phase 7 — Pre-existing test failures discovered during execution
+
+**These were invisible when the plan was written.** The suite aborted in group 10 of 15, so nothing downstream had ever been observed. Removing the `rethrow` (Task 5) exposed them. None is caused by Phases 0-1.
+
+### Measured baselines — use these, not "expect exit=0"
+
+| Point in time | Pass | Fail | Error | Broken | Total | Wall |
+|---|---|---|---|---|---|---|
+| After Task 5 (suite completes for the first time) | 1076 | 10 | 25 | 45 | 1156 | 39m53s |
+| After Task 4 (supply-chain test deleted) | 1076 | 6 | 19 | 45 | 1146 | 48m01s |
+
+**Revised acceptance criterion for every remaining task.** The original plan said "Expected: `exit=0`" throughout. That is unreachable while 6 failures and 19 errors pre-date this work, so it is replaced by: **no regression against the table above** — pass count must not drop, and fail/error counts must not rise. A task that reduces them is an improvement; a task that raises them must be fixed before commit.
+
+**Verification protocol change.** The full suite takes 40-48 minutes, so running it per task would cost ~16 hours across the remaining tasks. Remaining tasks verify with targeted per-file runs (`julia --project=. -e 'using Test; using GFlowNet; include("test/<path>")'`) plus a single full-suite run at the end of each phase.
+
+### Task 25: Fix the `OptimizationMethod` enum scoping in `test/integration/test_training.jl`
+
+5 of the 19 errors come from this one file: `UndefVarError: ADAM not defined in Main` at `:52`, `:54`, `:57`, `:99`, and 2 more at `:10`. `ADAM`, `ADAMW`, `RMSPROP` and `SGD` are **GFlowNet's own** `@enum OptimizationMethod` values (`src/training/configuration.jl:91-96`), correctly exported at `src/GFlowNet.jl:224`. So this is an import/scoping defect in the test file, not an API rename in Optimisers.
+
+- [ ] **Step 1: Establish the exact cause**
+
+```bash
+sed -n '1,15p' test/integration/test_training.jl
+julia --project=. -e 'using Test; using GFlowNet; include("test/integration/test_training.jl")' 2>&1 | grep -m3 UndefVarError
+```
+Determine whether the file lacks `using GFlowNet`, or imports a restricted symbol list that omits the enum values. Fix whichever it is — do not add a bare `const ADAM = ...` alias.
+
+- [ ] **Step 2: Verify the file in isolation, then commit**
+
+`julia --project=. -e 'using Test; using GFlowNet; include("test/integration/test_training.jl")'` must stop reporting `UndefVarError` for the enum names.
+
+### Task 26: Fix the `RMSProp` / `RMSprop` capitalization mismatch
+
+`test/core/test_core_functions.jl:258` asserts against `Optimisers.RMSProp` (capital P) while `src/training/configuration.jl:511` correctly calls `Optimisers.RMSprop` (lower p), which is the name Optimisers actually exports. The test is wrong, not the source.
+
+Note `test/README.md:251` documents this as "Change `RMSprop` to `RMSProp` in configuration.jl:383" — pointing the fix in the **wrong direction**. Correct that line too; Task 21 already covers the rest of that file's staleness.
+
+- [ ] **Step 1: Confirm which name Optimisers exports**
+
+`julia --project=. -e 'using Optimisers; println(isdefined(Optimisers, :RMSprop), " ", isdefined(Optimisers, :RMSProp))'`
+
+- [ ] **Step 2: Fix the test assertion and the misleading doc line, then commit**
+
+### Task 27: Supply the missing flow estimator for flow-matching tests
+
+2 errors: `ArgumentError: Flow matching requires flow estimator`, thrown at `src/core/balance.jl:694`, reached from `test/objectives/flow_matching/test_flow_matching.jl:20` and `test_flow_matching_comprehensive.jl:17`. The tests build their model with `create_grid_world_gflownet`, which does not attach a flow estimator, then call `flow_matching_loss`.
+
+**Decide which side is wrong before editing:** either the tests must construct a model with a flow estimator (test defect), or `create_grid_world_gflownet` should attach one when the objective needs it (source defect). Read `src/core/balance.jl:685-700` and the `create_grid_world_gflownet` signature before choosing. Do not silence the `ArgumentError`.
+
+### Task 28: Investigate the remaining failures
+
+Still unattributed after Tasks 25-27: 3 × `MethodError: no method matching reward(::GridState)` and 1 × `ArgumentError: reducing over an empty collection is not allowed; consider supplying \`init\``. Locate each with a targeted run, then fix at the source. The `reward(::GridState)` gap is suspicious given `src/applications/grid_world.jl` defines `GFlowNet.state_to_features` in the qualified style — check whether `reward` was meant to be defined the same way and was missed.
+
+
 ## Deferred — needs an owner decision before it can be planned
 
 Each of these was found during reconnaissance and deliberately left out of the tasks above, because the right answer changes the work substantially.
