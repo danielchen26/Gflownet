@@ -501,14 +501,14 @@ Create optimizer instance for the specified method.
 # Mathematical Foundation
 Different optimizers implement different update rules:
 - Adam: Uses adaptive learning rates with momentum
-- RMSprop: Scales learning rate by running average of gradients
+- RMSProp: Scales learning rate by running average of gradients
 - SGD: Simple gradient descent with optional momentum
 """
 function create_optimizer(method::OptimizationMethod, learning_rate::Float64)
     if method == ADAM
         return Optimisers.Adam(learning_rate)
     elseif method == RMSPROP
-        return Optimisers.RMSprop(learning_rate)
+        return Optimisers.RMSProp(learning_rate)
     elseif method == SGD
         return Optimisers.Descent(learning_rate)
     elseif method == ADAMW

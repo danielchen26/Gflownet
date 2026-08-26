@@ -6,6 +6,13 @@ using GFlowNet
 using Random
 using Optimisers
 
+# `using Optimisers` above also brings a deprecated uppercase ADAM/ADAMW into
+# scope, which makes the bare names ambiguous with GFlowNet's own
+# OptimizationMethod enum (src/training/configuration.jl:91-96) and leaves them
+# unbound: "UndefVarError: `ADAM` not defined in `Main`". An explicit import
+# takes precedence over the ambiguous `using`.
+using GFlowNet: ADAM, ADAMW, RMSPROP, SGD
+
 @testset "Training Infrastructure" begin
     @testset "Training Configuration" begin
         # Test default configuration creation
