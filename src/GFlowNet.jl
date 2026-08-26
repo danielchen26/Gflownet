@@ -106,7 +106,7 @@ include("extensions/information.jl")
 # =============================================================================
 
 # Abstract base types
-export AbstractState, AbstractAction, AbstractPolicy
+export AbstractState, AbstractAction  # AbstractPolicy was exported but never defined
 
 # Concrete mathematical types
 export ForwardPolicy, BackwardPolicy, FlowEstimator
@@ -185,13 +185,12 @@ export SamplingConfig
 # Trajectory sampling
 export sample_trajectory, sample_trajectory_batch, sample_backward_trajectory
 export sample_backward_trajectories_from_terminals, find_parent_for_action
-export sample_action_with_strategy
 
 
 
 # Trajectory analysis
 export is_valid_trajectory  # Only this function actually exists
-export benchmark_sampling, get_trajectory_summary
+export benchmark_sampling  # get_trajectory_summary was exported but never defined
 
 # =============================================================================
 # Training Objectives - Optimization Mathematics
@@ -245,7 +244,6 @@ export state_to_features, is_terminal_state, reward
 export is_applicable, apply_action
 
 # Interface validation
-export validate_state_interface, validate_action_interface
 
 # =============================================================================
 # Validation and Utilities
@@ -256,16 +254,22 @@ export validate_numerical_array, validate_neural_network_input, validate_neural_
 export validate_model_parameters, validate_reward
 export validate_state_features, validate_policy_output, validate_state_for_policy
 
-# Logging and monitoring
-export setup_logging!, log_training_progress!, log_validation_results!
-export create_training_logger, close_training_logger!
+# Logging and monitoring — these are the names utils/logging.jl actually
+# defines. The previous list (setup_logging!, log_training_progress!,
+# log_validation_results!, create_training_logger, close_training_logger!)
+# existed nowhere in src/.
+export GFlowNetLogger
+export log_metric!, log_iteration!, get_metric, get_last_metric, save_metrics
 
-# Visualization and reporting
-export plot_training_progress, plot_dag_structure, plot_trajectory_analysis
-export generate_training_report, save_training_artifacts
+# Visualization and reporting — names utils/visualization.jl actually defines.
+# plot_dag_structure, plot_trajectory_analysis, generate_training_report and
+# save_training_artifacts were exported but defined nowhere.
+export plot_trajectory, plot_multiple_trajectories, plot_training_progress
+export plot_reward_distribution, plot_state_visitation
+export create_training_dashboard, analyze_trajectories_visual
 
 # Z learning validation (LEARNABLE_ESTIMATION)
-export validate_z_learning, validate_z_gradients, monitor_z_learning
+export validate_z_learning, validate_z_gradients
 export validate_z_mathematical_properties, compute_trajectory_log_probability
 
 # Backward policy validation
@@ -283,13 +287,17 @@ export MoleculeState, MoleculeData, AddAtomAction, AddBondAction, TerminateMolec
 # Reaction GFlowNet factory (Gap 4, from interface.jl)
 export create_reaction_gflownet
 
-# Causal discovery application
-export CausalState, CausalAction, create_causal_gflownet
-export causal_reward, causal_features
+# Causal discovery application — names applications/causal_discovery.jl actually
+# defines. It has no Causal* vocabulary at all; the previous exports
+# (CausalState, CausalAction, create_causal_gflownet, causal_reward,
+# causal_features) were defined nowhere in src/.
+export DAGData, DAGState, DAGAction
+export AddEdgeAction, RemoveEdgeAction, TerminateDAGAction
 
-# Active learning application
-export ActiveLearningState, ActiveLearningAction, create_active_learning_gflownet
-export active_learning_reward, active_learning_features
+# Active learning application — names applications/active_learning.jl actually
+# defines. The previous ActiveLearning* exports were defined nowhere.
+export ExperimentData, ExperimentState, ExperimentAction
+export SelectExperimentAction, TerminateExperimentAction, create_experiment_actions
 
 # Supply chain application - Removed in core-fixes branch
 # export SupplyChainState, SupplyChainAction, SupplyChainNode, SupplyChainConnection, SupplyChainNetwork
@@ -307,22 +315,28 @@ export active_learning_reward, active_learning_features
 
 # Grid world application
 export GridState, GridAction, MoveRight, MoveUp, MoveLeft, MoveDown, Terminate
-export create_grid_world_gflownet, create_simple_grid_world, analyze_grid_world_results
+export create_grid_world_gflownet, analyze_grid_world_results
 
 # =============================================================================
 # Extensions - Advanced Features
 # =============================================================================
 
-# Continuous state spaces
-export ContinuousState, ContinuousGFlowNet
-export continuous_sampling, continuous_flow_estimation
+# Continuous state spaces (experimental — extensions/continuous.jl)
+# ContinuousGFlowNet / continuous_sampling / continuous_flow_estimation were
+# exported but defined nowhere.
+export ContinuousState, ContinuousAction, GaussianPolicy
+export create_gaussian_policy, gaussian_log_prob
+export sample_continuous_action, continuous_action_log_prob
 
-# Information-theoretic extensions
-export mutual_information_reward, entropy_regularized_sampling
-export information_bottleneck_objective
+# Information-theoretic extensions (experimental — extensions/information.jl)
+# mutual_information_reward / entropy_regularized_sampling /
+# information_bottleneck_objective were exported but defined nowhere.
+export entropy_estimator, kl_divergence, mutual_information
 
-# Non-acyclic extensions (experimental)
-export NonAcyclicGFlowNet, cycle_breaking_sampling
+# Non-acyclic extensions (experimental — extensions/non_acyclic.jl)
+# NonAcyclicGFlowNet / cycle_breaking_sampling were exported but defined nowhere.
+export CyclicFlowNetwork, create_cyclic_network
+export cyclic_trajectory_balance_loss, sample_cyclic_trajectory
 
 # =============================================================================
 # Model Creation - High-Level Interface
@@ -330,7 +344,7 @@ export NonAcyclicGFlowNet, cycle_breaking_sampling
 
 # High-level model creation (following the rules for clean interface)
 export create_forward_policy, create_backward_policy, create_flow_estimator
-export create_gflownet, to_component_array
+export create_gflownet
 
 # Multi-start GFlowNets
 export MultiStartGFlowNetModel, create_multi_start_gflownet

@@ -16,7 +16,8 @@ test_groups = [
         "core/neural_networks/test_neural_networks.jl"
     ]),
     ("Core Interface", [
-        "core/test_core_interface.jl"
+        "core/test_core_interface.jl",
+        "core/test_exports.jl"
     ]),
     ("Core Functions", [
         "core/test_core_functions.jl"
