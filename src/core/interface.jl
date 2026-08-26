@@ -854,6 +854,21 @@ end
 # =============================================================================
 
 """
+    reaction_state_dim(; n_reactions = 17, fp_dim = 1024, n_scalar_features = 8) → Int
+
+Feature-vector width for reaction-based molecular states: a Morgan fingerprint,
+a one-hot over reaction templates, and a block of scalar descriptors.
+
+This is the only place the reaction state width is computed.
+`create_reaction_gflownet` defaults `state_dim` to it, and the server-side
+`REACTION_STATE_DIM` calls it, so changing `n_reactions` can no longer desync
+the network's input layer from the real feature width.
+"""
+reaction_state_dim(; n_reactions::Int = 17, fp_dim::Int = 1024,
+                     n_scalar_features::Int = 8) =
+    fp_dim + n_reactions + n_scalar_features
+
+"""
     create_reaction_gflownet(; kwargs...) → GFlowNetModel
 
 Create a GFlowNet model for reaction-based molecular generation.
@@ -863,9 +878,14 @@ Uses a two-head architecture:
 """
 function create_reaction_gflownet(;
     n_reactions::Int = 17,
-    state_dim::Int = 1049,
-    hidden_dim::Int = 256,
     fp_dim::Int = 1024,
+    n_scalar_features::Int = 8,
+    # Julia evaluates keyword defaults left to right, so n_reactions, fp_dim and
+    # n_scalar_features must be declared above this line. Previously this was the
+    # literal 1049, so create_reaction_gflownet(n_reactions=20) built a network
+    # sized for 17 reactions.
+    state_dim::Int = reaction_state_dim(; n_reactions, fp_dim, n_scalar_features),
+    hidden_dim::Int = 256,
     learning_rate::Float64 = 0.001,
     initial_state::Union{Nothing, AbstractState} = nothing,
     all_actions::Union{Nothing, Vector{<:AbstractAction}} = nothing,

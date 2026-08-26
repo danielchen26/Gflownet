@@ -76,6 +76,7 @@ test_groups = [
         "applications/molecular/test_mogfn.jl",
         "applications/molecular/test_reaction_constraints.jl",
         "applications/molecular/test_integration.jl",
+        "applications/molecular/test_state_dim_consistency.jl",
     ])
 ]
 

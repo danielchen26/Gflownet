@@ -285,7 +285,7 @@ export MoleculeState, MoleculeData, AddAtomAction, AddBondAction, TerminateMolec
 # Fragment-based molecular types (MolState, FragmentAction, etc.) are in
 # molecular_generation.jl, loaded by the visualization server — not this module.
 # Reaction GFlowNet factory (Gap 4, from interface.jl)
-export create_reaction_gflownet
+export create_reaction_gflownet, reaction_state_dim
 
 # Causal discovery application — names applications/causal_discovery.jl actually
 # defines. It has no Causal* vocabulary at all; the previous exports

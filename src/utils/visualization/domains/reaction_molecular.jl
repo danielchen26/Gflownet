@@ -10,7 +10,7 @@
 # Users choose one or the other at training time.
 
 using GFlowNet: GFlowNetModel, Trajectory, AbstractState, AbstractAction,
-                is_terminal_state, reward
+                is_terminal_state, reward, reaction_state_dim
 
 # ============================================
 # Types
@@ -18,7 +18,10 @@ using GFlowNet: GFlowNetModel, Trajectory, AbstractState, AbstractAction,
 
 const MAX_REACTION_STEPS = 5
 const N_REACTIONS = 17
-const REACTION_STATE_DIM = 1049  # 1024 FP + 17 rxn one-hot + 8 scalars
+# Derived from GFlowNet.reaction_state_dim so this cannot drift from the network
+# input width that create_reaction_gflownet builds. Was the literal 1049, with
+# the arithmetic (1024 FP + 17 rxn one-hot + 8 scalars) only in a comment.
+const REACTION_STATE_DIM = reaction_state_dim(; n_reactions = N_REACTIONS)
 
 """State for reaction-based molecular generation."""
 mutable struct ReactionMolState <: AbstractState

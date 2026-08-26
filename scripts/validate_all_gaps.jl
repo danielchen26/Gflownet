@@ -466,9 +466,12 @@ function validate_gap4()
 
     # 4.6: create_reaction_gflownet model
     println("\n  [4.6] Reaction GFlowNet model creation...")
+    # state_dim is deliberately NOT passed: it now derives from n_reactions via
+    # GFlowNet.reaction_state_dim. Passing the old literal 1049 alongside
+    # n_reactions=length(templates) mis-sized the input layer whenever the
+    # template count was not 17.
     reaction_model = create_reaction_gflownet(
         n_reactions=length(templates),
-        state_dim=1049,
         hidden_dim=256,
     )
     println("    ✅ Model created with $(length(templates)) reaction templates")
