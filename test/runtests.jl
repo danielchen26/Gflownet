@@ -102,8 +102,8 @@ total_time = Ref(0.0)
                         include(test_path)
                     catch e
                         push!(failed_groups, "$group_name - $test_file")
-                        @error "Test failed" file=test_file exception=e
-                        rethrow(e)
+                        @error "Test file errored" file=test_file exception=(e, catch_backtrace())
+                        @test false  # surface as a failure; without this a collected error would pass
                     end
                 else
                     @warn "Test file not found: $test_file"
@@ -141,4 +141,10 @@ for (name, path) in debugging_tests
     println("  - $name: test/$path")
 end
 println("\nRun them individually when debugging specific issues.")
+
+# Collected errors must still fail the run. Without this, replacing the old
+# rethrow with collect-and-continue would let an erroring file pass silently.
+if !isempty(failed_groups)
+    error("$(length(failed_groups)) test file(s) errored — see the list above")
+end
 println("\nCompleted at: $(now())")
