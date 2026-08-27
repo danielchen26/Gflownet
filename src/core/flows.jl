@@ -502,12 +502,52 @@ Validate flow conservation across multiple states in the DAG.
 A well-trained GFlowNet should have flow conservation close to 1.0.
 Lower values indicate training issues or model problems.
 """
-function validate_flow_consistency(model::GFlowNetModel; sample_size::Int=50)::Float64
-    # NOTE: Flow consistency validation requires full flow computation
-    # which is not yet implemented. Returning placeholder value.
-    # TODO: Implement when flow functions are ready
-    @warn "Flow consistency validation not fully implemented"
-    return 1.0
+function validate_flow_consistency(model::GFlowNetModel; sample_size::Int=50,
+                                   tolerance::Float64=0.1)::Float64
+    # This returned a hardcoded 1.0 behind a @warn, so every caller was told
+    # flow conservation held perfectly no matter what the model did.
+    #
+    # The check must be FALSIFIABLE. Comparing compute_recursive_flow against
+    # its own defining recursion would be a tautology that returns 1.0 for any
+    # model, which is no better than the hardcoded value. So the real question
+    # is asked instead: does the LEARNED flow network agree with the flow
+    # implied by the policy?
+    #
+    #     flow_estimate(s)  ==  sum over children s' of F(s') * P_B(s|s')
+    #
+    # For an untrained model this fails and the fraction is near 0; it rises to
+    # 1 as the flow estimator learns. A model with no flow estimator has
+    # nothing to validate, which is reported as NaN rather than as success.
+    isnothing(model.flow_estimator) && return NaN
+
+    states = AbstractState[]
+    for _ in 1:sample_size
+        traj = sample_trajectory(model)
+        is_valid_trajectory(traj) || continue
+        for s in traj.states
+            is_terminal_state(s) && continue
+            isempty(get_applicable_actions(s, model.all_actions)) && continue
+            push!(states, s)
+        end
+    end
+    states = unique(states)
+
+    isempty(states) && return NaN
+
+    satisfied = 0
+    for s in states
+        estimated = flow_estimate(model.flow_estimator, s,
+                                  model.parameters.flow, model.states.flow)
+        implied = compute_recursive_flow(model, s)
+
+        # Relative agreement in log space: flows span orders of magnitude, so an
+        # absolute tolerance would be meaningless.
+        if abs(log(max(estimated, 1e-12)) - log(max(implied, 1e-12))) <= tolerance
+            satisfied += 1
+        end
+    end
+
+    return satisfied / length(states)
 end
 
 # =============================================================================

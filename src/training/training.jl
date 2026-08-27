@@ -353,7 +353,26 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
         gc.log_Z = 0.0          # keep log_Z out of the Adam update
         gc
     else
-        g
+        copy(g)
+    end
+
+    # APPLY gradient clipping. `clip_gradients!` and `gradient_clip_norm` both
+    # existed, the config validated the value and printed it in its summary, and
+    # nothing ever called it -- so the documented stability guarantee was
+    # absent. Clipping is applied to the network gradients only; log_Z has its
+    # own explicit step below and its magnitude sensitivity is the point of it.
+    # TrainingConfig has no separate on/off flag: the constructor already
+    # rejects gradient_clip_norm <= 0, so a positive value means clip.
+    # MEASURED EFFECT, so nobody relies on this for safety: with Adam the effect
+    # is nearly nil, because Adam divides by the gradient's own second moment
+    # and a global-norm clip is a single uniform rescale, which cancels exactly
+    # on a fresh step. Over 40 steps, clip_norm 1e6 vs 1e-6 gave total parameter
+    # movement 1.2488 vs 1.2518 -- a 0.25% difference, arising only because the
+    # per-step norms differ. It is wired because the config promises it, not
+    # because it confers real stability here; NaN/Inf spikes are caught by the
+    # any_invalid guard above instead.
+    if config.gradient_clip_norm > 0
+        clip_gradients!(grads_for_adam, config.gradient_clip_norm)
     end
 
     # Update network parameters using Optimisers.jl

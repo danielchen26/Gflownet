@@ -912,13 +912,79 @@ function validate_balance_conditions(model::GFlowNetModel;
         results["trajectory_balance"] = nothing
     end
 
-    # Detailed Balance validation (not currently supported)
-    # TODO: Implement detailed balance validation when backward policy and flow computation are available
-    results["detailed_balance"] = nothing
+    # Detailed Balance: measure the residual of
+    #     log P_F(s'|s) + log F(s)  ==  log P_B(s|s') + log F(s')
+    # over sampled transitions. This returned `nothing` behind a TODO, so no
+    # caller could ever detect a DB violation.
+    results["detailed_balance"] = try
+        residuals = Float64[]
+        for _ in 1:n_state_pairs
+            traj = sample_trajectory(model)
+            is_valid_trajectory(traj) || continue
+            for i in 1:length(traj.states)-1
+                s, sp = traj.states[i], traj.states[i+1]
+                probs = forward_action_probabilities(model.forward_policy, s,
+                            model.all_actions, model.parameters.forward, model.states.forward)
+                applicable = get_applicable_actions(s, model.all_actions)
+                idx = findfirst(a -> a in applicable && apply_action(a, s) == sp,
+                                model.all_actions)
+                isnothing(idx) && continue
+                pb = if isnothing(model.backward_policy)
+                    parents = backward_parent_states(sp, model.all_actions)
+                    isempty(parents) ? 1.0 : 1.0 / length(parents)
+                else
+                    compute_backward_probability(model.backward_policy, sp, s,
+                        model.parameters.backward, model.states.backward, model.all_actions)
+                end
+                fs  = is_terminal_state(s)  ? reward(s)  : flow(model, s)
+                fsp = is_terminal_state(sp) ? reward(sp) : flow(model, sp)
+                push!(residuals, abs((log(max(probs[idx],1e-12)) + log(max(fs,1e-12))) -
+                                     (log(max(pb,1e-12))        + log(max(fsp,1e-12)))))
+            end
+        end
+        isempty(residuals) ? nothing :
+            (mean_residual = mean(residuals), max_residual = maximum(residuals),
+             n_samples = length(residuals))
+    catch e
+        @warn "Detailed balance validation failed: $e"
+        nothing
+    end
 
-    # Flow Matching validation (not currently supported)
-    # TODO: Implement flow matching validation when flow computation is available
-    results["flow_matching"] = nothing
+    # Flow Matching: residual of the conservation law
+    #     sum over parents p of F(p) P_F(s|p)  ==  F(s)
+    results["flow_matching"] = try
+        residuals = Float64[]
+        seen = Set{Any}()
+        for _ in 1:n_states
+            traj = sample_trajectory(model)
+            is_valid_trajectory(traj) || continue
+            for s in traj.states
+                s in seen && continue
+                push!(seen, s)
+                parents = backward_parent_states(s, model.all_actions)
+                isempty(parents) && continue
+                inflow = 0.0
+                for p in parents
+                    probs = forward_action_probabilities(model.forward_policy, p,
+                                model.all_actions, model.parameters.forward, model.states.forward)
+                    applicable = get_applicable_actions(p, model.all_actions)
+                    idx = findfirst(a -> a in applicable && apply_action(a, p) == s,
+                                    model.all_actions)
+                    isnothing(idx) && continue
+                    fp = is_terminal_state(p) ? reward(p) : flow(model, p)
+                    inflow += fp * probs[idx]
+                end
+                fs = is_terminal_state(s) ? reward(s) : flow(model, s)
+                push!(residuals, abs(log(max(inflow,1e-12)) - log(max(fs,1e-12))))
+            end
+        end
+        isempty(residuals) ? nothing :
+            (mean_residual = mean(residuals), max_residual = maximum(residuals),
+             n_samples = length(residuals))
+    catch e
+        @warn "Flow matching validation failed: $e"
+        nothing
+    end
 
     return NamedTuple(Symbol(k) => v for (k, v) in results)
 end

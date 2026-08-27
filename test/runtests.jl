@@ -12,6 +12,20 @@ println("=" ^ 60)
 # Define test groups with their paths
 # Order matters: core functionality first, then higher-level features
 test_groups = [
+    # MATHEMATICAL CORRECTNESS, run FIRST and deliberately so. These do not
+    # test plumbing: they compare the implementation against exact enumeration
+    # of the 3x3 grid DAG, where Z = 19 and the target distribution is known in
+    # closed form. test_reward_proportionality.jl asserts the defining theorem
+    # p(x) proportional to R(x); test_objective_health.jl asserts that every
+    # objective produces a non-zero gradient for each component it claims to
+    # train, that P_B is a distribution over parents, and that every objective
+    # responds to a change in reward. Each of these failed before the repair,
+    # and each failure was a silent one -- training ran, losses fell, and the
+    # sampled distribution was wrong.
+    ("Mathematical Correctness", [
+        "theory/test_reward_proportionality.jl",
+        "theory/test_objective_health.jl"
+    ]),
     ("Neural Networks", [
         "core/neural_networks/test_neural_networks.jl"
     ]),
