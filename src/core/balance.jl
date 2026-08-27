@@ -264,9 +264,23 @@ function _compute_sub_trajectory_loss_differentiable(
     start_flow_vec, _ = model.flow_estimator.model(start_features_mat, params.flow, model.states.flow)
     end_flow_vec, _ = model.flow_estimator.model(end_features_mat, params.flow, model.states.flow)
 
-    # Ensure positive flows (using softplus-like transformation)
-    log_start_flow = log(max(start_flow_vec[1], 1e-8))
-    log_end_flow = log(max(end_flow_vec[1], 1e-8))
+    # TERMINAL BOUNDARY CONDITION: F(x) = R(x) for terminal x.
+    #
+    # This was missing, and it is why reward never entered the SubTB objective at
+    # all: the raw flow-network output was used even when the endpoint was
+    # terminal. Measured proof -- scaling R(3,3) from 10 to 1000 left the loss
+    # bit-identical at 9.990423551228066, so a 100x reward change moved nothing
+    # and any constant flow network minimised the objective.
+    log_start_flow = if Zygote.@ignore(is_terminal_state(sub_states[1]))
+        log(max(Zygote.@ignore(reward(sub_states[1])), 1e-8))
+    else
+        log(max(start_flow_vec[1], 1e-8))
+    end
+    log_end_flow = if Zygote.@ignore(is_terminal_state(sub_states[end]))
+        log(max(Zygote.@ignore(reward(sub_states[end])), 1e-8))
+    else
+        log(max(end_flow_vec[1], 1e-8))
+    end
 
     # SubTB loss: (log F(s_i) + log P_F(τ[i:j]) - log F(s_j))²
     error = log_start_flow + log_forward_prob - log_end_flow

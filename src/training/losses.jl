@@ -148,9 +148,36 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
                         )
                     end
                     
-                    # Compute flows in a non-differentiable way to avoid cache issues
-                    source_flow = Zygote.@ignore flow(model, source)
-                    target_flow = Zygote.@ignore flow(model, target)
+                      # Flows must be DIFFERENTIABLE for Detailed Balance to be
+                      # trainable: DB's whole content is that F adjusts until
+                      # P_F(s'|s)F(s) = P_B(s|s')F(s'). These were previously
+                      # `Zygote.@ignore flow(model, ...)`, which left DB's :flow
+                      # gradient norm at exactly 0.0 -- the objective could only
+                      # move the policy against a frozen target it could never
+                      # close against. Use the learned flow estimator, which is
+                      # what DB's F is supposed to be.
+                      if isnothing(model.flow_estimator) || !haskey(params, :flow)
+                          error("DETAILED_BALANCE requires a flow estimator. " *
+                                "Construct the model with include_flow_estimator = true.")
+                      end
+                      # TERMINAL BOUNDARY F(x) = R(x). Without it the reward never
+                      # enters DB at all: switching from flow() to the learned
+                      # estimator attached the gradient but made the loss
+                      # reward-blind, measured as a delta of exactly 0.0 under a
+                      # 100x reward change. DB's boundary condition IS what ties
+                      # the flow network to the task.
+                      source_flow = if Zygote.@ignore(is_terminal_state(source))
+                          Zygote.@ignore(max(reward(source), 1e-8))
+                      else
+                          flow_estimate(model.flow_estimator, source,
+                                        params.flow, model.states.flow)
+                      end
+                      target_flow = if Zygote.@ignore(is_terminal_state(target))
+                          Zygote.@ignore(max(reward(target), 1e-8))
+                      else
+                          flow_estimate(model.flow_estimator, target,
+                                        params.flow, model.states.flow)
+                      end
                     
                     # Compute detailed balance loss
                     left_side = log(max(forward_prob, 1e-8)) + log(max(source_flow, 1e-8))
@@ -182,67 +209,90 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         return base_loss
 
     elseif config.objective == FLOW_MATCHING
-        # For flow matching, we need non-terminal states from trajectories
-        # Extract all non-terminal states
+        # Flow conservation on STATE flows, in log space:
+        #
+        #     sum over parents p of  F(p) * P_F(s|p)   ==   F(s)
+        #     with the boundary condition F(x) = R(x) at terminal x
+        #
+        # Three defects are fixed here, all measured:
+        #  1. The policy was inside `Zygote.@ignore`, so the forward parameters
+        #     received a gradient norm of 0.004535 against TB's 9.923 -- and that
+        #     residual was only the entropy term, whose sign drives the sampler
+        #     TOWARD uniform. Flow matching could not learn a reward-seeking
+        #     policy at all. P_F is now inside the gradient.
+        #  2. The comparison was `(estimated - expected)^2` in RAW flow space, so
+        #     the loss scaled as O(R^2) and was dominated by reward magnitude.
+        #     It is now a difference of logs.
+        #  3. There was no in-flow over parents and no R(s) term, so reward never
+        #     entered: a 100x reward change moved the loss by exactly 0.0.
+        #
+        # NOTE ON FAITHFULNESS: Bengio et al. 2021 parameterise EDGE flows
+        # F(s,a). This estimator produces STATE flows, so what is implemented is
+        # the state-flow form of the same conservation law. That is a valid
+        # condition with the same fixed point, but it is not literally the
+        # edge-flow objective of the paper, and the docs should not claim it is.
         states = Zygote.@ignore begin
             all_states = AbstractState[]
-            
             for traj in trajectories
-                if !is_valid_trajectory(traj)
-                    continue
-                end
-                
-                # Add all non-terminal states
-                for state in traj.states[1:end-1]  # Exclude last state (terminal)
-                    if !is_terminal_state(state)
-                        push!(all_states, state)
-                    end
+                is_valid_trajectory(traj) || continue
+                # Terminal states are INCLUDED: F(x) = R(x) is where the reward
+                # enters the objective.
+                for state in traj.states
+                    push!(all_states, state)
                 end
             end
-            
-            # Remove duplicates to avoid biasing training
             unique(all_states)
         end
-        
+
         if isempty(states)
             return 0.0
         end
-        
-        # Compute flow matching loss for each state
+
+        if isnothing(model.flow_estimator) || !haskey(params, :flow)
+            throw(ArgumentError(
+                "FLOW_MATCHING requires a flow estimator. " *
+                "Create the model with include_flow_estimator = true"
+            ))
+        end
+
+        # log F(s), applying the terminal boundary.
+        log_flow_of(s) = if Zygote.@ignore(is_terminal_state(s))
+            log(max(Zygote.@ignore(reward(s)), 1e-8))
+        else
+            log(max(flow_estimate(model.flow_estimator, s, params.flow, model.states.flow), 1e-12))
+        end
+
         losses = [
             begin
-                # Compute expected flow (wrap flow computation in Zygote.@ignore)
-                expected_flow = Zygote.@ignore begin
-                    applicable_actions = get_applicable_actions(state, model.all_actions)
-                    if isempty(applicable_actions)
+                parents = Zygote.@ignore backward_parent_states(state, model.all_actions)
+                if isempty(parents)
+                    # The initial state has no parents; conservation is vacuous there.
+                    0.0
+                else
+                    log_terms = map(parents) do p
+                        # index of the action taking p -> state
+                        idx = Zygote.@ignore begin
+                            applicable = get_applicable_actions(p, model.all_actions)
+                            findfirst(a -> a in applicable && apply_action(a, p) == state,
+                                      model.all_actions)
+                        end
+                        if idx === nothing
+                            -Inf
+                        else
+                            probs = forward_action_probabilities(
+                                model.forward_policy, p, model.all_actions,
+                                params.forward, model.states.forward
+                            )
+                            log_flow_of(p) + log(max(probs[idx], 1e-12))
+                        end
+                    end
+                    finite_terms = filter(!isinf, log_terms)
+                    if isempty(finite_terms)
                         0.0
                     else
-                        action_probs = forward_action_probabilities(
-                            model.forward_policy, state, model.all_actions,
-                            params.forward, model.states.forward
-                        )
-                        
-                        flow_sum = 0.0
-                        for (action_idx, action) in enumerate(model.all_actions)
-                            if action in applicable_actions
-                                next_state = apply_action(action, state)
-                                transition_prob = action_probs[action_idx]
-                                next_flow = flow(model, next_state)
-                                flow_sum += transition_prob * next_flow
-                            end
-                        end
-                        flow_sum
+                        (logsumexp(finite_terms) - log_flow_of(state))^2
                     end
                 end
-                
-                # Get flow estimate from neural network (this is differentiable)
-                estimated_flow = flow_estimate(
-                    model.flow_estimator, state,
-                    params.flow, model.states.flow
-                )
-                
-                # Flow matching loss
-                (estimated_flow - expected_flow)^2
             end
             for state in states
         ]
@@ -283,15 +333,23 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
         return sub_trajectory_balance_loss_batch(model, trajectories, params; sub_length=sub_length)
         
     elseif config.objective == DIRECT_FLOW_OBJECTIVE
-        # Filter valid trajectories
-        valid_trajectories = Zygote.@ignore [traj for traj in trajectories if is_valid_trajectory(traj)]
-
-        if isempty(valid_trajectories)
-            return 0.0
-        end
-
-        # Compute direct flow loss
-        return direct_flow_loss_batch(model, valid_trajectories)
+        # DELIBERATELY UNAVAILABLE. This branch called
+        # `direct_flow_loss_batch(model, valid_trajectories)` WITHOUT `params`, and
+        # direct_flow_loss internally reads `model.parameters` and wraps log Z in
+        # Zygote.@ignore. The whole expression was therefore a constant with
+        # respect to the differentiation variable: Zygote returned nothing, and
+        # train_step! short-circuited to `return Inf, 0.0`. Measured: it throws
+        # during compilation. Training under it was a no-op that looked like
+        # training.
+        #
+        # It is also not a published objective -- it is TB with a state-conditioned
+        # Z(s0) from the flow network. Use TRAJECTORY_BALANCE instead, which is now
+        # verified to sample proportionally to reward.
+        throw(ArgumentError(
+            "DIRECT_FLOW_OBJECTIVE is not implemented correctly and is disabled. " *
+            "Its loss was constant with respect to the model parameters, so " *
+            "training under it silently did nothing. Use TRAJECTORY_BALANCE."
+        ))
 
     elseif config.objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
         # TLM (ICLR 2025): Optimizing Backward Policies in GFlowNets via Trajectory Likelihood Maximization
