@@ -329,25 +329,46 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
     # Compute gradient norm (before scaling)
     gradient_norm = compute_gradient_norm(grads[1])
 
-    # Apply z_learning_rate_multiplier by scaling the log_Z gradient
-    # This effectively gives Z a higher learning rate: lr_Z = lr * multiplier
-    # Reference: Peptide generation paper (bioRxiv 2026) recommends 10x for faster Z convergence
-    scaled_grads = if haskey(grads[1], :log_Z) && config.z_learning_rate_multiplier != 1.0
-        scale_z_gradient(grads[1], config.z_learning_rate_multiplier)
+    # log_Z is updated SEPARATELY from the network parameters.
+    #
+    # The old path scaled the log_Z gradient by z_learning_rate_multiplier and fed
+    # it to Adam. That is provably a no-op: Adam divides by the gradient's own
+    # second moment, so scaling the gradient by c scales both m and sqrt(v) by c
+    # and the step is unchanged. Verified numerically -- gradient scales 1x, 10x
+    # and 100x all give log_Z = 0.2 after 200 Adam steps, i.e. exactly lr per
+    # step. Since the TB objective needs log Z to travel to log(Z_true) (about 3
+    # on the 3x3 grid, about 20 on the molecular fragment DAG), that meant
+    # thousands of iterations before the loss could begin to fall, and it is why
+    # observed losses sat at 217-473 while the report's own runs drifted only
+    # 21.7 -> 18.2 over 1500 episodes.
+    #
+    # A plain scaled step IS magnitude-sensitive, so a large TB residual closes
+    # quickly and a small one barely moves.
+    g = grads[1]
+    has_logZ = haskey(g, :log_Z)
+    dZ = has_logZ ? g.log_Z : 0.0
+
+    grads_for_adam = if has_logZ
+        gc = copy(g)
+        gc.log_Z = 0.0          # keep log_Z out of the Adam update
+        gc
     else
-        grads[1]
+        g
     end
 
-    # Update parameters using Optimisers.jl
-    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, scaled_grads)
+    # Update network parameters using Optimisers.jl
+    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters,
+                                                   grads_for_adam)
 
     # Update model state (mutation after gradient computation is safe)
     model.optimizer = optimizer_state
     model.parameters = parameters
 
-    # Synchronize log_partition_function field with parameter if using LEARNABLE_ESTIMATION
-    if haskey(parameters, :log_Z)
-        model.log_partition_function = parameters.log_Z
+    # Explicit log_Z step, and synchronise the mirrored field.
+    if has_logZ
+        lr_Z = config.learning_rate * config.z_learning_rate_multiplier
+        model.parameters.log_Z = model.parameters.log_Z - lr_Z * dZ
+        model.log_partition_function = model.parameters.log_Z
     end
 
     return loss_val, gradient_norm
