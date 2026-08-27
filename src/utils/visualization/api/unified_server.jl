@@ -843,6 +843,23 @@ end
     return safe_json(molecules[idx])
 end
 
+# Memo for the chemical-space projection.
+#
+# The frontend polls /api/v2/molecular/space every 10 s
+# (web/src/pages/ChemicalSpaceExplorer.tsx:34) with method=umap by default, and
+# each request refit UMAP from scratch: rdkit_bridge.jl constructs a new reducer
+# and calls fit_transform unconditionally, with no cache anywhere in the path.
+# Since this runs on the same cooperative thread as the HTTP server and the
+# training loop, every poll stalled every other endpoint -- which is why
+# /api/v2/domain/info, whose handler is sub-millisecond, was measured at 4.08 s.
+#
+# Keyed on (method, number of molecules with fingerprints). Sound because the
+# molecule list is APPEND-ONLY (domains/molecular.jl pushes, and there is no
+# deleteat!/resize! anywhere), so the count changing is exactly the condition
+# under which the projection must be recomputed. UMAP and t-SNE now pass
+# random_state=42, so a cached embedding is the same one a refit would produce.
+const _PROJECTION_CACHE = Ref{Union{Nothing,Tuple{String,Int,Vector{Dict}}}}(nothing)
+
 @get "/api/v2/molecular/space" function(req)
     method = get(queryparams(req), "method", "pca")
 
@@ -879,6 +896,14 @@ end
         return safe_json(Dict("points" => points, "projection" => "property_scatter"))
     end
 
+    # Serve the memo when the method and molecule count are unchanged. Skips the
+    # UMAP/t-SNE refit AND the fingerprint marshalling entirely.
+    cached = _PROJECTION_CACHE[]
+    if cached !== nothing && cached[1] == method && cached[2] == length(mols_with_fp)
+        return safe_json(Dict("points" => cached[3], "projection" => method,
+                              "cached" => true))
+    end
+
     fps = [Vector{Float32}(m["fingerprint"]) for m in mols_with_fp]
 
     try
@@ -893,7 +918,9 @@ end
             "cluster_id"       => 0,
             "generation_epoch" => mols_with_fp[i]["generation_step"],
         ) for i in 1:length(mols_with_fp)]
-        return safe_json(Dict("points" => points, "projection" => method))
+        _PROJECTION_CACHE[] = (method, length(mols_with_fp), points)
+        return safe_json(Dict("points" => points, "projection" => method,
+                              "cached" => false))
     catch e
         @warn "Chemical space projection failed" exception=e
         return safe_json(Dict("points" => [], "error" => string(e)))

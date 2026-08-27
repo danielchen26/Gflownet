@@ -39,6 +39,7 @@ function register_domain!(id::String, adapter_type::Type{<:AbstractDomainAdapter
         @warn "Overwriting existing domain registration: $id"
     end
     DOMAIN_REGISTRY.domains[id] = adapter_type
+    invalidate_domains_cache!()
     @info "Registered domain: $id => $adapter_type"
     return nothing
 end
@@ -51,6 +52,7 @@ Remove a domain from the registry.
 function unregister_domain!(id::String)
     if haskey(DOMAIN_REGISTRY.domains, id)
         delete!(DOMAIN_REGISTRY.domains, id)
+        invalidate_domains_cache!()
         @info "Unregistered domain: $id"
     end
     return nothing
@@ -72,7 +74,25 @@ Vector of dictionaries containing:
 - `isPopular`: Whether this domain is marked as popular
 - `tags`: Categorization tags
 """
+# Memo for list_domains(). The result is a pure function of the registry, which is
+# only mutated by register_domain!/unregister_domain! -- both of which run once at
+# server startup. Without this, every call rebuilt a temporary instance of all
+# three adapters plus six metadata calls and a sort. GET /api/v2/domains paid that
+# TWICE per request (it calls list_domains directly and again via
+# builtin_domain_count), and get_domain_info is implemented as list_domains plus a
+# linear scan. Invalidated explicitly on registry mutation, so the output stays
+# byte-identical.
+const _DOMAINS_CACHE = Ref{Union{Nothing,Vector{Dict}}}(nothing)
+
+function invalidate_domains_cache!()
+    _DOMAINS_CACHE[] = nothing
+    return nothing
+end
+
 function list_domains()::Vector{Dict}
+    cached = _DOMAINS_CACHE[]
+    cached === nothing || return cached
+
     domains = Dict[]
 
     for (id, adapter_type) in DOMAIN_REGISTRY.domains
@@ -115,6 +135,7 @@ function list_domains()::Vector{Dict}
     # Sort by popularity, then by name
     sort!(domains, by = d -> (!d["isPopular"], d["name"]))
 
+    _DOMAINS_CACHE[] = domains
     return domains
 end
 

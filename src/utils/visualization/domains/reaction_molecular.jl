@@ -329,11 +329,11 @@ function store_molecules_from_trajectories!(adapter::ReactionMolecularAdapter,
         props = RDKitBridge.compute_mol_properties(primary_smi)
         props === nothing && continue
 
-        svg = try
-            RDKitBridge.mol_to_svg(primary_smi)
-        catch
-            nothing
-        end
+        # Same as domains/molecular.jl: svg_2d is written but never read anywhere,
+        # and rendering it cost a Python round-trip per molecule per iteration on
+        # the thread that also serves HTTP. The dashboard renders structures
+        # client-side from SMILES via @rdkit/rdkit.
+        svg = nothing
 
         # Build synthesis route from reaction history
         templates = RDKitBridge.get_reaction_templates()

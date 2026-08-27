@@ -143,11 +143,21 @@ function store_molecules_from_trajectories!(adapter::MolecularAdapter,
         props = RDKitBridge.compute_mol_properties(terminal.smiles)
         props === nothing && continue
 
-        svg = try
-            RDKitBridge.mol_to_svg(terminal.smiles)
-        catch
-            nothing
-        end
+        # svg_2d is deliberately NOT rendered here.
+        #
+        # RDKitBridge.mol_to_svg was called once per molecule per training
+        # iteration -- a Python round-trip costing 0.53 ms per molecule, 8.5 ms
+        # per iteration at batch_size 16 -- on the same cooperative thread that
+        # serves every HTTP endpoint. And NOTHING reads the result: repo-wide,
+        # `svg_2d` is only ever WRITTEN (here, reaction_molecular.jl:369, and the
+        # SQLite column) plus declared once in a TypeScript interface
+        # (web/src/services/api.ts:493). The dashboard draws structures client-side
+        # from SMILES via @rdkit/rdkit (MoleculeCard.tsx:89 passes smiles=, not
+        # svg), so the server-rendered SVG was stored per row and shipped in every
+        # molecule payload without ever being displayed.
+        #
+        # The key is kept so the DB insert and the TS interface stay valid.
+        svg = nothing
 
         mol_dict = Dict(
             "id"              => "mol_$(length(adapter.generated_molecules) + 1)",
