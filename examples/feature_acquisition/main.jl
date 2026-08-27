@@ -8,7 +8,7 @@ training interface. The agent learns to select which features to measure in expe
 to maximize information gain while minimizing measurement costs.
 
 Key Features:
-- Uses TrainingConfig with ADAPTIVE_SUB_TB objective
+- Uses TrainingConfig with SUB_TRAJECTORY_BALANCE objective
 - Adaptive partition function estimation
 - Modern state representation and action space
 - Comprehensive evaluation and visualization
@@ -26,7 +26,7 @@ using Dates
 try
     using GFlowNet
     using GFlowNet: AbstractState, AbstractAction, TrainingConfig, TrainingObjective, PartitionFunctionMethod
-    using GFlowNet: ADAPTIVE_SUB_TB, ADAPTIVE_ESTIMATION
+    using GFlowNet: SUB_TRAJECTORY_BALANCE, ADAPTIVE_ESTIMATION
     global GFLOWNET_AVAILABLE = true
     println("✅ GFlowNet package loaded successfully")
 catch e
@@ -37,9 +37,8 @@ catch e
     # Define minimal mock types for demonstration
     abstract type AbstractState end
     abstract type AbstractAction end
-    abstract type RewardFunction end
     
-    @enum TrainingObjective ADAPTIVE_SUB_TB
+    @enum TrainingObjective SUB_TRAJECTORY_BALANCE
     @enum PartitionFunctionMethod ADAPTIVE_ESTIMATION
     
     struct TrainingConfig
@@ -206,11 +205,15 @@ end
 =============================================================================#
 
 """
-    FeatureAcquisitionReward <: RewardFunction
+    FeatureAcquisitionReward
 
 Reward function that balances discovery value against measurement costs.
+
+GFlowNet has no `RewardFunction` abstract type — the package's reward API is the
+exported `reward(state)` function plus plain callable structs — so this is a plain
+callable struct, invoked as `reward_fn(state)`.
 """
-struct FeatureAcquisitionReward <: RewardFunction
+struct FeatureAcquisitionReward
     experiment_values::Vector{Float64}    # True experiment values
     cost_per_measurement::Float64         # Cost per measurement
     value_weight::Float64                # Weight for discovery value
@@ -1603,7 +1606,7 @@ function run_comprehensive_benchmark()
     # Setup training configuration
     config = if GFLOWNET_AVAILABLE
         GFlowNet.TrainingConfig(
-            objective = GFlowNet.ADAPTIVE_SUB_TB,
+            objective = GFlowNet.SUB_TRAJECTORY_BALANCE,
             partition_function_method = GFlowNet.ADAPTIVE_ESTIMATION,
             batch_size = 32,
             learning_rate = 0.001,
@@ -1612,11 +1615,11 @@ function run_comprehensive_benchmark()
             early_stopping_patience = 400
         )
     else
-        TrainingConfig(ADAPTIVE_SUB_TB, ADAPTIVE_ESTIMATION, 32, 0.001, 2000, 200, 400, Dict())
+        TrainingConfig(SUB_TRAJECTORY_BALANCE, ADAPTIVE_ESTIMATION, 32, 0.001, 2000, 200, 400, Dict())
     end
     
     println("⚙️  Training Configuration:")
-    println("   • Objective: ADAPTIVE_SUB_TB (adaptive sub-trajectory balance)")
+    println("   • Objective: SUB_TRAJECTORY_BALANCE (sub-trajectory balance)")
     println("   • Iterations: $(config.n_iterations)")
     println("   • Batch size: $(config.batch_size)")
     println("   • Learning rate: $(config.learning_rate)")
@@ -1745,8 +1748,8 @@ function test_integration()
         # Test enum availability
         println("✓ TrainingObjective enums:")
         println("   • TRAJECTORY_BALANCE: $(GFlowNet.TRAJECTORY_BALANCE)")
-        println("   • ADAPTIVE_SUB_TB: $(GFlowNet.ADAPTIVE_SUB_TB)")
-        println("   • FLOW_CONSISTENCY: $(GFlowNet.FLOW_CONSISTENCY)")
+        println("   • SUB_TRAJECTORY_BALANCE: $(GFlowNet.SUB_TRAJECTORY_BALANCE)")
+        println("   • FLOW_MATCHING: $(GFlowNet.FLOW_MATCHING)")
         
         println("✓ PartitionFunctionMethod enums:")
         println("   • SIMPLE_ESTIMATION: $(GFlowNet.SIMPLE_ESTIMATION)")

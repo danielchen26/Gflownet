@@ -84,23 +84,30 @@ end
 
 # Show what sub-trajectories would be extracted
 println("\nSub-trajectories (max length 3):")
-sub_count = 0
-for start_idx in 1:length(sample_traj.states)-1
-    for end_idx in start_idx+1:min(start_idx+3, length(sample_traj.states))
-        sub_states = sample_traj.states[start_idx:end_idx]
-        sub_count += 1
-        counts = [s.count for s in sub_states]
-        println("  Sub-trajectory $sub_count: states $start_idx-$end_idx, counts: $counts")
-        
-        if sub_count >= 5  # Limit output
-            println("  ... (and more)")
-            break
+# The enumeration lives in a function so the running counter is a real local
+# variable. Written at top level, `sub_count += 1` inside the loop is an
+# ambiguous soft-scope assignment: Julia creates a fresh local per loop body and
+# the read fails with `UndefVarError: sub_count not defined in local scope`.
+function show_sub_trajectories(traj; max_sub_length::Int=3, max_shown::Int=5)
+    sub_count = 0
+    n_states = length(traj.states)
+    for start_idx in 1:n_states-1
+        for end_idx in start_idx+1:min(start_idx + max_sub_length, n_states)
+            sub_states = traj.states[start_idx:end_idx]
+            sub_count += 1
+            counts = [s.count for s in sub_states]
+            println("  Sub-trajectory $sub_count: states $start_idx-$end_idx, counts: $counts")
+
+            if sub_count >= max_shown  # Limit output
+                println("  ... (and more)")
+                return sub_count
+            end
         end
     end
-    if sub_count >= 5
-        break
-    end
+    return sub_count
 end
+
+show_sub_trajectories(sample_traj)
 
 # Compare training objectives
 println("\n=== Training Comparison ===")
@@ -110,18 +117,27 @@ println("\n1. Training with TRAJECTORY_BALANCE...")
 model_tb = create_gflownet(initial_state, all_actions; state_dim=2, hidden_dim=64)
 config_tb = TrainingConfig(
     objective=TRAJECTORY_BALANCE,
-    n_iterations=100,
-    batch_size=32
+    n_iterations=50,
+    batch_size=16
 )
 history_tb = train_gflownet(model_tb, config_tb; verbose=false)
 
 # Train with SUB_TRAJECTORY_BALANCE
 println("\n2. Training with SUB_TRAJECTORY_BALANCE...")
-model_stb = create_gflownet(initial_state, all_actions; state_dim=2, hidden_dim=64)
+# SUB_TRAJECTORY_BALANCE balances F(sᵢ) against F(sⱼ) on every sub-path, so the
+# model needs a flow estimator. Without include_flow_estimator=true every
+# iteration throws and the recorded loss is NaN, i.e. no training happens.
+model_stb = create_gflownet(
+    initial_state,
+    all_actions;
+    state_dim=2,
+    hidden_dim=64,
+    include_flow_estimator=true
+)
 config_stb = TrainingConfig(
     objective=SUB_TRAJECTORY_BALANCE,
-    n_iterations=100,
-    batch_size=32,
+    n_iterations=50,
+    batch_size=16,
     sub_trajectory_length=4
 )
 history_stb = train_gflownet(model_stb, config_stb; verbose=false)
@@ -131,7 +147,7 @@ println("\n=== Training Results ===")
 
 function analyze_model(model, name)
     # Sample many trajectories
-    trajectories = [sample_trajectory(model) for _ in 1:1000]
+    trajectories = [sample_trajectory(model) for _ in 1:500]
     
     # Terminal state distribution
     terminal_counts = [t.states[end].count for t in trajectories]

@@ -291,7 +291,19 @@ function step!(session::TrainingSession)::Dict
         # ---- 4b. Batch pre-compute oracle scores for terminal molecules ----
         # This happens OUTSIDE the gradient computation — one PythonCall crossing per oracle.
         # Oracle scores are cached so that reward() reads from cache during Zygote.withgradient.
-        if session.adapter isa MolecularAdapter && session.adapter.oracle_manager !== nothing
+        # Duck-typed, NOT `session.adapter isa MolecularAdapter`. MolecularAdapter is
+        # defined in domains/molecular.jl, which core/ never includes, so this line
+        # threw UndefVarError for every caller that had not separately included the
+        # whole molecular chain -- even though this file documents the session as
+        # "domain-agnostic" and types the field as AbstractDomainAdapter. Line 335
+        # below already solved the identical problem correctly with hasproperty.
+        #
+        # step!'s own try/catch swallowed the throw into a status="error" Dict, so
+        # the failure was invisible: examples/core_features/visualization/
+        # demo_real_training.jl exited 0 while every one of its 100 iterations had
+        # failed, printing "Training converged successfully" and "All 3 reward peaks
+        # discovered" from a run that never trained.
+        if hasproperty(session.adapter, :oracle_manager) && session.adapter.oracle_manager !== nothing
             oracle_mgr = session.adapter.oracle_manager
             if budget_remaining(oracle_mgr) > 0
                 terminal_smiles = String[]

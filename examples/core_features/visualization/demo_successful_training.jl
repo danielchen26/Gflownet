@@ -10,11 +10,21 @@ using GFlowNet
 using Statistics
 using Printf
 
-# Load visualization modules
+# Load visualization modules.
+# NOTE: the include order below mirrors src/utils/visualization/api/unified_server.jl.
+# core/training_session.jl's `step!` refers to `MolecularAdapter` (and the oracle
+# helpers) at runtime, so the molecular domain chain must be loaded too — otherwise
+# every training step throws UndefVarError, which `step!` swallows into a
+# status="error" result and the demo silently reports NaN losses.
 include("../../../src/utils/visualization/core/adapters.jl")
 include("../../../src/utils/visualization/core/metrics.jl")
 include("../../../src/utils/visualization/core/training_session.jl")
 include("../../../src/utils/visualization/domains/grid_world.jl")
+include("../../../src/utils/visualization/python/rdkit_bridge.jl")
+include("../../../src/utils/visualization/python/oracle_bridge.jl")
+include("../../../src/utils/visualization/core/oracle_manager.jl")
+include("../../../src/applications/molecular_generation.jl")
+include("../../../src/utils/visualization/domains/molecular.jl")
 
 # Model creation function
 function create_model_and_adapter(domain_type::String, config::Dict)
@@ -165,7 +175,7 @@ for (x, y) in [(1,4), (4,1), (4,4)]
     if idx !== nothing
         point = flow_data["data"][idx]
         r = reward(GFlowNet.GridState(x, y, true))
-        println("  ($x,$y) [r=$r]: flow=$(round(point["flow"], digits=2)), velocity=$(round.(point["velocity"], digits=2))")
+        println("  ($x,$y) [r=$r]: flow=$(round(point["flow_value"], digits=2)), velocity=$(round.(point["velocity"], digits=2))")
     end
 end
 println()
