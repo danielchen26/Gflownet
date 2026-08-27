@@ -555,7 +555,12 @@ function _compute_gradient_norm(gradients)::Float64
     if gradients isa AbstractArray
         return norm(gradients)
     elseif gradients isa NamedTuple
-        return sqrt(sum(_compute_gradient_norm(g)^2 for g in gradients))
+        # `init` is REQUIRED: an empty NamedTuple made this throw
+        # ArgumentError("reducing over an empty collection is not allowed"),
+        # which surfaced as "Gradient computation failed" once gradient clipping
+        # was actually wired into train_step!. A parameter group with no entries
+        # contributes zero norm.
+        return sqrt(sum((_compute_gradient_norm(g)^2 for g in gradients); init=0.0))
     elseif gradients isa ComponentArray
         return norm(gradients)
     else

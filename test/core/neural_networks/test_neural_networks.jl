@@ -153,11 +153,14 @@ using Zygote
     
     @testset "Integration with GFlowNet Model" begin
         # Create a simple grid world model to test integration
+        # `include_flow_estimator` defaults to false, so asserting
+        # `model.flow_estimator isa FlowEstimator` below requires asking for one.
         model = create_grid_world_gflownet(
             grid_size=3,
             reward_positions=Dict((3, 3) => 10.0),
             hidden_dim=8,
-            learning_rate=0.01
+            learning_rate=0.01,
+            include_flow_estimator=true
         )
         
         @test model isa GFlowNet.GFlowNetModel

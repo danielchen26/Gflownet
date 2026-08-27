@@ -100,13 +100,15 @@ Random.seed!(42)
             # Compute loss with original Z
             loss_original = compute_single_trajectory_loss(model, trajectory, model.parameters)
             
-            # Modify Z parameter
+            # Modify Z only. This used to rebuild the ComponentArray as
+            # ComponentArray(forward=..., flow=..., log_Z=1.0), but
+            # `include_flow_estimator` defaults to false, so `model.parameters`
+            # has no :flow field at all -- the axis is (forward, log_Z) -- and
+            # reading `.flow` threw ArgumentError("reducing over an empty
+            # collection"). Setting the field in place expresses the intent and
+            # works for any parameter shape.
             modified_params = deepcopy(model.parameters)
-            modified_params = ComponentArray(
-                forward=modified_params.forward,
-                flow=modified_params.flow,
-                log_Z=1.0  # Change log Z from 0 to 1
-            )
+            modified_params.log_Z = 1.0  # Change log Z from 0 to 1
             
             loss_modified = compute_single_trajectory_loss(model, trajectory, modified_params)
             
@@ -200,12 +202,9 @@ Random.seed!(42)
                 partition_function_method=LEARNABLE_ESTIMATION
             )
             
-            # Set initial Z to suboptimal value
-            model.parameters = ComponentArray(
-                forward=model.parameters.forward,
-                flow=model.parameters.flow,
-                log_Z=5.0  # Start with large Z
-            )
+            # Set initial Z to a suboptimal value. Same defect as above: the old
+            # rebuild read a :flow field that a default model does not have.
+            model.parameters.log_Z = 5.0  # Start with large Z
             model.log_partition_function = 5.0
             
             config = TrainingConfig(

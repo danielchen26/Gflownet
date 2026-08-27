@@ -116,32 +116,18 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
         ]
         
         for state in test_states
-            # Get flow estimate from neural network
-            estimated_flow = flow_estimate(
-                model.flow_estimator, state,
-                model.parameters.flow, model.states.flow
-            )
-            
-            # Compute expected flow manually
+            # Expected flow under the CORRECTED conservation law. This test used
+            # to weight children by P_F(s'|s), i.e. it asserted
+            #   F(s) = sum_{s'} P_F(s'|s) F(s')
+            # which is a convex combination of the children and so pins F(s0)
+            # between min and max R instead of equalling sum_x R(x). It was
+            # asserting the very defect that made partition_function return
+            # 2.2184 rather than 19.0 on the 3x3 grid. The law that holds for
+            # unnormalised flow weights children by P_B(s|s'), and
+            # validate_flow_conservation is the single implementation of it.
             applicable_actions = get_applicable_actions(state, model.all_actions)
             if !isempty(applicable_actions)
-                action_probs = forward_action_probabilities(
-                    model.forward_policy, state, model.all_actions,
-                    model.parameters.forward, model.states.forward
-                )
-                
-                expected_flow = 0.0
-                for (idx, action) in enumerate(model.all_actions)
-                    if action in applicable_actions
-                        next_state = apply_action(action, state)
-                        next_flow = flow(model, next_state)
-                        expected_flow += action_probs[idx] * next_flow
-                    end
-                end
-                
-                # They should be approximately equal after training
-                # Allow larger tolerance since this is a simple test
-                @test abs(estimated_flow - expected_flow) / max(expected_flow, 1.0) < 0.5
+                @test GFlowNet.validate_flow_conservation(model, state; tolerance=0.5)
             end
         end
     end

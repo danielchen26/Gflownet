@@ -99,10 +99,22 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
             ("FM", FLOW_MATCHING, false),
             ("DB", DETAILED_BALANCE, true)
         ]
-            model = create_grid_world_gflownet(include_flow_estimator = true, 
+            # TB REQUIRES a learnable Z. Under the default SIMPLE_ESTIMATION,
+            # Z is fixed at 1 so log Z = 0, and the TB residual
+            #   (log Z + sum log P_F - log R - sum log P_B)^2
+            # cannot reach zero unless Z_true = 1. The objective is then
+            # unsatisfiable by construction -- as src/utils/visualization/api/
+            # unified_server.jl:154 already documents. Measured on this exact
+            # 4x4 setup: TB sat at 21.17 after 200 iterations and got WORSE at
+            # 1000 (25.46), because sharpening the policy only grows the
+            # residual, while FM and DB both reached about 0.0. That was a
+            # broken model, not a broken objective.
+            model = create_grid_world_gflownet(include_flow_estimator = true,
                 grid_size = 4,
                 hidden_dim = 64,
-                include_backward = include_backward
+                include_backward = include_backward,
+                partition_function_method = objective == TRAJECTORY_BALANCE ?
+                    LEARNABLE_ESTIMATION : SIMPLE_ESTIMATION
             )
             
             config = TrainingConfig(
@@ -167,21 +179,27 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
                 model.parameters.flow, model.states.flow
             )
             
-            # Compute RHS: Σ P_F(s'|s) * F(s')
-            action_probs = forward_action_probabilities(
-                model.forward_policy, state, model.all_actions,
-                model.parameters.forward, model.states.forward
-            )
-            
+            # Compute RHS under the CORRECTED conservation law: the children are
+            # weighted by P_B(s|s'), not by P_F(s'|s). The P_F-weighted form is a
+            # convex combination, which pins F(s0) between min and max R instead
+            # of equalling sum_x R(x) -- the defect that made partition_function
+            # return 2.2184 rather than 19.0 on the 3x3 grid. This testset was
+            # asserting that defect.
             rhs = 0.0
-            for (idx, action) in enumerate(model.all_actions)
-                if action in applicable_actions
-                    next_state = apply_action(action, state)
-                    next_flow = flow(model, next_state)
-                    rhs += action_probs[idx] * next_flow
+            for action in applicable_actions
+                child = apply_action(action, state)
+                back_prob = if isnothing(model.backward_policy)
+                    parents = GFlowNet.backward_parent_states(child, model.all_actions)
+                    isempty(parents) ? 0.0 : 1.0 / length(parents)
+                else
+                    GFlowNet.compute_backward_probability(
+                        model.backward_policy, child, state,
+                        model.parameters.backward, model.states.backward,
+                        model.all_actions)
                 end
+                rhs += back_prob * flow(model, child)
             end
-            
+
             error = abs(lhs - rhs) / max(rhs, 1.0)
             push!(conservation_errors, error)
         end
@@ -243,8 +261,14 @@ using GFlowNet: flow, flow_estimate, flow_matching_loss
         history = train_gflownet(model, config; verbose=false)
         final_log_Z = model.parameters.log_Z
         
-        # Z should change during training
-        @test initial_log_Z != final_log_Z
+        # log Z MUST NOT change under FLOW_MATCHING. The symbol log_Z appears
+        # nowhere in the flow-matching loss -- FM's unknowns are the state flows
+        # and the policy, and F(s0) already plays the role of Z -- so its
+        # gradient is exactly zero and no correct optimiser can move it.
+        # Asserting that Z "should change during training" asserted a fiction:
+        # it was evaluated as `0.0 != 0.0` and had been failing continuously.
+        # Measured gradient norm for the :log_Z component under FM: exactly 0.
+        @test initial_log_Z == final_log_Z
         @test isfinite(final_log_Z)
         
         # Should still achieve good performance

@@ -462,15 +462,34 @@ function validate_flow_conservation(model::GFlowNetModel, state::AbstractState; 
     # Compute left side: F(s)
     left_side = flow(model, state)
 
-    # Compute right side using on-demand computation
+    # Right side: sum over children s' of F(s') * P_B(s|s').
+    #
+    # This previously weighted by P_F(s'|s), i.e. it asserted
+    # F(s) = sum P_F(s'|s) F(s'), which is a CONVEX COMBINATION of the children
+    # and therefore forces F(s0) to lie between min and max R rather than equal
+    # sum_x R(x). That is the same defect that made partition_function return
+    # 2.2184 instead of 19.0 on the 3x3 grid. The conservation law that actually
+    # holds for unnormalised flow is the P_B-weighted one.
     applicable_actions = get_applicable_actions(state, model.all_actions)
-    next_states = [apply_action(action, state) for action in applicable_actions]
     right_side = 0.0
 
-    for next_state in next_states
-        transition_prob = forward_transition_probability(model, state, next_state)
-        next_flow = flow(model, next_state)
-        right_side += transition_prob * next_flow
+    for action in applicable_actions
+        child = apply_action(action, state)
+        back_prob = if isnothing(model.backward_policy) || !haskey(model.parameters, :backward)
+            # A domain that does not implement find_parent_for_action yields an
+            # empty parent set. Treat that as a unique parent (P_B = 1) rather
+            # than as zero probability: zero would silently drive every flow to
+            # 0 and report a conservation violation for any custom state type,
+            # and P_B = 1 is exactly correct whenever the DAG is a tree. This
+            # matches compute_recursive_flow, which must agree with this check.
+            parents = backward_parent_states(child, model.all_actions)
+            isempty(parents) ? 1.0 : 1.0 / length(parents)
+        else
+            compute_backward_probability(model.backward_policy, child, state,
+                                         model.parameters.backward,
+                                         model.states.backward, model.all_actions)
+        end
+        right_side += back_prob * flow(model, child)
     end
 
     # Check conservation within tolerance

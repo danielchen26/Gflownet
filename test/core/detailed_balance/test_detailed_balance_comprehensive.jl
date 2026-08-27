@@ -19,19 +19,33 @@ model = create_grid_world_gflownet(
 # Sample trajectories
 trajectories = [sample_trajectory(model) for _ in 1:4]
 
-# Test gradient computation directly
+# Test gradient computation directly.
+#
+# This used to be wrapped in a bare try/catch that printed
+# "✗ Gradient computation failed: $e" and carried on, so it could never fail the
+# suite. The gradient in fact computed fine; the throw came from this file's own
+# norm expression,
+#   sqrt(sum(sum(abs2, g) for g in values(grads[1]) if g isa AbstractArray))
+# which reduces over an empty collection for a ComponentArray and raised
+# ArgumentError("reducing over an empty collection"). So a green run printed a
+# failure message about a component that was working. Asserted properly now: a
+# ComponentArray is itself an AbstractArray, so norm applies directly.
 using Zygote
-try
-    loss_val, grads = Zygote.withgradient(model.parameters) do ps
-        Zygote.@ignore clear_flow_cache!()
-        compute_trajectory_loss(model, trajectories, ps, TrainingConfig(objective=DETAILED_BALANCE))
-    end
-    println("✓ Gradient computation successful!")
-    println("  Loss value: $(round(loss_val, digits=4))")
-    println("  Gradient norm: $(round(sqrt(sum(sum(abs2, g) for g in values(grads[1]) if g isa AbstractArray)), digits=4))")
-catch e
-    println("✗ Gradient computation failed: $e")
+using LinearAlgebra: norm
+
+loss_val, grads = Zygote.withgradient(model.parameters) do ps
+    Zygote.@ignore clear_flow_cache!()
+    compute_trajectory_loss(model, trajectories, ps, TrainingConfig(objective=DETAILED_BALANCE))
 end
+
+@test !isnothing(grads[1])
+@test isfinite(loss_val)
+grad_norm = norm(grads[1])
+@test isfinite(grad_norm)
+@test grad_norm > 0        # DB must produce a live gradient, not a dead one
+println("✓ Gradient computation successful!")
+println("  Loss value: $(round(loss_val, digits=4))")
+println("  Gradient norm: $(round(grad_norm, digits=4))")
 
 # Test 2: Compare TRAJECTORY_BALANCE vs DETAILED_BALANCE training
 println("\n2. Comparing training objectives...")

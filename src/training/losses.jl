@@ -148,36 +148,39 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
                         )
                     end
                     
-                      # Flows must be DIFFERENTIABLE for Detailed Balance to be
-                      # trainable: DB's whole content is that F adjusts until
-                      # P_F(s'|s)F(s) = P_B(s|s')F(s'). These were previously
-                      # `Zygote.@ignore flow(model, ...)`, which left DB's :flow
-                      # gradient norm at exactly 0.0 -- the objective could only
-                      # move the policy against a frozen target it could never
-                      # close against. Use the learned flow estimator, which is
-                      # what DB's F is supposed to be.
-                      if isnothing(model.flow_estimator) || !haskey(params, :flow)
-                          error("DETAILED_BALANCE requires a flow estimator. " *
-                                "Construct the model with include_flow_estimator = true.")
-                      end
-                      # TERMINAL BOUNDARY F(x) = R(x). Without it the reward never
-                      # enters DB at all: switching from flow() to the learned
-                      # estimator attached the gradient but made the loss
-                      # reward-blind, measured as a delta of exactly 0.0 under a
-                      # 100x reward change. DB's boundary condition IS what ties
-                      # the flow network to the task.
-                      source_flow = if Zygote.@ignore(is_terminal_state(source))
-                          Zygote.@ignore(max(reward(source), 1e-8))
-                      else
-                          flow_estimate(model.flow_estimator, source,
-                                        params.flow, model.states.flow)
-                      end
-                      target_flow = if Zygote.@ignore(is_terminal_state(target))
-                          Zygote.@ignore(max(reward(target), 1e-8))
-                      else
-                          flow_estimate(model.flow_estimator, target,
-                                        params.flow, model.states.flow)
-                      end
+                    # Flows must be DIFFERENTIABLE for Detailed Balance to be
+                    # trainable: DB's whole content is that F adjusts until
+                    # P_F(s'|s)F(s) = P_B(s|s')F(s'). These were previously
+                    # `Zygote.@ignore flow(model, ...)`, which left DB's :flow
+                    # gradient norm at exactly 0.0 -- the objective could only
+                    # move the policy against a frozen target it could never
+                    # close against.
+                    #
+                    # TERMINAL BOUNDARY F(x) = R(x). Without it the reward never
+                    # enters DB at all: switching to the learned estimator
+                    # attached the gradient but made the loss reward-blind,
+                    # measured as a delta of exactly 0.0 under a 100x reward
+                    # change. DB's boundary condition IS what ties F to the task.
+                    #
+                    # A model with no flow estimator is still supported: DB then
+                    # falls back to the recursive flow, exactly as before. There
+                    # is no flow network to train in that case, so nothing is
+                    # lost by it being non-differentiable, and the reward still
+                    # enters because compute_recursive_flow returns R at
+                    # terminals. Erroring here instead broke every existing
+                    # DB caller that omitted the estimator.
+                    has_flow_net = !isnothing(model.flow_estimator) && haskey(params, :flow)
+
+                    flow_at(s) = if Zygote.@ignore(is_terminal_state(s))
+                        Zygote.@ignore(max(reward(s), 1e-8))
+                    elseif has_flow_net
+                        flow_estimate(model.flow_estimator, s, params.flow, model.states.flow)
+                    else
+                        Zygote.@ignore(max(flow(model, s), 1e-8))
+                    end
+
+                    source_flow = flow_at(source)
+                    target_flow = flow_at(target)
                     
                     # Compute detailed balance loss
                     left_side = log(max(forward_prob, 1e-8)) + log(max(source_flow, 1e-8))
@@ -248,18 +251,19 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
             return 0.0
         end
 
-        if isnothing(model.flow_estimator) || !haskey(params, :flow)
-            throw(ArgumentError(
-                "FLOW_MATCHING requires a flow estimator. " *
-                "Create the model with include_flow_estimator = true"
-            ))
-        end
+        # A model with no flow estimator falls back to the recursive flow, so
+        # existing callers that omitted the estimator keep working. There is no
+        # flow network to train in that case, and the reward still enters
+        # through the terminal boundary.
+        fm_has_flow_net = !isnothing(model.flow_estimator) && haskey(params, :flow)
 
         # log F(s), applying the terminal boundary.
         log_flow_of(s) = if Zygote.@ignore(is_terminal_state(s))
             log(max(Zygote.@ignore(reward(s)), 1e-8))
-        else
+        elseif fm_has_flow_net
             log(max(flow_estimate(model.flow_estimator, s, params.flow, model.states.flow), 1e-12))
+        else
+            log(max(Zygote.@ignore(flow(model, s)), 1e-12))
         end
 
         losses = [
