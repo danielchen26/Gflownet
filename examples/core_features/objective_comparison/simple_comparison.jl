@@ -53,7 +53,7 @@ println("DB - Mean reward: $(round(mean(rewards_db), digits=3))")
 
 # Key difference: DB can answer "how did I get here?"
 println("\nKey difference - Backward policy (DB only):")
-test_state = GridWorldState(3, 3, false)
+test_state = GridState(3, 3, false)
 println("For state (3,3), DB can compute P(previous state | current state)")
 
 # This only works for DB model

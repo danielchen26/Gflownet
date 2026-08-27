@@ -13,12 +13,18 @@ println("This learns flows that satisfy conservation directly.\n")
 # Set random seed
 Random.seed!(123)
 
-# Create model with flow estimator
+# Create model with flow estimator.
+#
+# `include_flow_estimator` was NOT passed, despite the comment saying otherwise, and
+# it defaults to false -- so FLOW_MATCHING had no F to train and the script died with
+# "type NamedTuple has no field flow". FM's whole content is the flow conservation
+# law, so the estimator is mandatory, not optional.
 println("Creating GFlowNet model...")
 model = create_grid_world_gflownet(
     grid_size = 5,
     hidden_dim = 64,
     learning_rate = 0.001,
+    include_flow_estimator = true,
     partition_function_method = LEARNABLE_ESTIMATION
 )
 
@@ -44,10 +50,10 @@ println("\n📊 Analyzing flow conservation...")
 
 # Test flow conservation on several states
 test_states = [
-    GridWorldState(1, 1, false),
-    GridWorldState(2, 2, false),
-    GridWorldState(3, 3, false),
-    GridWorldState(2, 4, false)
+    GridState(1, 1, false),
+    GridState(2, 2, false),
+    GridState(3, 3, false),
+    GridState(2, 4, false)
 ]
 
 conservation_errors = Float64[]
@@ -155,7 +161,7 @@ p3 = heatmap(grid_counts,
 # Plot 4: Flow values heatmap
 flow_grid = zeros(5, 5)
 for i in 1:5, j in 1:5
-    state = GridWorldState(i, j, false)
+    state = GridState(i, j, false)
     flow_val = flow_estimate(
         model.flow_estimator, state,
         model.parameters.flow, model.states.flow

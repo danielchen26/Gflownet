@@ -188,20 +188,27 @@ println("States: $([(s.x, s.y) for s in sample_traj.states])")
 
 # Show sub-trajectories that would be considered
 println("\nSub-trajectories (length ≤ $SUB_TRAJECTORY_LENGTH):")
-count = 0
-for start_idx in 1:length(sample_traj.states)-1
-    for end_idx in start_idx+1:min(start_idx+SUB_TRAJECTORY_LENGTH, length(sample_traj.states))
-        sub_states = sample_traj.states[start_idx:end_idx]
-        count += 1
-        println("  $count. States $start_idx-$end_idx: $([(s.x, s.y) for s in sub_states])")
-        
-        if count >= 10  # Limit output
-            println("  ... ($(count) more sub-trajectories)")
-            break
+# `local` + a name that does not shadow Base.
+#
+# This was `count = 0` at top level with `count += 1` inside the nested loop, which
+# is an ambiguous soft-scope assignment: at top level Julia treats the loop body
+# assignment as creating a fresh LOCAL each iteration, so the read failed with
+# `UndefVarError: count not defined in local scope`. The name also shadowed
+# `Base.count`. Wrapping the whole thing in a `let` gives one binding the loops can
+# actually update.
+let shown = 0
+    for start_idx in 1:length(sample_traj.states)-1
+        for end_idx in start_idx+1:min(start_idx+SUB_TRAJECTORY_LENGTH, length(sample_traj.states))
+            sub_states = sample_traj.states[start_idx:end_idx]
+            shown += 1
+            println("  $shown. States $start_idx-$end_idx: $([(s.x, s.y) for s in sub_states])")
+
+            if shown >= 10  # Limit output
+                println("  ... (further sub-trajectories omitted)")
+                break
+            end
         end
-    end
-    if count >= 10
-        break
+        shown >= 10 && break
     end
 end
 
