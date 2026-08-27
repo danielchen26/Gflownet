@@ -142,9 +142,21 @@ This implements the fundamental flow conservation equation of GFlowNets.
 - `Float64`: Flow value F(s)
 
 # Mathematical Properties
-- Satisfies flow conservation by construction
-- Terminates at terminal states with F(s) = R(s)
+- F(terminal) = R(terminal)
+- F(s) = sum over children s' of F(s') * P_B(s|s'), so F(s0) = Z = sum_x R(x)
 - Result is deterministic given model parameters
+
+# Why P_B and not P_F
+This previously computed F(s) = sum_{s'} P_F(s'|s) F(s'). Because sum P_F = 1
+that is a CONVEX COMBINATION, i.e. an expectation, so F(s0) was bounded by
+max_x R(x) and could never equal Z once more than one terminal state is
+rewarded. Measured on the 3x3 grid: flow(model, s0) = 2.2184, matching
+E_{P_F}[R] to 0.000e+00 while Z_true = 19.0 -- so the function named
+`partition_function` was returning a reward expectation.
+
+Weighting each child by P_B(s|s') makes the path multiplicity cancel rather
+than accumulate, which is the recursion consistent with the corrected
+Trajectory Balance objective, and gives F(s0) = sum_x R(x) exactly.
 """
 function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Float64
     # Base case: terminal states
@@ -160,38 +172,30 @@ function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Flo
         return 0.0
     end
     
-    # Compute flow recursively: F(s) = Σ_{s'} P_F(s'|s) * F(s')
+    # F(s) = sum over children s' of F(s') * P_B(s|s')
     total_flow = 0.0
-    
-    # Compute forward policy probabilities for all actions
-    action_probs = forward_action_probabilities(
-        model.forward_policy, 
-        state,
-        model.all_actions,
-        model.parameters.forward, 
-        model.states.forward
-    )
-    
-    # Sum over all applicable actions and their next states
-    for (action_idx, action) in enumerate(model.all_actions)
-        # Skip non-applicable actions
-        if !(action in applicable_actions)
-            continue
-        end
-        
-        # Compute next state
+
+    for action in model.all_actions
+        action in applicable_actions || continue
+
         next_state = apply_action(action, state)
-        
-        # Get transition probability P_F(s'|s)
-        transition_prob = action_probs[action_idx]
-        
-        # Recursively compute flow for next state
-        next_flow = compute_recursive_flow(model, next_state)
-        
-        # Add contribution to total flow
-        total_flow += transition_prob * next_flow
+
+        # P_B(state | next_state): probability that a backward walk at next_state
+        # steps to state. With no backward policy this is uniform over the parents
+        # of next_state, which is a perfectly valid fixed P_B.
+        back_prob = if isnothing(model.backward_policy) || !haskey(model.parameters, :backward)
+            np = length(backward_parent_states(next_state, model.all_actions))
+            np == 0 ? 1.0 : 1.0 / np
+        else
+            compute_backward_probability(
+                model.backward_policy, next_state, state,
+                model.parameters.backward, model.states.backward, model.all_actions
+            )
+        end
+
+        total_flow += back_prob * compute_recursive_flow(model, next_state)
     end
-    
+
     return total_flow
 end
 
