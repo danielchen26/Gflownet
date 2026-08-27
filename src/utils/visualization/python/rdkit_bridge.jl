@@ -504,19 +504,47 @@ function compute_projection(fingerprints::Vector{Vector{Float32}}, method::Strin
     # Need at least 2 points for dimensionality reduction
     n < 2 && return [Dict("x" => 0.0, "y" => 0.0)]
 
-    # Convert to flat Python list, then reshape in Python
-    flat = vcat(fingerprints...)
-    py_arr = np[].array(pylist(Float64.(flat))).reshape(n, 1024)
+    # Cross the PythonCall boundary O(1) times instead of O(n*1024).
+    #
+    # This built the input as `np.array(pylist(Float64.(vcat(fingerprints...))))`,
+    # which converts EVERY scalar into a separate Python float: n*1024 crossings,
+    # 204,800 for n=200 and 1,949,696 for n=1904. It also splatted n arrays into
+    # vcat and allocated the matrix three times over (the caller narrows to
+    # Float32, this widened back to Float64).
+    #
+    # A dense Julia Matrix handed to numpy travels through the buffer protocol as
+    # a single memcpy. Values, shape and dtype are identical, so the reducer sees
+    # byte-identical input and the output is unchanged.
+    #
+    # NOTE ON LAYOUT: Julia is column-major and numpy expects row-major, so the
+    # matrix is built TRANSPOSED as (1024, n) and transposed on the Python side.
+    # Building (n, 1024) directly and passing it would silently transpose the data
+    # and project garbage.
+    mat = Matrix{Float64}(undef, 1024, n)
+    @inbounds for j in 1:n
+        fp = fingerprints[j]
+        length(fp) == 1024 || throw(ArgumentError(
+            "fingerprint $j has length $(length(fp)), expected 1024"))
+        for i in 1:1024
+            mat[i, j] = Float64(fp[i])
+        end
+    end
+    py_arr = np[].asarray(Py(mat)).T
 
     coords = if method == "umap" && n >= 5
         umap_mod = pyimport("umap")
         n_neighbors = min(15, n - 1)
-        reducer = umap_mod.UMAP(n_neighbors=n_neighbors, min_dist=0.1, n_components=2)
+        # random_state pins the embedding. Without it two identical requests
+        # returned DIFFERENT coordinates, so the scatter visibly jittered on every
+        # 10 s refetch, and no caching of the result could have been sound.
+        reducer = umap_mod.UMAP(n_neighbors=n_neighbors, min_dist=0.1,
+                                n_components=2, random_state=42)
         reducer.fit_transform(py_arr)
     elseif method == "tsne" && n >= 5
         sklearn_manifold = pyimport("sklearn.manifold")
         perplexity = min(30.0, Float64(n - 1))
-        reducer = sklearn_manifold.TSNE(n_components=2, perplexity=perplexity)
+        reducer = sklearn_manifold.TSNE(n_components=2, perplexity=perplexity,
+                                        random_state=42)
         reducer.fit_transform(py_arr)
     else  # pca (default)
         sklearn_decomp = pyimport("sklearn.decomposition")
@@ -524,12 +552,11 @@ function compute_projection(fingerprints::Vector{Vector{Float32}}, method::Strin
         reducer.fit_transform(py_arr)
     end
 
-    points = Dict[]
-    for i in 1:n
-        push!(points, Dict(
-            "x" => pyconvert(Float64, coords[i-1, 0]),
-            "y" => pyconvert(Float64, coords[i-1, 1]),
-        ))
+    # One conversion of the whole (n, 2) result instead of 4n scalar crossings.
+    c = pyconvert(Matrix{Float64}, np[].asarray(coords, dtype=np[].float64))
+    points = Vector{Dict}(undef, n)
+    @inbounds for i in 1:n
+        points[i] = Dict("x" => c[i, 1], "y" => c[i, 2])
     end
     return points
 end
