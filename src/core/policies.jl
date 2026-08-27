@@ -33,8 +33,15 @@ where f_θ(s) are the logits from the neural network.
 """
 function forward_probability(policy::ForwardPolicy, state, action,
     parameters, states, actions)
-    # Get state features
-    features = state_to_features(state)
+    # Features are a deterministic function of the state with no dependence on the
+    # parameters, so they are constant inputs and must stay OFF the tape. A domain
+    # whose state_to_features builds its vector by mutation -- `features = zeros(...)`
+    # then `features[i] = ...`, which is the idiomatic way to write it -- otherwise
+    # dies with "Mutating arrays is not supported -- called setindex!". This was
+    # latent until the flow-based objectives started calling these paths inside a
+    # gradient; examples/core_features/direct_flow/direct_flow_demo.jl is the case
+    # that found it.
+    features = Zygote.@ignore state_to_features(state)
 
     # Compute logits for all actions
     logits, _ = compute_forward_logits(policy, features, parameters, states)
@@ -133,8 +140,8 @@ function sample_forward_action(policy::ForwardPolicy, state, actions,
         rng = Random.default_rng()
     end
 
-    # Get state features
-    features = state_to_features(state)
+    # Constant input, off the tape. See the note at forward_action_probabilities.
+    features = Zygote.@ignore state_to_features(state)
 
     # Compute logits
     logits, _ = compute_forward_logits(policy, features, parameters, states)
@@ -186,8 +193,8 @@ Compute probability distribution P_F(·|s) over all actions.
 """
 function forward_action_probabilities(policy::ForwardPolicy, state, actions,
     parameters, states)
-    # Get state features
-    features = state_to_features(state)
+    # Constant input, off the tape. See the note at forward_action_probabilities.
+    features = Zygote.@ignore state_to_features(state)
 
     # Compute logits
     logits, _ = compute_forward_logits(policy, features, parameters, states)
@@ -344,8 +351,10 @@ where z_θ(s) is the log-flow estimate from the neural network.
 - `Float64`: Estimated flow Z(s)
 """
 function flow_estimate(estimator::FlowEstimator, state, parameters, states)
-    # Get state features
-    features = state_to_features(state)
+    # Constant input, off the tape. See the note at forward_action_probabilities.
+    # This one specifically broke DETAILED_BALANCE on any domain with a mutating
+    # state_to_features, because DB now differentiates through flow_estimate.
+    features = Zygote.@ignore state_to_features(state)
 
     # Compute log-flow estimate
     log_flow, _ = compute_flow_logits(estimator, features, parameters, states)
@@ -526,7 +535,7 @@ function compute_backward_probability(policy::BackwardPolicy, target_state, sour
     idx = Zygote.@ignore findfirst(p -> p == source_state, parents)
     idx === nothing && return 0.0
 
-    target_features = state_to_features(target_state)
+    target_features = Zygote.@ignore state_to_features(target_state)
     Zygote.@ignore begin
         validate_model_parameters(parameters, "backward policy parameters")
     end
@@ -534,7 +543,7 @@ function compute_backward_probability(policy::BackwardPolicy, target_state, sour
     # One scalar logit per parent, then a softmax over them. Written without
     # mutation so it stays Zygote-differentiable.
     logits = map(parents) do p
-        joint = vcat(target_features, state_to_features(p))
+        joint = Zygote.@ignore vcat(target_features, state_to_features(p))
         first(safe_model_call(policy.model, joint, parameters, states)[1])
     end
 

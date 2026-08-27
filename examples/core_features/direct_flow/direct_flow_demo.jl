@@ -1,5 +1,5 @@
-# DIRECT_FLOW_OBJECTIVE Training Demo
-# Demonstrates how DIRECT_FLOW_OBJECTIVE uses a neural network to directly estimate flows
+# Learned Flow Networks Training Demo
+# Demonstrates how DETAILED_BALANCE uses a neural network to learn flows F(s)
 # instead of computing them recursively
 
 using GFlowNet
@@ -79,7 +79,7 @@ Base.hash(s::TreeState, h::UInt) = hash((s.path, s.is_terminal), h)
 Base.:(==)(a::TreeAction, b::TreeAction) = a.choice == b.choice
 Base.hash(a::TreeAction, h::UInt) = hash(a.choice, h)
 
-println("=== DIRECT_FLOW_OBJECTIVE Training Demo ===\n")
+println("=== Learned Flow Networks Training Demo ===\n")
 
 # Create the domain
 initial_state = TreeState(Int[], false)
@@ -112,23 +112,39 @@ model_tb = create_gflownet(
 println("   - Uses recursive flow computation")
 println("   - Flow network NOT included\n")
 
-# Model 2: DIRECT_FLOW_OBJECTIVE (neural network flow estimation)
-println("2. DIRECT_FLOW_OBJECTIVE model (neural network estimates flows):")
+# Model 2: DETAILED_BALANCE, which learns flows with a neural network.
+#
+# This demo used to train DIRECT_FLOW_OBJECTIVE here. That objective is now
+# disabled and raises an ArgumentError, because its loss was CONSTANT with
+# respect to the model parameters: it called direct_flow_loss_batch without
+# `params` and wrapped log Z in Zygote.@ignore, so Zygote returned nothing,
+# train_step! short-circuited to (Inf, 0.0), and every recorded loss was
+# non-finite. This very script was the evidence: `filter(!isnan, history.losses)`
+# came back EMPTY and the script died on `df_losses[end]` with
+#   BoundsError: attempt to access 0-element Vector{Float64} at index [0]
+# It fails identically at commit 31fae84a, i.e. it never worked.
+#
+# DETAILED_BALANCE is the objective that actually does what this demo set out to
+# show -- a learned flow network instead of recursive flow computation -- and it
+# is verified to receive a real flow gradient (norm 1.412, previously exactly 0)
+# and to respond to reward.
+println("2. DETAILED_BALANCE model (neural network estimates flows):")
 model_df = create_gflownet(
     initial_state,
     all_actions;
     state_dim = 5,
     hidden_dim = 64,
     learning_rate = 0.01,
-    include_flow_estimator = true  # Key difference!
+    include_backward = true,        # DB needs P_B
+    include_flow_estimator = true   # and a learned F
 )
-println("   - Uses neural network to estimate flows")
+println("   - Uses a neural network to estimate flows")
 println("   - Flow estimator network included")
-println("   - No recursive computation needed\n")
+println("   - No recursive flow computation needed\n")
 
 # Show untrained behavior
 println("=== Before Training ===\n")
-println("Sample trajectories (untrained DIRECT_FLOW_OBJECTIVE model):")
+println("Sample trajectories (untrained DETAILED_BALANCE model):")
 for i in 1:3
     traj = sample_trajectory(model_df)
     print("  $i. ")
@@ -147,20 +163,31 @@ config_tb = TrainingConfig(
     verbose = false
 )
 history_tb = train_gflownet(model_tb, config_tb)
-tb_losses = filter(!isnan, history_tb.losses)
-println("  Final loss: $(round(tb_losses[end], digits=4))")
+# Keep only finite losses, and say so loudly if there are none. `filter(!isnan, ...)`
+# alone let Inf through and then indexed `[end]` on a possibly-empty vector, which
+# is how this script died with a BoundsError instead of reporting that training had
+# produced no usable loss at all.
+function final_loss(history, label)
+    good = filter(isfinite, history.losses)
+    if isempty(good)
+        error("$label produced no finite loss in $(length(history.losses)) " *
+              "iterations -- training did not work.")
+    end
+    return good[end]
+end
 
-# Train DIRECT_FLOW_OBJECTIVE
-println("\nTraining DIRECT_FLOW_OBJECTIVE model...")
+println("  Final loss: $(round(final_loss(history_tb, "TRAJECTORY_BALANCE"), digits=4))")
+
+# Train DETAILED_BALANCE
+println("\nTraining DETAILED_BALANCE model...")
 config_df = TrainingConfig(
-    objective = DIRECT_FLOW_OBJECTIVE,
+    objective = DETAILED_BALANCE,
     n_iterations = 100,
     batch_size = 32,
     verbose = false
 )
 history_df = train_gflownet(model_df, config_df)
-df_losses = filter(!isnan, history_df.losses)
-println("  Final loss: $(round(df_losses[end], digits=4))")
+println("  Final loss: $(round(final_loss(history_df, "DETAILED_BALANCE"), digits=4))")
 
 # Analyze results
 println("\n=== After Training ===\n")
@@ -206,7 +233,7 @@ end
 
 traj_tb, rewards_tb = analyze_model(model_tb, "TRAJECTORY_BALANCE")
 println("\n" * "="^50 * "\n")
-traj_df, rewards_df = analyze_model(model_df, "DIRECT_FLOW_OBJECTIVE")
+traj_df, rewards_df = analyze_model(model_df, "DETAILED_BALANCE")
 
 # Mathematical explanation
 println("\n=== Key Differences ===\n")
@@ -216,7 +243,7 @@ TRAJECTORY_BALANCE (Recursive Flow):
   - Exact but computationally expensive for large state spaces
   - Requires traversing the graph structure
   
-DIRECT_FLOW_OBJECTIVE (Neural Network Estimation):
+DETAILED_BALANCE (Neural Network Estimation):
   - Uses neural network Z(s) to directly estimate F(s)
   - Loss: (log P_F(τ) + log Z(s₀) - log R(sT))²
   - Faster inference, no recursion needed
@@ -226,7 +253,7 @@ DIRECT_FLOW_OBJECTIVE (Neural Network Estimation):
 Both methods enforce the same mathematical constraint:
   P_F(τ) × Z ∝ R(sT)
   
-But DIRECT_FLOW_OBJECTIVE learns Z(s) as a function instead of computing it.
+But DETAILED_BALANCE learns F(s) with a network instead of recursing.
 """)
 
 # Demonstrate flow estimation
@@ -240,7 +267,7 @@ test_states = [
 ]
 
 for state in test_states
-    # DIRECT_FLOW_OBJECTIVE uses neural network
+    # DETAILED_BALANCE uses a learned flow network
     if !is_terminal_state(state)
         df_flow = GFlowNet.compute_flow_estimate(model_df, state)
         println("  Path $(state.path): Z(s) = $(round(df_flow, digits=4))")
@@ -249,13 +276,13 @@ end
 
 println("""
 
-Note: DIRECT_FLOW_OBJECTIVE's flow estimates are learned by the neural network,
+Note: DETAILED_BALANCE's flow estimates are learned by the neural network,
 while traditional methods would compute these recursively.
 """)
 
 println("\n=== Demo Complete ===")
 println("""
-Key Takeaway: DIRECT_FLOW_OBJECTIVE replaces expensive recursive flow computation
+Key Takeaway: DETAILED_BALANCE replaces expensive recursive flow computation
 with a learned neural network estimator. This trades some accuracy for
 significant computational efficiency, especially in large state spaces.
 """)
