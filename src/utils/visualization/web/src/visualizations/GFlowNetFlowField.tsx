@@ -672,7 +672,8 @@ export function GFlowNetFlowField() {
             {stateStats.flow_statistics && (
               <div className="mt-3 pt-2 border-t border-dark-border space-y-2">
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Mean log Z:</span>
+                  {/* log Z is a single scalar parameter, not a mean over states. */}
+                  <span className="text-muted-foreground">log Z:</span>
                   <span className="text-neon-purple font-medium">
                     {stateStats.flow_statistics.mean_log_Z.toFixed(3)}
                   </span>

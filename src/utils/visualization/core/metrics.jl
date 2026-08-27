@@ -45,8 +45,15 @@ function compute_gflownet_metrics(model::GFlowNetModel, trajectories::Vector{Tra
         # Trajectory metrics
         "mean_length"       => mean(lengths),
         "max_length"        => maximum(lengths),
-        # Model metrics
+        # Model metrics. `mean_log_Z` was CONSUMED but never PRODUCED: the server
+        # did get(universal_metrics, "mean_log_Z", 0.0), so the dashboard's
+        # "Mean log Z" readout displayed a hardcoded 0.000 forever. That hid the
+        # one quantity whose convergence was actually broken -- log Z used to be
+        # fed to Adam through a scaled gradient, which is a provable no-op, so it
+        # crawled at exactly the base learning rate. Emitting the real value.
         "partition_function" => Z,
+        "mean_log_Z"         => model.log_partition_function === nothing ? 0.0 :
+                                Float64(model.log_partition_function),
         # Sample size
         "n_trajectories"    => length(trajectories)
     )
