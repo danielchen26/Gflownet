@@ -206,8 +206,14 @@ function _compute_sub_trajectory_loss_differentiable(
     params
 )::Float64
 
-    # Compute log forward probability along sub-trajectory using on-demand computation
+    # Accumulate log P_F and log P_B over the SAME transitions. The published
+    # SubTB (Madan et al. 2023) is
+    #     (log F(s_i) + sum log P_F - log F(s_j) - sum log P_B)^2
+    # The backward term was absent, which is why the backward parameters had a
+    # gradient norm of exactly 0 under this objective: P_B appeared nowhere in
+    # the expression, so it could never be trained.
     log_forward_prob = 0.0
+    log_backward_prob = 0.0
 
     for i in 1:length(sub_states)-1
         source_state = sub_states[i]
@@ -251,6 +257,15 @@ function _compute_sub_trajectory_loss_differentiable(
         end
 
         log_forward_prob += log_probs[action_pos]
+
+        # P_B(source | target) for this same transition.
+        if !isnothing(model.backward_policy)
+            log_backward_prob += log(max(
+                compute_backward_probability(
+                    model.backward_policy, target_state, source_state,
+                    params.backward, model.states.backward, model.all_actions
+                ), 1e-8))
+        end
     end
 
     # Compute flow estimates using flow estimator (DIFFERENTIABLE!)
@@ -282,8 +297,8 @@ function _compute_sub_trajectory_loss_differentiable(
         log(max(end_flow_vec[1], 1e-8))
     end
 
-    # SubTB loss: (log F(s_i) + log P_F(τ[i:j]) - log F(s_j))²
-    error = log_start_flow + log_forward_prob - log_end_flow
+    # SubTB loss: (log F(s_i) + sum log P_F - log F(s_j) - sum log P_B)^2
+    error = log_start_flow + log_forward_prob - log_end_flow - log_backward_prob
     return error^2
 end
 
