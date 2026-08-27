@@ -484,33 +484,72 @@ both source and target state features and outputs P_B(source|target).
 """
 function compute_backward_probability(policy::BackwardPolicy, target_state, source_state,
     parameters, states, all_actions)
-    
-    # First check if transition is valid
+
+    # Naming note: `source_state` is the PARENT and `target_state` is the CHILD.
+    # is_valid_backward_transition(source, target) checks apply_action(a, source)
+    # == target, and the DB loss calls this as (policy, target, source, ...) with
+    # source earlier in the trajectory. So this returns P_B(source | target).
     if !is_valid_backward_transition(source_state, target_state, all_actions)
         return 0.0
     end
-    
-    # Get features for both states
-    source_features = state_to_features(source_state)
+
+    # A GFlowNet requires sum over parents of P_B(parent | child) == 1. The old
+    # implementation returned an independent per-edge sigmoid, which cannot sum
+    # to 1 except by coincidence -- measured sums were 1.1967 to 1.2922 on
+    # multi-parent states and 0.51 to 0.68 on single-parent states, where the
+    # only correct value is exactly 1. Normalise over the parent set instead.
+    # The parent SET is discrete graph structure with no dependence on the
+    # parameters, so it carries no gradient and must be computed off the tape --
+    # enumerating it involves push!, which Zygote refuses to differentiate
+    # ("Mutating arrays is not supported"). Only the logits below are
+    # differentiated, which is what actually matters.
+    parents = Zygote.@ignore backward_parent_states(target_state, all_actions)
+    isempty(parents) && return 0.0
+
+    # Unique parent: P_B is exactly 1, not a learned quantity. This is the
+    # definition, not a shortcut.
+    length(parents) == 1 && return 1.0
+
+    idx = Zygote.@ignore findfirst(p -> p == source_state, parents)
+    idx === nothing && return 0.0
+
     target_features = state_to_features(target_state)
-    
-    # Concatenate features for joint representation
-    joint_features = vcat(source_features, target_features)
-    
-    # Validate inputs
     Zygote.@ignore begin
-        validate_neural_network_input(joint_features, "backward policy joint features")
         validate_model_parameters(parameters, "backward policy parameters")
     end
-    
-    # Neural network forward pass
-    logit, new_states = safe_model_call(policy.model, joint_features, parameters, states)
-    
-    # Convert logit to probability using sigmoid
-    prob = sigmoid(logit[1])  # Network outputs single value
-    
-    # Ensure valid probability
-    return clamp(Float64(prob), 1e-8, 1.0 - 1e-8)
+
+    # One scalar logit per parent, then a softmax over them. Written without
+    # mutation so it stays Zygote-differentiable.
+    logits = map(parents) do p
+        joint = vcat(target_features, state_to_features(p))
+        first(safe_model_call(policy.model, joint, parameters, states)[1])
+    end
+
+    mx = maximum(logits)
+    ex = exp.(logits .- mx)
+    return Float64(ex[idx] / sum(ex))
+end
+
+"""
+    backward_parent_states(child, all_actions)
+
+Enumerate every state that can reach `child` in one forward action, using the
+`find_parent_for_action` hook each domain already provides. Duplicates are
+removed, since two different actions may induce the same parent.
+
+This is what makes `compute_backward_probability` normalisable: you cannot form a
+distribution over parents without knowing the parent set.
+"""
+function backward_parent_states(child, all_actions)
+    parents = Any[]
+    for action in all_actions
+        p = find_parent_for_action(child, action)
+        p === nothing && continue
+        is_valid_backward_transition(p, child, all_actions) || continue
+        any(q -> q == p, parents) && continue
+        push!(parents, p)
+    end
+    return parents
 end
 
 """
