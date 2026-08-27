@@ -134,7 +134,7 @@ p4 = heatmap(terminal_counts / n_samples,
 
 # Combine plots
 final_plot = plot(p1, p2, p3, p4, layout = (2, 2), size = (1000, 800))
-savefig(final_plot, "multi_start_results.png")
+savefig(final_plot, joinpath(@__DIR__, "multi_start_results.png"))  # next to the example, not the launch CWD
 
 println("\n✅ Results saved to multi_start_results.png")
 

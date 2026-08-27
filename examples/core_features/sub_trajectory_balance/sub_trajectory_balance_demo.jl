@@ -175,7 +175,7 @@ ylabel!(p4, "Frequency")
 
 # Combine plots
 final_plot = plot(p1, p2, p3, p4, layout=(2,2), size=(1000, 800))
-savefig(final_plot, "sub_trajectory_balance_comparison.png")
+savefig(final_plot, joinpath(@__DIR__, "sub_trajectory_balance_comparison.png"))  # next to the example, not the launch CWD
 println("\nPlots saved to: sub_trajectory_balance_comparison.png")
 
 # Demonstrate sub-trajectory extraction
