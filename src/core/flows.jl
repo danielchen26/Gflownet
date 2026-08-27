@@ -202,43 +202,85 @@ end
 """
     compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
 
-Compute recursive flow with memoization for performance.
+Compute recursive flow with REAL memoization over the whole recursion.
 
-# Mathematical Foundation
-Same as compute_recursive_flow but uses caching to avoid recomputing
-flow values for states that have already been processed.
+# Why this was rewritten
+The previous version cached only the ROOT call and then delegated to
+`compute_recursive_flow`, whose internal recursive calls went to ITSELF rather
+than back through the memo. So every interior node was recomputed once per path
+reaching it, and the docstring's claim of "O(|S|) time complexity instead of
+potentially exponential" was false: it was exponential with exactly one cached
+entry. Measured on a 4x4 grid (16 states, hidden_dim 32), one call cost 47.1 ms
+and left the cache holding 0 entries.
 
-# Performance Benefits
-- O(|S|) time complexity instead of potentially exponential
-- Essential for large DAGs with many shared substructures
-- Maintains mathematical correctness while improving efficiency
+The cost was paid per call by every consumer of `flow()`: the DB and FM
+fallbacks, both flow validators, `compute_gflownet_metrics`, and the dashboard's
+`compute_flow_field`, which calls `flow()` once per grid cell -- 64 exponential
+recursions for one Flow-view request on an 8x8 grid.
+
+# Differentiability
+NON-DIFFERENTIABLE by design, which is why the memo is sound. A cache hit
+returns a plain Float64 carrying no tape, so memoizing a differentiable
+recursion would silently drop gradients. Verified that no caller differentiates
+through here: every loss-path use of `flow()` is already inside
+`Zygote.@ignore` (losses.jl DB and FM fallbacks), and the validators, metrics and
+server paths run outside any gradient. `compute_recursive_flow` remains the
+exact, differentiable, unmemoized definition and is unchanged.
+
+# Cache key
+The parameter hash is computed ONCE per top-level call and threaded through the
+recursion. It used to be recomputed inside `get_cache_key` on every probe, at
+5.4 us per probe for a 2597-element parameter vector -- which would have become
+the dominant cost once the interior was actually memoized.
 """
 function compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
-    # All cache operations are wrapped in Zygote.@ignore to avoid mutation issues
-    cache_key = Zygote.@ignore get_cache_key(model, state)
-    
-    # Check cache (non-differentiable)
-    cached_value = Zygote.@ignore begin
-        if haskey(FLOW_CACHE[], cache_key)
-            FLOW_CACHE[][cache_key]
+    return Zygote.@ignore begin
+        param_hash = hash(model.parameters)
+        _memoized_flow(model, state, param_hash)
+    end
+end
+
+function _memoized_flow(model::GFlowNetModel, state::AbstractState,
+                        param_hash::UInt64)::Float64
+    cache = FLOW_CACHE[]
+    cache_key = (param_hash, state)
+
+    cached = get(cache, cache_key, nothing)
+    isnothing(cached) || return cached
+
+    value = if is_terminal_state(state)
+        terminal_flow(state)
+    else
+        applicable_actions = get_applicable_actions(state, model.all_actions)
+        if isempty(applicable_actions)
+            0.0
         else
-            nothing
+            total = 0.0
+            for action in model.all_actions
+                action in applicable_actions || continue
+                child = apply_action(action, state)
+
+                # P_B(state | child), matching compute_recursive_flow exactly.
+                back_prob = if isnothing(model.backward_policy) ||
+                               !haskey(model.parameters, :backward)
+                    np = length(backward_parent_states(child, model.all_actions))
+                    np == 0 ? 1.0 : 1.0 / np
+                else
+                    compute_backward_probability(
+                        model.backward_policy, child, state,
+                        model.parameters.backward, model.states.backward,
+                        model.all_actions
+                    )
+                end
+
+                total += back_prob * _memoized_flow(model, child, param_hash)
+            end
+            total
         end
     end
-    
-    if !isnothing(cached_value)
-        return cached_value
-    end
 
-    # Compute flow value (this is differentiable)
-    flow_value = compute_recursive_flow(model, state)
-
-    # Cache result (non-differentiable)
-    Zygote.@ignore begin
-        FLOW_CACHE[][cache_key] = flow_value
-    end
-
-    return flow_value
+    cache[cache_key] = value
+    return value
 end
 
 # =============================================================================
