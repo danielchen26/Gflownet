@@ -486,13 +486,9 @@ function compute_backward_probability(policy::BackwardPolicy, target_state, sour
     parameters, states, all_actions)
 
     # Naming note: `source_state` is the PARENT and `target_state` is the CHILD.
-    # is_valid_backward_transition(source, target) checks apply_action(a, source)
-    # == target, and the DB loss calls this as (policy, target, source, ...) with
-    # source earlier in the trajectory. So this returns P_B(source | target).
-    if !is_valid_backward_transition(source_state, target_state, all_actions)
-        return 0.0
-    end
-
+    # The DB loss calls this as (policy, target, source, ...) with source earlier
+    # in the trajectory, so this returns P_B(source | target).
+    #
     # A GFlowNet requires sum over parents of P_B(parent | child) == 1. The old
     # implementation returned an independent per-edge sigmoid, which cannot sum
     # to 1 except by coincidence -- measured sums were 1.1967 to 1.2922 on
@@ -503,8 +499,25 @@ function compute_backward_probability(policy::BackwardPolicy, target_state, sour
     # enumerating it involves push!, which Zygote refuses to differentiate
     # ("Mutating arrays is not supported"). Only the logits below are
     # differentiated, which is what actually matters.
+    #
+    # There is deliberately NO separate is_valid_backward_transition call here.
+    # It was redundant: backward_parent_states validates every candidate parent
+    # with exactly that predicate, so membership in `parents` already implies a
+    # valid transition, and the findfirst below rejects a non-parent. Worse, it
+    # was expensive -- it calls apply_action for every applicable action, which in
+    # the molecular domain is an RDKit fragment-join round-trip per action across
+    # a 51-action space. Measured at 11.8 ms per call, 935 ms per training
+    # iteration at batch_size 16, i.e. a third of the whole molecular step, to
+    # recompute something the parent enumeration establishes anyway.
     parents = Zygote.@ignore backward_parent_states(target_state, all_actions)
-    isempty(parents) && return 0.0
+
+    # A domain that does not implement find_parent_for_action yields an empty
+    # parent set. Return 1.0, not 0.0: log P_B then contributes 0 and the backward
+    # term vanishes, which is exactly the "fixed uniform P_B" objective and is a
+    # valid GFlowNet. Returning 0.0 injected a constant log(1e-8) = -18.4 per
+    # transition instead. This matches compute_recursive_flow and both flow
+    # validators, which treat an unknown parent set as a unique parent.
+    isempty(parents) && return 1.0
 
     # Unique parent: P_B is exactly 1, not a learned quantity. This is the
     # definition, not a shortcut.
