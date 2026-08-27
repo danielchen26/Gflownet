@@ -99,7 +99,10 @@ include("../../src/utils/visualization/domains/grid_world.jl")
         end
 
         println("  ✓ Creating session...")
-        session = create_session(config)
+        # Inject the factory explicitly. It is defined inside this @testset, so it
+        # is NOT a Main global and the old implicit lookup failed with
+        # UndefVarError from inside create_session.
+        session = create_session(config; model_factory=create_model_and_adapter)
 
         @test session.current_iteration == 0
         @test session.total_iterations == 10
@@ -229,7 +232,15 @@ include("../../src/utils/visualization/domains/grid_world.jl")
             @test haskey(point, "position")
             @test haskey(point, "velocity")
             @test haskey(point, "magnitude")
-            @test haskey(point, "flow")
+            # The key is "flow_value", not "flow". compute_flow_field has always
+            # emitted "flow_value" (domains/grid_world.jl:187) and the dashboard
+            # reads point.flow_value in four places, so the producer and the real
+            # consumer already agreed -- only this assertion was stale. It failed
+            # 16 times per run, and identically at the pre-repair baseline
+            # 31fae84a, but this file is not referenced by runtests.jl so nothing
+            # ever reported it.
+            @test haskey(point, "flow_value")
+            @test haskey(point, "reward")
             @test length(point["position"]) == 2
             @test length(point["velocity"]) == 2
         end

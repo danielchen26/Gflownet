@@ -101,18 +101,30 @@ end
     create_session(config::Dict)::TrainingSession
 
 Create new training session from configuration dict.
-This function is implemented in unified_server.jl which calls
-create_model_and_adapter() to construct the model and adapter.
+This builds the model through a factory. By default it resolves
+`Main.create_model_and_adapter(domain_type, config)`, which is what
+unified_server.jl defines; pass `model_factory` to supply one directly.
 
 # Arguments
 - `config::Dict`: Configuration with domain_type, grid_size, n_episodes, etc.
+- `model_factory`: Optional `(domain_type, config) -> (model, adapter)` callable.
+  Prefer this over relying on the global.
 
 # Returns
 - `TrainingSession`: Initialized session ready for training
 """
-function create_session(config::Dict)::TrainingSession
+function create_session(config::Dict; model_factory=nothing)::TrainingSession
     domain_type = get(config, "domain_type", "grid_world")
-    model, adapter = create_model_and_adapter(domain_type, config)
+    # `create_model_and_adapter` was resolved as a LATE-BOUND GLOBAL in Main,
+    # which is an invisible requirement: any caller that did not happen to define
+    # that exact name at top level died with UndefVarError from inside this
+    # function. unified_server.jl satisfies it by accident of file layout, so the
+    # app worked while every other caller was broken. `model_factory` makes the
+    # dependency explicit and injectable; the global remains the default so no
+    # existing caller changes.
+    factory = isnothing(model_factory) ?
+        getfield(Main, :create_model_and_adapter) : model_factory
+    model, adapter = factory(domain_type, config)
 
     # Build TrainingConfig using kwargs-only constructor (matches real API)
     objective = parse_objective(get(config, "objective", "TRAJECTORY_BALANCE"))
