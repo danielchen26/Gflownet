@@ -10,6 +10,21 @@
 using Pkg
 Pkg.activate(@__DIR__)  # Activate the project in the current directory (the example directory)
 
+# `examples/**/Manifest.toml` is intentionally untracked (a manifest resolved on
+# one Julia version cannot be instantiated on another), so a clean checkout has
+# no manifest here and `using GFlowNet` would otherwise die with an opaque
+# "required but does not seem to be installed". Project.toml carries a
+# `[sources]` entry pointing GFlowNet at the repository root, so resolving and
+# installing on first run needs no registry entry and no `Pkg.develop` step.
+try
+    Pkg.instantiate()
+catch err
+    @error """Could not instantiate the example environment at $(@__DIR__).
+             Run `julia --project=. examples/setup_examples.jl` from the \
+             repository root, then re-run this script.""" exception = err
+    rethrow()
+end
+
 using GFlowNet
 using GFlowNet.GFlowNetUtils
 using Plots
@@ -18,7 +33,6 @@ using LinearAlgebra
 using Statistics
 using StatsBase
 using Distributions  # For probability distributions
-using Lux, Optimisers, NNlib  # Moved from inside the main function
 
 # Generate synthetic causal data
 function generate_synthetic_causal_data(n_samples::Int, n_variables::Int; 
@@ -62,45 +76,6 @@ function generate_synthetic_causal_data(n_samples::Int, n_variables::Int;
     cor_matrix = cor(data)
     
     return data, adjacency, weights, cov_matrix, cor_matrix
-end
-
-# Add a custom has_cycle function that converts BitVectors to Vector{Bool}
-function has_cycle(adjacency_matrix::Matrix{Bool})
-    n = size(adjacency_matrix, 1)
-    # Using Vector{Bool} instead of falses() to ensure type compatibility
-    visited = Vector{Bool}(falses(n))
-    rec_stack = Vector{Bool}(falses(n))
-    
-    function is_cyclic_util(adjacency_matrix, v, visited, rec_stack)
-        visited[v] = true
-        rec_stack[v] = true
-        
-        # Visit all neighbors
-        for i in 1:size(adjacency_matrix, 1)
-            if adjacency_matrix[v, i]
-                if !visited[i]
-                    if is_cyclic_util(adjacency_matrix, i, visited, rec_stack)
-                        return true
-                    end
-                elseif rec_stack[i]
-                    return true
-                end
-            end
-        end
-        
-        rec_stack[v] = false
-        return false
-    end
-    
-    for i in 1:n
-        if !visited[i]
-            if is_cyclic_util(adjacency_matrix, i, visited, rec_stack)
-                return true
-            end
-        end
-    end
-    
-    return false
 end
 
 # Create a DAGState from our causal_discovery.jl implementation
@@ -149,96 +124,49 @@ function main()
     # Create all possible actions for this DAG
     actions = GFlowNet.create_dag_actions(n_variables)
     
-    # Create terminal states - in practice, these would be discovered during search
-    # For this example, we'll create a few terminal states including the true DAG
+    # The true DAG is only needed for the evaluation further down.
     true_dag = create_dag_from_adjacency(true_adjacency, variable_names)
-    
-    # Create some variations by randomly adding/removing edges from the true DAG
-    rng = Random.MersenneTwister(42)
-    terminal_states = [GFlowNet.DAGState(Matrix{Bool}(true_adjacency .!= 0), variable_names, true)]
-    
-    for i in 1:5
-        # Copy true adjacency and make random modifications
-        adj_copy = copy(true_adjacency)
-        
-        # Randomly modify some edges
-        for _ in 1:3
-            i, j = rand(rng, 1:n_variables), rand(rng, 1:n_variables)
-            # Convert to Matrix{Bool} before calling has_cycle
-            temp_matrix = Matrix{Bool}((adj_copy .| [i == x && j == y for x in 1:n_variables, y in 1:n_variables]) .!= 0)
-            if i != j && adj_copy[i, j] == 0 && !has_cycle(temp_matrix)
-                adj_copy[i, j] = 1
-            end
-        end
-        
-        # Add this as a terminal state
-        push!(terminal_states, GFlowNet.DAGState(Matrix{Bool}(adj_copy .!= 0), variable_names, true))
-    end
-    
-    # Terminal sink state
-    terminal_sink = GFlowNet.DAGState(Matrix{Bool}(zeros(Int, n_variables, n_variables) .!= 0), variable_names, true)
-    
-    # Create DAG
-    dag = GFlowNet.create_dag(initial_state, terminal_states, terminal_sink, actions)
-    
-    # Create neural network models for policies
+
+    # Build the model with the current on-demand API. There is no `create_dag`
+    # helper and no `GFlowNetModel(dag, ...)` constructor any more, and
+    # `TrajectoryBalanceObjective` is gone -- the objective now lives in
+    # `TrainingConfig`. `create_gflownet` takes the initial state plus the full
+    # action set and builds the policy network, the `ComponentArray` parameters,
+    # the optimiser and the layer states itself; reachable states are enumerated
+    # on demand during sampling, so no bootstrap list of terminal states is
+    # required.
     rng = Random.default_rng()
-    
-    # Get feature dimension from a state
     input_dim = length(GFlowNet.state_to_features(initial_state))
-    
-    # Output dimension is the number of possible states
-    output_dim = length(dag.states)
-    
-    # Create forward policy
-    forward_policy, forward_ps, forward_st = GFlowNet.create_forward_policy(
-        input_dim, 128, output_dim, rng
-    )
-    
-    # Create flow estimator
-    flow_estimator, flow_ps, flow_st = GFlowNet.create_flow_estimator(
-        input_dim, 128, rng
-    )
-    
-    # Create optimizer
-    opt = Optimisers.Adam(0.001)
-    
-    forward_opt_state = Optimisers.setup(opt, forward_ps)
-    flow_opt_state = Optimisers.setup(opt, flow_ps)
-    
-    # Define optimizer structure for GFlowNet
-    optimizer = (forward = forward_opt_state, flow = flow_opt_state)
-    
-    # Create GFlowNet model with trajectory balance objective
-    model = GFlowNet.GFlowNetModel(
-        dag,
-        forward_policy,
-        nothing,  # No backward policy
-        flow_estimator,
-        nothing,  # Will be estimated during training
-        [GFlowNet.TrajectoryBalanceObjective(1.0)],
-        optimizer,
-        (forward = forward_ps, backward = nothing, flow = flow_ps),  # Parameters
-        (forward = forward_st, backward = nothing, flow = flow_st)   # States
+
+    model = GFlowNet.create_gflownet(
+        initial_state,
+        actions;
+        state_dim = input_dim,
+        hidden_dim = 128,
+        learning_rate = 0.001,
+        include_flow_estimator = true,
+        partition_function_method = GFlowNet.SAMPLING_ESTIMATION,
+        rng = rng
     )
     
     # Train using modern interface
     println("Training GFlowNet with modern training interface...")
     
-    # Create training configuration optimized for causal discovery
+    # Demo budget: a DAG trajectory can add and remove edges up to
+    # `SamplingConfig`'s 100-step cap, so keep the iteration count small enough
+    # that the example finishes in well under a minute of training.
     config = GFlowNet.TrainingConfig(
-        objective=GFlowNet.GENERAL_TRAJECTORY_BALANCE,  # Use general TB for non-deterministic paths
-        partition_function_method=GFlowNet.SAMPLING_BASED,  # Complex graph spaces need sampling
-        batch_size=24,
+        objective=GFlowNet.TRAJECTORY_BALANCE,
+        partition_function_method=GFlowNet.SAMPLING_ESTIMATION,  # Complex graph spaces need sampling
+        batch_size=4,
         learning_rate=0.001,
-        n_iterations=1500,
-        partition_update_frequency=25,
-        validation_frequency=100,
-        early_stopping_patience=150
+        n_iterations=10,
+        validation_frequency=5,
+        early_stopping_patience=10
     )
     
     println("Training configuration for causal discovery:")
-    println("  Objective: $(config.objective) (handles non-deterministic graph construction)")
+    println("  Objective: $(config.objective)")
     println("  Partition function method: $(config.partition_function_method) (optimal for complex spaces)")
     println("  Batch size: $(config.batch_size)")
     println("  Iterations: $(config.n_iterations)")
@@ -247,14 +175,17 @@ function main()
     
     println("Training completed!")
     println("  Final loss: $(round(training_history[:losses][end], digits=6))")
-    println("  Final Z estimate: $(round(training_history[:partition_function_estimates][end], digits=6))")
+    println("  Mean gradient norm: $(round(sum(training_history[:gradient_norms]) / length(training_history[:gradient_norms]), digits=6))")
     println("  Total training iterations: $(length(training_history[:losses]))")
     
     # Visualize results
     println("Visualizing results...")
     
     # Create output directory if it doesn't exist
-    output_dir = "."
+    # Write next to the script, not into whatever directory the user launched
+    # from -- this example is normally run as `julia examples/causal_discovery/…`
+    # from the repository root.
+    output_dir = @__DIR__
     
     # Plot loss curve from training history
     loss_plot = plot(
@@ -310,7 +241,7 @@ function main()
     
     # Plot distribution of SHDs
     shd_plot = histogram(distances, 
-                         bins=0:maximum(distances), 
+                         bins=0:max(1, maximum(distances)),  # 0:0 is not a valid bin edge set
                          title="Structural Hamming Distance", 
                          xlabel="SHD", 
                          ylabel="Frequency", 

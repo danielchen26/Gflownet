@@ -167,6 +167,21 @@ function apply_action(action::TerminateDAGAction, state::DAGState)
 end
 
 """
+    GFlowNet.is_terminal_state(state::DAGState)
+
+Whether this DAG is a terminal state.
+
+REQUIRED interface method, and it was missing, so any use of this domain failed --
+examples/causal_discovery/causal_discovery.jl had to define it locally to run at all.
+
+Note the QUALIFIED name. This file's `using ..GFlowNet: ...` list does not import
+`is_terminal_state`, so an unqualified definition would create a NEW function local
+to this module instead of adding a method to GFlowNet's, and the package would never
+call it -- a silent no-op. `grid_world.jl:141` is the working precedent.
+"""
+GFlowNet.is_terminal_state(state::DAGState)::Bool = state.is_terminal
+
+"""
     state_to_features(state::DAGState)
 
 Convert a DAG state to a feature vector.

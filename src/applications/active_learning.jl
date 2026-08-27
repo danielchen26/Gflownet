@@ -109,6 +109,19 @@ function apply_action(action::TerminateExperimentAction, state::ExperimentState)
 end
 
 """
+    GFlowNet.is_terminal_state(state::ExperimentState)
+
+Whether experiment selection has terminated.
+
+REQUIRED interface method, and it was missing, so any use of this domain failed --
+examples/active_learning/active_learning.jl had to define it locally to run at all.
+Qualified deliberately: this file does not import `is_terminal_state`, so an
+unqualified definition would create a new module-local function that the package
+never calls. See `grid_world.jl:141`.
+"""
+GFlowNet.is_terminal_state(state::ExperimentState)::Bool = state.is_terminal
+
+"""
     state_to_features(state::ExperimentState, experiment_features::Matrix{Float64})
 
 Convert an experiment state to a feature vector, using experiment features.

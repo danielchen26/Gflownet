@@ -46,20 +46,23 @@ for example in examples
         Pkg.activate(example_dir)
         println("[$example] Activated environment in $example_dir")
         
-        # Remove any existing GFlowNet reference that might cause conflicts
-        try
-            Pkg.rm("GFlowNet")
-            println("[$example] Removed existing GFlowNet reference")
-        catch e
-            # It's fine if the package wasn't there
-            println("[$example] Note: GFlowNet was not previously added (this is normal)")
-        end
-        
-        # Ensure GFlowNet is properly linked as a development dependency
-        println("[$example] Linking GFlowNet from $main_dir...")
-        Pkg.develop(path=main_dir)
-        
-        # Install dependencies
+        # Just instantiate. Do NOT Pkg.rm + Pkg.develop.
+        #
+        # That pair was destructive: Pkg.develop REWRITES the example's
+        # Project.toml, deleting the `[sources]` table (and its comments) and
+        # replacing the resolution with an ABSOLUTE dev path in the manifest. The
+        # manifests are gitignored on purpose -- one resolved on a different Julia
+        # version cannot be instantiated here -- so the absolute path is all that
+        # remained, and it pointed at a volume that no longer exists:
+        #   /Volumes/chetianc/Documents/Decision_science_codes/Gflownet
+        # which is exactly why active_learning, causal_discovery and
+        # molecule_design all failed with
+        #   ArgumentError: Package GFlowNet [2d7ca041-...] is required but does not
+        #   seem to be installed
+        #
+        # Each example Project.toml now carries `[sources] GFlowNet = {path="../.."}`,
+        # which is relative, version-control friendly and resolved by instantiate
+        # alone. Running the old sequence would silently delete that again.
         println("[$example] Installing dependencies...")
         Pkg.instantiate()
         

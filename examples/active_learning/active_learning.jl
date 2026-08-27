@@ -8,14 +8,27 @@
 using Pkg
 Pkg.activate(@__DIR__)
 
+# `examples/**/Manifest.toml` is intentionally untracked (a manifest resolved on
+# one Julia version cannot be instantiated on another), so a clean checkout has
+# no manifest here and `using GFlowNet` would otherwise die with an opaque
+# "required but does not seem to be installed". Project.toml carries a
+# `[sources]` entry pointing GFlowNet at the repository root, so resolving and
+# installing on first run needs no registry entry and no `Pkg.develop` step.
+try
+    Pkg.instantiate()
+catch err
+    @error """Could not instantiate the example environment at $(@__DIR__).
+             Run `julia --project=. examples/setup_examples.jl` from the \
+             repository root, then re-run this script.""" exception = err
+    rethrow()
+end
+
 using GFlowNet
 using Plots
 using Random
 using Statistics
 using StatsBase
 using LinearAlgebra
-using Lux # Add Lux for neural network models
-using Optimisers # Add Optimisers for optimization
 using CSV
 using DataFrames
 
@@ -23,8 +36,8 @@ using DataFrames
 const N_EXPERIMENTS = 50   # Total number of possible experiments
 const FEATURE_DIM = 10     # Feature dimension for each experiment
 const MAX_EXPERIMENTS = 5  # Maximum number of experiments to select
-const N_ITERATIONS = 1000  # Number of training iterations
-const BATCH_SIZE = 32      # Batch size for training
+const N_ITERATIONS = 20    # Number of training iterations (demo budget)
+const BATCH_SIZE = 8       # Batch size for training
 const LEARNING_RATE = 1e-3 # Learning rate for optimizer
 
 # Global variables to store experiment data
@@ -98,9 +111,9 @@ function sample_trajectories(model, batch_size, rng=Random.GLOBAL_RNG)
             # Create a terminal state with these experiments
             terminal_state = GFlowNet.ExperimentState(selected, MAX_EXPERIMENTS, true)
             
-            # Create a trajectory with just this terminal state
-            # The Trajectory constructor only needs a vector of states
-            trajectories[i] = GFlowNet.Trajectory([terminal_state])
+            # `Trajectory` requires one action per transition, so a single-state
+            # trajectory carries an empty action vector.
+            trajectories[i] = GFlowNet.Trajectory([terminal_state], GFlowNet.AbstractAction[])
         end
     end
     
@@ -141,82 +154,55 @@ function main()
     # Create initial state with no experiments selected
     initial_state = GFlowNet.ExperimentState(Int[], MAX_EXPERIMENTS, false)
     
-    # Terminal states with diverse experiment selections for bootstrapping
-    terminal_states = GFlowNet.ExperimentState[]
-    
-    # Add terminal states that include high-value experiments
-    println("Creating terminal states with experiments...")
-    # Sort experiments by value to include some high-value ones in terminal states
+    # Rank experiments by value; used for reporting and for the sampling fallback.
     sorted_exp_indices = sortperm(global_experiment_values, rev=true)
-    
-    # Add terminal states with high-value experiments
+
+    # Show a few representative terminal selections so the reward scale is visible.
+    println("Representative terminal selections:")
     for i in 1:5
-        # Include at least one high-value experiment in each terminal state
+        # Include at least one high-value experiment in each selection
         high_value_exp = sorted_exp_indices[i]
-        
-        # Select other experiments randomly
         n_additional = rand(rng, 0:MAX_EXPERIMENTS-1)
         remaining_exps = setdiff(1:N_EXPERIMENTS, high_value_exp)
         additional_exps = sample(rng, remaining_exps, n_additional, replace=false)
-        
-        # Combine high-value experiment with random ones
-        selected_experiments = vcat(high_value_exp, additional_exps)
-        
-        # Create a terminal state with these experiments
-        term_state = GFlowNet.ExperimentState(selected_experiments, MAX_EXPERIMENTS, true)
-        push!(terminal_states, term_state)
-        println("  Terminal state $i: experiments $(term_state.experiments), reward: $(experiment_reward(term_state))")
+
+        term_state = GFlowNet.ExperimentState(
+            vcat(high_value_exp, additional_exps), MAX_EXPERIMENTS, true
+        )
+        println("  High-value selection $i: experiments $(term_state.experiments), reward: $(experiment_reward(term_state))")
     end
-    
-    # Add some completely random terminal states for diversity
+
     for i in 6:10
         n_selected = rand(rng, 1:MAX_EXPERIMENTS)
         selected_experiments = sample(rng, 1:N_EXPERIMENTS, n_selected, replace=false)
-        
+
         term_state = GFlowNet.ExperimentState(selected_experiments, MAX_EXPERIMENTS, true)
-        push!(terminal_states, term_state)
-        println("  Random terminal state $i: experiments $(term_state.experiments), reward: $(experiment_reward(term_state))")
+        println("  Random selection $i: experiments $(term_state.experiments), reward: $(experiment_reward(term_state))")
     end
-    
-    # Terminal sink state (represents stopping with experiments)
-    # Use the highest value experiment for the sink state
+
+    # Terminal sink state (stopping with the single highest-value experiment).
+    # Used as the fallback when post-training sampling yields empty selections.
     best_exp = [sorted_exp_indices[1]]
     terminal_sink = GFlowNet.ExperimentState(best_exp, MAX_EXPERIMENTS, true)
-    println("Created terminal sink state with experiment $(best_exp[1]), reward: $(experiment_reward(terminal_sink))")
-    
+    println("Terminal sink state uses experiment $(best_exp[1]), reward: $(experiment_reward(terminal_sink))")
+
     # Create actions for experiment selection
     actions = GFlowNet.create_experiment_actions(N_EXPERIMENTS)
-    
-    # Setup the flow network model
-    rng = Random.MersenneTwister(42)
-    
-    # Create a neural network for the policy
+
+    # Build the model with the current on-demand API: `create_dag`,
+    # `TrajectoryBalanceObjective` and the DAG-based `GFlowNetModel` constructor
+    # no longer exist. `create_gflownet` takes the initial state plus the full
+    # action set and builds the policy network, the `ComponentArray` parameters,
+    # the optimiser and the layer states itself, so no bootstrap list of terminal
+    # states is needed.
     input_dim = N_EXPERIMENTS + 2  # One-hot encoding + num_selected + is_terminal
-    nn_model = Chain(
-        Dense(input_dim => 128, relu),
-        Dense(128 => 128, relu),
-        Dense(128 => length(actions))
-    )
-    
-    # Initialize parameters
-    ps, st = Lux.setup(rng, nn_model)
-    
-    # Create the flow network with the neural network
-    model = GFlowNet.GFlowNetModel(
-        GFlowNet.create_dag(
-            initial_state,
-            terminal_states,
-            terminal_sink,
-            actions
-        ),
-        GFlowNet.ForwardPolicy(nn_model),
-        nothing,  # backward_policy
-        nothing,  # flow_estimator
-        nothing,  # partition_function
-        [GFlowNet.TrajectoryBalanceObjective(1.0)],  # objectives
-        Optimisers.Adam(LEARNING_RATE),  # optimizer
-        (forward = ps, backward = nothing, flow = nothing),  # parameters
-        (forward = st, backward = nothing, flow = nothing)   # states
+    model = GFlowNet.create_gflownet(
+        initial_state,
+        actions;
+        state_dim = input_dim,
+        hidden_dim = 128,
+        learning_rate = LEARNING_RATE,
+        rng = Random.MersenneTwister(42)
     )
     
     println("Training GFlowNet for $N_ITERATIONS iterations...")
@@ -236,8 +222,7 @@ function main()
         batch_size=BATCH_SIZE,
         learning_rate=LEARNING_RATE,
         n_iterations=N_ITERATIONS,
-        partition_update_frequency=50,
-        validation_frequency=100
+        validation_frequency=20
     )
     
     println("Training with modern training interface...")
@@ -276,7 +261,10 @@ function main()
     end
     
     # Save training metrics
-    CSV.write("active_learning_training.csv", train_data)
+    # Write next to the script, not into whatever directory the user launched
+    # from -- this example is normally run as `julia examples/active_learning/…`
+    # from the repository root.
+    CSV.write(joinpath(@__DIR__, "active_learning_training.csv"), train_data)
     
     # Plot training metrics
     loss_plot = Plots.plot(
@@ -288,7 +276,7 @@ function main()
         legend=false,
         lw=2
     )
-    Plots.savefig(loss_plot, "active_learning_loss.png")
+    Plots.savefig(loss_plot, joinpath(@__DIR__, "active_learning_loss.png"))
     
     reward_plot = Plots.plot(
         train_data.iteration, 
@@ -299,18 +287,13 @@ function main()
         label=["Mean Reward" "Max Reward"],
         lw=2
     )
-    Plots.savefig(reward_plot, "active_learning_rewards.png")
+    Plots.savefig(reward_plot, joinpath(@__DIR__, "active_learning_rewards.png"))
     
     # Sample experiment selections after training
     println("\nSampling experiment selections after training...")
     n_samples = 10
     
     try
-        # Estimate partition function
-        println("Estimating partition function...")
-        Z = GFlowNet.estimate_partition_function(model)
-        println("Estimated partition function: $Z")
-        
         # Sample states from the model
         sample_results = []
         
@@ -389,7 +372,7 @@ function main()
         )
         
         # Save the plot
-        Plots.savefig(plt, "active_learning_results.png")
+        Plots.savefig(plt, joinpath(@__DIR__, "active_learning_results.png"))
         println("\nResults visualization saved to active_learning_results.png")
     catch e
         println("Error in sampling or visualization: $e")

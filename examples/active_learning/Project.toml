@@ -12,8 +12,17 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
+# GFlowNet is not registered, so this environment has to be told where to find
+# it. A relative `path` (resolved against this file's directory) is
+# checkout-location independent, unlike the absolute dev path that Pkg bakes
+# into a Manifest.toml -- and `examples/**/Manifest.toml` is deliberately
+# untracked, because a manifest resolved on one Julia version cannot be
+# instantiated on another. `[sources]` requires Julia >= 1.11.
+[sources]
+GFlowNet = {path = "../.."}
+
 [compat]
-julia = "1.6"
+julia = "1.11"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

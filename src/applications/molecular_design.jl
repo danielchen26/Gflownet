@@ -56,6 +56,19 @@ struct TerminateMoleculeAction <: AbstractAction end
 # Implementation of required methods for the GFlowNet framework
 
 """
+    GFlowNet.is_terminal_state(state::MoleculeState)
+
+Whether the molecule is complete.
+
+REQUIRED interface method, and it was missing, so any use of this domain failed --
+examples/molecule_design/molecule_example.jl had to define it locally to run at all.
+Qualified deliberately: this file does not import `is_terminal_state`, so an
+unqualified definition would create a new module-local function that the package
+never calls. See `grid_world.jl:141`.
+"""
+GFlowNet.is_terminal_state(state::MoleculeState)::Bool = state.complete
+
+"""
     state_to_features(state::MoleculeState)
 
 Convert a molecule state to a feature vector for neural network inputs.
