@@ -118,6 +118,57 @@ function analytic_optimum_terminal_law(n::Int)
 end
 
 """
+    analytic_optimum_terminal_law_corrected(n) -> Dict{Tuple{Int,Int},Float64}
+
+Terminal law at the zero of the CORRECTED TB loss
+`(log Z + sum log P_F - sum log P_B - log R)^2`, using a fixed uniform backward
+policy `P_B(parent|child) = 1/|parents(child)|`.
+
+Trajectory Balance is valid for ANY fixed P_B, so at the optimum the terminal law
+must be exactly `R(x)/Z` regardless of which P_B was chosen. That invariance is
+what this function checks: the reward-mass recursion is reweighted by P_B so that
+the path multiplicity cancels instead of accumulating.
+
+Concretely, with `w(child->parent) = 1/|parents(child)|` the forward mass becomes
+`m(s) = R(s) + sum_{children c} m(c) * P_B(s|c)`, and `m((1,1))` equals Z rather
+than `sum_x n(x)R(x)`.
+"""
+function analytic_optimum_terminal_law_corrected(n::Int)
+    R = reward_table(n)
+    nparents(x, y) = length(parents_of(GS(x, y, false)))
+
+    m = Dict{Tuple{Int,Int},Float64}()
+    for x in n:-1:1, y in n:-1:1
+        acc = R[(x, y)]
+        if x < n
+            acc += m[(x + 1, y)] / max(nparents(x + 1, y), 1)
+        end
+        if y < n
+            acc += m[(x, y + 1)] / max(nparents(x, y + 1), 1)
+        end
+        m[(x, y)] = acc
+    end
+
+    reach = Dict{Tuple{Int,Int},Float64}((1, 1) => 1.0)
+    law = Dict{Tuple{Int,Int},Float64}()
+    for x in 1:n, y in 1:n
+        p = get(reach, (x, y), 0.0)
+        (p == 0.0 || m[(x, y)] == 0.0) && continue
+        mm = m[(x, y)]
+        R[(x, y)] > 0 && (law[(x, y)] = p * R[(x, y)] / mm)
+        if x < n
+            share = m[(x + 1, y)] / max(nparents(x + 1, y), 1) / mm
+            reach[(x + 1, y)] = get(reach, (x + 1, y), 0.0) + p * share
+        end
+        if y < n
+            share = m[(x, y + 1)] / max(nparents(x, y + 1), 1) / mm
+            reach[(x, y + 1)] = get(reach, (x, y + 1), 0.0) + p * share
+        end
+    end
+    return law
+end
+
+"""
     set_grid!(n, rewards)
 
 Set the process-global GRID_CONFIG that `GFlowNet.reward(::GridState)` reads.
