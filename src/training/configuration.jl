@@ -201,7 +201,31 @@ struct TrainingConfig
 
     function TrainingConfig(;
         objective::TrainingObjective=TRAJECTORY_BALANCE,
-        partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION,
+        # LEARNABLE_ESTIMATION, not SIMPLE_ESTIMATION, and this is a BUG FIX rather
+        # than a preference.
+        #
+        # SIMPLE_ESTIMATION pins Z = 1. The Trajectory Balance residual is then
+        # (sum log P_F - log R - sum log P_B)^2, which is zero only if
+        # P_F(tau) = R(x) P_B(tau|x) for every trajectory. Summing that over all
+        # trajectories reaching x gives p(x) = R(x), so sum_x p(x) = sum_x R(x). The
+        # left side is 1 because p is a distribution, so the objective is
+        # SATISFIABLE ONLY IF sum_x R(x) = 1 -- which is essentially never.
+        #
+        # So the previous default made the library's primary objective provably
+        # unsatisfiable. It was not a harmless conservative choice; it silently
+        # degraded every caller that took the default. Measured: examples/
+        # cycle_problem_demo.jl trained with the old default produced a sampler whose
+        # mean reward was IDENTICAL to the untrained one, 8.125 vs 8.125, with the
+        # loss RISING 28.021 -> 36.939. The only change was this method, after which
+        # the same demo goes 3.025 -> 15.575, a 5.1x improvement.
+        # test_flow_matching_comprehensive.jl showed the same shape: TB stuck at 21.17
+        # after 200 iterations and WORSE at 1000 (25.46), because sharpening the
+        # policy only grows a residual it can never close.
+        #
+        # SIMPLE_ESTIMATION remains available for the case it is actually correct for,
+        # rewards that genuinely sum to 1. The cost of the new default is one scalar
+        # parameter.
+        partition_function_method::PartitionFunctionMethod=LEARNABLE_ESTIMATION,
         optimization_method::OptimizationMethod=ADAM,
         n_iterations::Int=1000,
         batch_size::Int=32,
@@ -387,20 +411,77 @@ Checks that:
 - `ArgumentError` if configuration is invalid
 """
 function validate_training_config(config::TrainingConfig, model::GFlowNetModel)
-    # Check objective compatibility
-    if config.objective == DETAILED_BALANCE && isnothing(model.backward_policy)
-        throw(ArgumentError("Detailed balance requires backward policy"))
+    # ONE up-front check against ONE declarative table, reporting EVERY missing
+    # piece at once.
+    #
+    # This function was previously unusable: line 412 read `model.dag.states`, and
+    # GFlowNetModel has no `dag` field, so any caller that got that far threw. That
+    # is why nothing called it, and why the real requirements ended up scattered as
+    # five separate `throw`s buried inside loss branches
+    # (balance.jl:105, balance.jl:128, losses.jl:328, losses.jl:423,
+    # training.jl:102). Discovering a missing component by crashing on iteration 1 --
+    # or worse, by having train_gflownet swallow the exception and record NaN for
+    # every iteration -- is the failure mode that let several demos "run" while
+    # learning nothing.
+    #
+    # It was also WRONG where it did work: it claimed DETAILED_BALANCE needs only a
+    # backward policy, and get_objective_requirements claimed SUB_TRAJECTORY_BALANCE
+    # needs only a forward policy when it needs four things.
+    #
+    # TWO SEVERITIES, and the split is deliberate. A missing component that makes the
+    # objective DEGENERATE is an error; one that merely makes it SUBOPTIMAL is a
+    # warning. Measured basis: SubTB with a fixed Z collapses onto a single terminal
+    # state with probability 1.000 on every seed tried (TV 0.9474), so it errors. TB
+    # with a fixed Z is unsatisfiable but still trains and still moves the policy, and
+    # is correct outright when the rewards sum to 1, so it warns. Refusing to run it
+    # would break legitimate code-path tests for no mathematical gain.
+    reqs = _objective_component_requirements(config.objective)
+    missing_parts = String[]
+
+    if reqs.backward && isnothing(model.backward_policy)
+        push!(missing_parts, "a backward policy (include_backward = true)")
+    end
+    if reqs.flow && isnothing(model.flow_estimator)
+        push!(missing_parts, "a flow estimator (include_flow_estimator = true)")
+    end
+    if reqs.learnable_z && !haskey(model.parameters, :log_Z)
+        push!(missing_parts,
+              "a learnable partition function " *
+              "(partition_function_method = LEARNABLE_ESTIMATION)")
     end
 
-    if config.objective == FLOW_MATCHING && isnothing(model.flow_estimator)
-        throw(ArgumentError("Flow matching requires flow estimator"))
+    if get(reqs, :warn_learnable_z, false) && !haskey(model.parameters, :log_Z)
+        @warn "$(config.objective) is running with a FIXED partition function Z = 1" reason = reqs.why fix = "partition_function_method = LEARNABLE_ESTIMATION"
     end
 
-    if config.objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION && isnothing(model.backward_policy)
-        throw(ArgumentError("TLM requires backward policy - use include_backward_policy=true in create_gflownet"))
+    if !isempty(missing_parts)
+        throw(ArgumentError(
+            "$(config.objective) cannot be trained on this model. Missing: " *
+            join(missing_parts, "; ") * ". " * reqs.why
+        ))
     end
 
-    # Check mathematical constraints
+    # The partition-function method has to agree between model and config, because
+    # train_step! reads it from the CONFIG when deciding whether to update log_Z.
+    # Setting it on only one of the two silently freezes Z at its initial value, which
+    # looks like slow convergence rather than a misconfiguration -- and a model can
+    # carry a log_Z parameter that never moves, which is the most confusing state of
+    # all.
+    if config.partition_function_method != LEARNABLE_ESTIMATION &&
+       haskey(model.parameters, :log_Z)
+        if reqs.learnable_z
+            throw(ArgumentError(
+                "$(config.objective) requires partition_function_method = " *
+                "LEARNABLE_ESTIMATION on the TrainingConfig as well as on the model; " *
+                "got $(config.partition_function_method). train_step! reads the " *
+                "method from the config, so Z would stay frozen at its initial value."
+            ))
+        else
+            @warn "Model has a learnable log_Z but the config says $(config.partition_function_method), so Z will NOT be updated" fix = "set partition_function_method = LEARNABLE_ESTIMATION on the TrainingConfig too"
+        end
+    end
+
+    # Numeric sanity. Warnings, not errors: these are unusual, not impossible.
     if config.temperature < 0.1 || config.temperature > 10.0
         @warn "Temperature $(config.temperature) is outside typical range [0.1, 10.0]"
     end
@@ -409,17 +490,94 @@ function validate_training_config(config::TrainingConfig, model::GFlowNetModel)
         @warn "Learning rate $(config.learning_rate) is quite high, may cause instability"
     end
 
-    if config.batch_size > length(model.dag.states)
-        @warn "Batch size larger than number of states in DAG"
-    end
-
-    # Check regularization
     if config.entropy_weight > 1.0
         @warn "High entropy weight $(config.entropy_weight) may prevent convergence"
     end
 
     if config.parameter_regularization > 1e-1
         @warn "High regularization $(config.parameter_regularization) may prevent learning"
+    end
+
+    return nothing
+end
+
+"""
+    _objective_component_requirements(objective) -> NamedTuple
+
+THE single source of truth for what each objective needs from a model.
+
+Every requirement here is one that the corresponding loss branch actually
+dereferences, verified by reading the branch -- not a guess. `why` explains the
+mathematical reason, so a failure tells the caller what to fix and why it matters.
+"""
+function _objective_component_requirements(objective::TrainingObjective)
+    if objective == TRAJECTORY_BALANCE
+        # learnable_z is a WARNING for TB, not an error. TB with Z pinned to 1 is
+        # unsatisfiable but it still runs and still moves the policy, so refusing to
+        # train would break legitimate code-path tests and anyone whose rewards
+        # genuinely sum to 1. Contrast SUB_TRAJECTORY_BALANCE below, where a fixed Z
+        # collapses the sampler onto one state deterministically -- that one errors.
+        return (backward = false, flow = false, learnable_z = false,
+                warn_learnable_z = true,
+                why = "TB balances log Z + sum log P_F against log R + sum log P_B. " *
+                      "With Z pinned to 1 the residual cannot reach zero unless the " *
+                      "rewards sum to 1, so the objective is unsatisfiable and " *
+                      "training barely moves the sampler.")
+
+    elseif objective == DETAILED_BALANCE
+        # Flow estimator is OPTIONAL, not required. losses.jl falls back to the
+        # recursive flow() when there is none: F is then non-trainable, so the flow
+        # gradient is zero, but the objective still works and the reward still enters
+        # through the terminal boundary F(x) = R(x). Claiming it as required broke
+        # five existing DB tests that deliberately exercise that path.
+        return (backward = true, flow = false, learnable_z = false,
+                why = "DB enforces P_F(s'|s) F(s) = P_B(s|s') F(s'), so it needs P_B. " *
+                      "A flow estimator is optional: with one, F is learned; without " *
+                      "one, F is the recursive flow and carries no gradient. Z does " *
+                      "not appear in DB at all.")
+
+    elseif objective == FLOW_MATCHING
+        # Flow estimator is genuinely REQUIRED here, unlike for DB. FM's entire
+        # content is the conservation law on F, and losses.jl has no non-estimator
+        # path that can train it -- without one there is nothing to optimise.
+        return (backward = false, flow = true, learnable_z = false,
+                why = "FM enforces sum over parents of F(p) P_F(s|p) = F(s) with " *
+                      "F(x) = R(x), so F must exist and be trainable. P_B does not " *
+                      "appear in the residual, and Z does not either -- F(s0) plays " *
+                      "that role.")
+
+    elseif objective == SUB_TRAJECTORY_BALANCE
+        return (backward = true, flow = true, learnable_z = true,
+                why = "SubTB balances log F(s_i) + sum log P_F against " *
+                      "log F(s_j) + sum log P_B, anchored at F(s_0) = Z and " *
+                      "F(x) = R(x). Under a fixed Z = 1 the root anchor contradicts " *
+                      "the true partition function and the sampler collapses onto a " *
+                      "single terminal state.")
+
+    elseif objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
+        # Same severity reasoning as TB: it shares TB's trajectory residual, so a
+        # fixed Z makes it unsatisfiable but not degenerate. Warn, do not refuse.
+        return (backward = true, flow = false, learnable_z = false,
+                warn_learnable_z = true,
+                why = "TLM trains the backward policy directly, so P_B must exist, " *
+                      "and it shares TB's trajectory residual, so a fixed Z leaves " *
+                      "that residual with a floor it cannot close.")
+
+    elseif objective == MULTI_OBJECTIVE_TB
+        return (backward = false, flow = false, learnable_z = false,
+                why = "MOGFN needs a preference encoder and a Z network, which only " *
+                      "create_mogfn_gflownet builds; that is checked in its own loss " *
+                      "branch because the components are not fields of a plain model.")
+
+    elseif objective == DIRECT_FLOW_OBJECTIVE
+        return (backward = false, flow = false, learnable_z = false,
+                why = "DIRECT_FLOW_OBJECTIVE is disabled: its loss was constant with " *
+                      "respect to the parameters, so training under it did nothing. " *
+                      "Use TRAJECTORY_BALANCE.")
+
+    else
+        return (backward = false, flow = false, learnable_z = false,
+                why = "No declared component requirements.")
     end
 end
 
@@ -432,23 +590,23 @@ Get model component requirements for a training objective.
 Vector of strings naming required model components.
 """
 function get_objective_requirements(objective::TrainingObjective)::Vector{String}
-    if objective == TRAJECTORY_BALANCE
-        return ["forward_policy"]
-    elseif objective == DETAILED_BALANCE
-        return ["forward_policy", "backward_policy"]
-    elseif objective == FLOW_MATCHING
-        return ["forward_policy", "flow_estimator"]
-    elseif objective == SUB_TRAJECTORY_BALANCE
-        return ["forward_policy"]
-    elseif objective == COMBINED_OBJECTIVES
-        return ["forward_policy"]  # May require others depending on weights
-    elseif objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
-        return ["forward_policy", "backward_policy"]  # TLM requires both policies
-    elseif objective == MULTI_OBJECTIVE_TB
-        return ["forward_policy", "preference_encoder", "z_network"]  # MOGFN-PC
-    else
-        return String[]
+    # DERIVED from _objective_component_requirements, never restated. The two used to
+    # disagree: this function claimed SUB_TRAJECTORY_BALANCE needs only
+    # ["forward_policy"], when its loss dereferences the backward policy, the flow
+    # estimator AND log_Z. Duplicated truth tables drift, and this one had.
+    reqs = _objective_component_requirements(objective)
+    parts = ["forward_policy"]           # every objective reads P_F
+    reqs.backward    && push!(parts, "backward_policy")
+    reqs.flow        && push!(parts, "flow_estimator")
+    (reqs.learnable_z || get(reqs, :warn_learnable_z, false)) && push!(parts, "learnable_log_Z")
+
+    # MOGFN's extra components are not fields of a plain GFlowNetModel, so they are
+    # named here rather than in the boolean table.
+    if objective == MULTI_OBJECTIVE_TB
+        append!(parts, ["preference_encoder", "z_network"])
     end
+
+    return parts
 end
 
 """

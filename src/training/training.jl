@@ -67,6 +67,20 @@ end
 ```
 """
 function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::Bool = false)
+    # Validate BEFORE the loop, not by crashing inside it.
+    #
+    # The loop below catches per-iteration exceptions and records NaN, which is the
+    # right behaviour for a transient numerical failure and the WRONG behaviour for a
+    # misconfigured model: a missing flow estimator or a fixed Z makes EVERY iteration
+    # throw, and the run still completes, still returns a history, and still lets the
+    # caller print a success banner. Several examples in this repo did exactly that --
+    # one reported "Training converged successfully (100 iterations)" from a run where
+    # all 100 had failed.
+    #
+    # validate_training_config reports every missing component at once, with the
+    # mathematical reason, so this fails in one line before any work happens.
+    validate_training_config(config, model)
+
     history = TrainingHistory()
 
     # Initialize replay buffer if configured (JMLR 2023: Off-policy learning)

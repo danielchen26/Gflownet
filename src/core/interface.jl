@@ -92,7 +92,21 @@ function create_gflownet(
         nothing  # For SIMPLE_ESTIMATION, SAMPLING_ESTIMATION, etc.
     end
 
-    # Build parameters and states based on which components are included
+    # Build parameters and states based on which components are included.
+    #
+    # log_Z MUST match the network parameter element type. Lux gives Float32 params,
+    # and a Float64 scalar promotes the ENTIRE ComponentArray to Float64 -- doubling
+    # memory and silently changing the numerics of every layer. That surfaced as
+    # `compute_forward_logits` returning Vector{Float64} once LEARNABLE_ESTIMATION
+    # became the default, breaking test_core_functions.jl:131 which asserts Float32.
+    # Derived rather than hardcoded, so a Float64 network stays Float64.
+    param_eltype = eltype(ComponentArray(forward = forward_ps))
+    # log_partition_function is `nothing` unless LEARNABLE_ESTIMATION, so the
+    # conversion has to be guarded -- converting unconditionally threw
+    # MethodError: no method matching Float32(::Nothing) for every SIMPLE model.
+    logz_init = isnothing(log_partition_function) ? nothing :
+                param_eltype(log_partition_function)
+
     if include_backward && include_flow_estimator
         # Both backward policy and flow estimator
         backward_policy, backward_ps, backward_st = create_backward_policy(state_dim, hidden_dim, rng)
@@ -102,7 +116,7 @@ function create_gflownet(
                 forward = forward_ps,
                 backward = backward_ps,
                 flow = flow_ps,
-                log_Z = log_partition_function
+                log_Z = logz_init
             )
         else
             ComponentArray(
@@ -122,7 +136,7 @@ function create_gflownet(
             ComponentArray(
                 forward = forward_ps,
                 backward = backward_ps,
-                log_Z = log_partition_function
+                log_Z = logz_init
             )
         else
             ComponentArray(
@@ -141,7 +155,7 @@ function create_gflownet(
             ComponentArray(
                 forward = forward_ps,
                 flow = flow_ps,
-                log_Z = log_partition_function
+                log_Z = logz_init
             )
         else
             ComponentArray(
@@ -159,7 +173,7 @@ function create_gflownet(
         parameters = if partition_function_method == LEARNABLE_ESTIMATION
             ComponentArray(
                 forward = forward_ps,
-                log_Z = log_partition_function
+                log_Z = logz_init
             )
         else
             ComponentArray(

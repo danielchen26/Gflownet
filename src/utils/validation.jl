@@ -307,7 +307,13 @@ function validate_z_gradients(model::GFlowNetModel, trajectories::Vector{Traject
             model.forward_policy,
             model.backward_policy,
             model.flow_estimator,
-            haskey(ps, :log_Z) ? ps.log_Z : nothing,
+            # Float64(...) is REQUIRED: the struct field is Union{Nothing,Float64}
+            # (types.jl:160) while ps.log_Z follows the network parameter eltype,
+            # which is Float32. Passing it straight through threw
+            # MethodError: no method matching GFlowNetModel(..., ::Float32, ...).
+            # The field is a mirror of the parameter, so widening it is unnecessary;
+            # converting here keeps the struct concretely typed.
+            haskey(ps, :log_Z) ? Float64(ps.log_Z) : nothing,
             ps,
             model.optimizer,
             model.states

@@ -183,7 +183,7 @@ const GRID_CONFIG = Ref{NamedTuple}()
         hidden_dim::Int=64,
         learning_rate::Float64=0.01,
         include_backward::Bool=false,
-        partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION,
+        partition_function_method::PartitionFunctionMethod=LEARNABLE_ESTIMATION,
         rng::AbstractRNG=Random.default_rng()
     )
 
@@ -199,9 +199,12 @@ eliminating cache misses and training errors while maintaining all mathematical 
 - `hidden_dim::Int=64`: Hidden dimension for neural networks
 - `learning_rate::Float64=0.01`: Learning rate for optimizer
 - `include_backward::Bool=false`: Whether to include backward policy
-- `partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION`: How to handle partition function Z:
-  - `SIMPLE_ESTIMATION`: Z = 1 (default, simple and fast)
-  - `LEARNABLE_ESTIMATION`: Learn Z as parameter (better exploration, ~42% improvement)
+- `partition_function_method::PartitionFunctionMethod=LEARNABLE_ESTIMATION`: How to handle Z:
+  - `LEARNABLE_ESTIMATION`: learn log Z as a parameter. THE DEFAULT, because
+    Trajectory Balance is only satisfiable when Z can reach sum_x R(x).
+  - `SIMPLE_ESTIMATION`: Z = 1. Correct only when the rewards genuinely sum to 1;
+    otherwise the TB residual has a floor it can never close, and training will not
+    move the sampler.
 - `rng::AbstractRNG`: Random number generator
 
 # Returns
@@ -243,7 +246,7 @@ function create_grid_world_gflownet(;
     learning_rate::Float64=0.01,
     include_backward::Bool=false,
     include_flow_estimator::Bool=false,
-    partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION,
+    partition_function_method::PartitionFunctionMethod=LEARNABLE_ESTIMATION,
     rng::AbstractRNG=Random.default_rng()
 )
 
