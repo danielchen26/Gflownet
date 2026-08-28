@@ -493,9 +493,40 @@ end
         session.is_training = false
     end
 
-    # Launch async training loop
-    # NOTE: @async runs cooperatively on the same thread as Oxygen,
-    # so session field reads/writes are safe without locks.
+    # Launch async training loop.
+    #
+    # `@async` runs cooperatively on the same thread as Oxygen, so session field
+    # reads and writes are safe without locks.
+    #
+    # DO NOT CHANGE THIS TO `Threads.@spawn`. It was investigated properly and it
+    # does not work on this stack. Because Python is unavoidable inside `step!` --
+    # `reward(::MolState)` calls RDKitBridge.compute_mol_properties
+    # (molecular_generation.jl:362) from inside `Zygote.withgradient` -- moving the
+    # loop to another thread puts PythonCall on a non-primary thread. Three
+    # reproductions, all against the real server:
+    #
+    #   plain Threads.@spawn      -> "Fatal Python error: PyThreadState_Get: the
+    #                                function must be called with the GIL held",
+    #                                abort trap, dead about one second in
+    #   concurrent RDKit, no GIL  -> signal 11 segfault inside rdBase.so / boost-python
+    #   WITH correct GIL locking  -> whole process froze in __psynch_cvwait. A
+    #                                pure-Julia watchdog touching no Python stopped
+    #                                ticking after 6 s, i.e. Julia's stop-the-world GC
+    #                                could not complete. Control: identical program
+    #                                with GC.enable(false) survived 3/3 iterations.
+    #
+    # Root cause is upstream: PyGILState_Ensure is a bare ccall
+    # (PythonCall src/C/pointers.jl:303) with no gc_safe transition, which Julia
+    # 1.11.6 does not offer. PythonCall.jl issue #627 is still open; the maintainer
+    # reports every locking strategy they tried could be made to deadlock.
+    #
+    # Also note Threads.nthreads() is 1 here, so the change would be inert anyway,
+    # and the launcher must NOT be given `-t auto`.
+    #
+    # The real cost is a 1.43 s molecular step blocking every endpoint. Fix that by
+    # making the step cheaper -- compute_mol_properties is called per molecule per
+    # iteration and is UNCACHED -- or by moving training into a separate PROCESS,
+    # which sidesteps the GIL entirely. Not by threading it.
     TRAINING_TASK[] = @async begin
         try
             while session.is_training && session.current_iteration < session.total_iterations
