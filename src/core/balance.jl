@@ -286,8 +286,30 @@ function _compute_sub_trajectory_loss_differentiable(
     # terminal. Measured proof -- scaling R(3,3) from 10 to 1000 left the loss
     # bit-identical at 9.990423551228066, so a 100x reward change moved nothing
     # and any constant flow network minimised the objective.
+    # BOTH boundary conditions, F(s_0) = Z and F(x) = R(x).
+    #
+    # The initial-state anchor was missing entirely: `log_Z` appeared exactly once
+    # in this file, inside a comment. Its absence makes a COLLAPSED SAMPLER a global
+    # optimum with loss exactly 0. Take a deterministic policy that always reaches a
+    # single terminal x, with P_B = 1, and a flow network that is constant at R(x):
+    # every non-terminal sub-trajectory has residual log F(s_i) - log F(s_j) = 0, and
+    # the only terminal-anchored pair needs log F = log R(x), which holds. Nothing in
+    # the objective penalises ignoring every other terminal state.
+    #
+    # Measured before adding this: SubTB collapsed to ONE terminal with probability
+    # 1.000 and TV(p_hat, R/Z) = 0.9474, which is 1 - 1/19, i.e. it settled on a
+    # reward-1.0 corner rather than the reward-10 one. Identical to four decimal
+    # places at learning rates 0.005 and 0.0005, clip norms 1.0 and 0.1, and
+    # sub-trajectory lengths 5 and 2 -- so it was structural, not an optimisation
+    # scale problem.
+    #
+    # Anchoring F(s_0) = Z breaks that optimum, because a constant flow now also has
+    # to equal Z at the root while equalling R(x) at the leaf. It also gives SubTB a
+    # log_Z gradient, which the component-gradient table previously reported as dead.
     log_start_flow = if Zygote.@ignore(is_terminal_state(sub_states[1]))
         log(max(Zygote.@ignore(reward(sub_states[1])), 1e-8))
+    elseif start_idx == 1 && haskey(params, :log_Z)
+        params.log_Z
     else
         log(max(start_flow_vec[1], 1e-8))
     end
