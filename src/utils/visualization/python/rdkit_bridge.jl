@@ -1188,9 +1188,20 @@ end
 Map Vina docking score to [0, 1].
 Vina scores: ~-12 (strong binder) to ~0 (no binding).
 center=-6.0 maps to 0.5; more negative → higher score.
+
+The sign in the exponent is load-bearing and was WRONG: the body used
+`exp(-(score - center) / scale)`, which is increasing in `score`, so a -12
+kcal/mol binder normalized to 0.047 and a non-binder at +5 kcal/mol normalized
+to 0.996 -- the exact inverse of the documented contract. `proxy_dock` feeds
+this straight into the maximized reward vector
+(src/applications/molecular_generation.jl:414-415), so
+every docking-conditioned run was rewarding molecules for NOT binding. Found by
+un-skipping test/applications/molecular/test_docking.jl:19 under
+GFLOWNET_TEST_RDKIT=true: 10 of its 18 assertions failed, e.g.
+`sigmoid_normalize(-10.0) > 0.5` evaluated `0.11920292202211755 > 0.5`.
 """
 function sigmoid_normalize(score::Float64; center::Float64=-6.0, scale::Float64=2.0)::Float64
-    return 1.0 / (1.0 + exp(-(score - center) / scale))
+    return 1.0 / (1.0 + exp((score - center) / scale))
 end
 
 # ============================================

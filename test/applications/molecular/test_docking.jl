@@ -7,17 +7,21 @@ using Test
 include(joinpath(@__DIR__, "test_setup.jl"))
 
 # RDKit availability comes from the single gate in test/fixtures/molecular.jl
-# (loaded by test_setup.jl above), which also logs WHY it is unavailable.
-const _rdkit_available = RDKIT_AVAILABLE
+# (loaded by test_setup.jl above), which also logs WHY it is unavailable. The
+# name is file-local because test_diversity.jl defines its own; both used to
+# write `const _rdkit_available` into Main.
+const _rdkit_avail_docking = RDKIT_AVAILABLE
 
 @testset "Docking Integration" begin
 
-    if !_rdkit_available
-        @info "Skipping RDKitBridge-dependent docking tests (RDKitBridge not loaded)"
+    # All eight testsets below are RDKit-only. @info is not enough: a skipped
+    # suite must be as visible as a failing one, and must carry the reason.
+    if !_rdkit_avail_docking
+        @warn "ALL 8 docking testsets SKIPPED" reason = rdkit_reason()
     end
 
     @testset "sigmoid normalization" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             # Center point should map to 0.5
@@ -50,7 +54,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "docking target configuration" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             # Targets should be loaded from JSON
@@ -66,7 +70,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "docking availability flags" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             @test RDKitBridge.is_docking_available() isa Bool
@@ -75,26 +79,26 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "compute_all_objectives length" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             state = MolState("c1ccccc1", Int[], 1, true, zeros(Float32, 1024))
             objs = compute_all_objectives(state)
-            if !isempty(objs)
-                if RDKitBridge.has_docking_target() && RDKitBridge.is_proxy_available()
-                    @test length(objs) == 5
-                else
-                    @test length(objs) == 4
-                end
-                for (i, obj) in enumerate(objs)
-                    @test 0.0 <= obj <= 1.0
-                end
+            # Was `if !isempty(objs)`, which would have hidden the whole check.
+            @test !isempty(objs)
+            if RDKitBridge.has_docking_target() && RDKitBridge.is_proxy_available()
+                @test length(objs) == 5
+            else
+                @test length(objs) == 4
+            end
+            for (i, obj) in enumerate(objs)
+                @test 0.0 <= obj <= 1.0
             end
         end
     end
 
     @testset "reward backward compatibility with docking" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             state = MolState("c1ccccc1", Int[], 1, true, zeros(Float32, 1024))
@@ -108,29 +112,41 @@ const _rdkit_available = RDKIT_AVAILABLE
             @test isfinite(r_multi)
 
             objs = compute_all_objectives(state)
+            # The 5-objective weight vector only applies when a docking target
+            # AND a trained proxy are configured; without them the reward is a
+            # 4-vector and a 5-weight call is genuinely wrong. Say which branch
+            # ran instead of silently taking neither.
             if length(objs) == 5
                 w5 = [0.2, 0.15, 0.1, 0.1, 0.45]
                 r5 = GFlowNet.reward(state, w5)
                 @test r5 > 0.0
                 @test isfinite(r5)
+            else
+                @test length(objs) == 4
+                @info "5-objective docking reward not exercised: no docking target / proxy" n_objectives = length(objs)
             end
         end
     end
 
     @testset "proxy dock fallback" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
-            # When proxy is not trained, proxy_dock should return 0.5 (neutral)
-            if !RDKitBridge.is_proxy_available()
-                score = RDKitBridge.proxy_dock("c1ccccc1")
+            # proxy_dock returns the neutral 0.5 only while the proxy is
+            # untrained; if one ever IS trained in the test environment, assert
+            # the normalized-score contract instead of skipping silently.
+            score = RDKitBridge.proxy_dock("c1ccccc1")
+            if RDKitBridge.is_proxy_available()
+                @test 0.0 < score < 1.0
+                @info "docking proxy IS trained; asserted range instead of the 0.5 fallback" score
+            else
                 @test score ≈ 0.5 atol=1e-6
             end
         end
     end
 
     @testset "DockingResult struct" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             result = RDKitBridge.DockingResult("c1ccccc1", -8.5, 3, 1500, "")
@@ -147,7 +163,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "set_docking_target! validation" begin
-        if !_rdkit_available
+        if !_rdkit_avail_docking
             @test_skip "RDKitBridge not available"
         else
             # Setting an unknown target should fail gracefully
