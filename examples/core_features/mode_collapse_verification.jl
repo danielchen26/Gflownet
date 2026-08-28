@@ -14,6 +14,8 @@ using Statistics
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "..", "src"))
 using GFlowNet
 
+include(joinpath(@__DIR__, "..", "convergence_assertions.jl"))
+
 """
     verify_mode_collapse_solved()
 
@@ -78,7 +80,10 @@ function verify_mode_collapse_solved()
 
     config_no_exp = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 500,      # More iterations for convergence
+        # Cut from 500. Measured at 150 iterations / batch 16 on this 6x6 setup:
+        # loss falls 12.158 -> 0.272 (ratio 0.022) and BOTH peaks are found
+        # (40 and 58 of 500 samples), so 500 iterations was well past sufficient.
+        n_iterations = 150,
         batch_size = 16,         # Smaller batches, more updates
         learning_rate = 0.01,
         temperature = 1.0,
@@ -100,6 +105,12 @@ function verify_mode_collapse_solved()
     history_no_exp = GFlowNet.train_gflownet(model_no_exp, config_no_exp; verbose=false)
     println("done!")
 
+    assert_finite_iterations(history_no_exp, config_no_exp.n_iterations,
+                             "TB without exploration")
+    # Measured ratio 0.0224 at this budget; bar set ~20x looser.
+    assert_loss_decreased(history_no_exp, "TB without exploration";
+                          window=10, max_ratio=0.5)
+
     # Sample from trained model (pure policy, no exploration)
     eval_config = GFlowNet.SamplingConfig(
         strategy = GFlowNet.STOCHASTIC_SAMPLING,
@@ -114,6 +125,13 @@ function verify_mode_collapse_solved()
     # Count modes
     peak1_no, peak2_no = count_modes(samples_no_exp, (6,4), (4,6))
     modes_no = (peak1_no > 10 ? 1 : 0) + (peak2_no > 10 ? 1 : 0)
+
+    # Measured across runs, the per-peak counts of 500 samples vary a lot:
+    # (40,58), (40,60), (19,72), (87,27). Bar 8 sits ~2.4x below the smallest count
+    # ever observed (19) while still being a real check -- a genuinely collapsed mode
+    # draws 0-1, and the expected share per peak is 8-17%, i.e. 40-85 samples.
+    assert_modes_discovered([peak1_no, peak2_no], "TB without exploration coverage";
+                            min_per_mode=8, n_samples=500)
 
     println()
     println("Results WITHOUT exploration:")
@@ -143,7 +161,9 @@ function verify_mode_collapse_solved()
 
     config_with_exp = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 500,      # More iterations for convergence
+        # Cut from 500 -- same measurement as the baseline above (150 iterations
+        # reaches loss ratio 0.024 and finds both peaks: 40 and 60 of 500).
+        n_iterations = 150,
         batch_size = 16,         # Smaller batches, more updates
         learning_rate = 0.01,
         temperature = 1.0,
@@ -167,6 +187,12 @@ function verify_mode_collapse_solved()
     history_with_exp = GFlowNet.train_gflownet(model_with_exp, config_with_exp; verbose=false)
     println("done!")
 
+    assert_finite_iterations(history_with_exp, config_with_exp.n_iterations,
+                             "TB with exploration")
+    # Measured ratio 0.0244 at this budget.
+    assert_loss_decreased(history_with_exp, "TB with exploration";
+                          window=10, max_ratio=0.5)
+
     print("Sampling 500 trajectories... ")
     samples_with_exp = [GFlowNet.sample_trajectory(model_with_exp; config=eval_config) for _ in 1:500]
     println("done!")
@@ -174,6 +200,10 @@ function verify_mode_collapse_solved()
     # Count modes
     peak1_with, peak2_with = count_modes(samples_with_exp, (6,4), (4,6))
     modes_with = (peak1_with > 10 ? 1 : 0) + (peak2_with > 10 ? 1 : 0)
+
+    # Same measured spread as the baseline above; bar 8.
+    assert_modes_discovered([peak1_with, peak2_with], "TB with exploration coverage";
+                            min_per_mode=8, n_samples=500)
 
     println()
     println("Results WITH exploration:")

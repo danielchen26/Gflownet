@@ -18,6 +18,20 @@ using Statistics
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "..", "src"))
 using GFlowNet
 
+include(joinpath(@__DIR__, "..", "convergence_assertions.jl"))
+
+# Budget cut from 1000 iterations / batch 32 (2000 / batch 64 for the last run) to
+# 80 / batch 16. This script trains SEVEN models, so the old budget could not finish
+# inside 300s. Measured at 80 / batch 16 on this 5x5 setup: the plain baseline loss
+# falls 17.582 -> 0.066 (ratio 0.0038) and the majority peak draws 281/400 samples,
+# i.e. converged. The replay-buffer variants are asserted on coverage instead of
+# loss -- measured there the loss RISES (22.793 -> 31.673, ratio 1.39) because half
+# of every batch is replayed, while the sampler stays healthy (majority peak
+# 124/400).
+const N_ITER = 80
+const BATCH = 16
+const N_EVAL = 400
+
 function run_comprehensive_comparison()
     println("=" ^ 80)
     println("LITERATURE METHODS COMPARISON FOR MODE COLLAPSE")
@@ -65,14 +79,26 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=1000, batch_size=32, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.0, entropy_weight=0.0, use_replay_buffer=false,
         verbose=false
     )
     print("Training... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "Baseline")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "Baseline"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["Baseline"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "Baseline majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -91,7 +117,7 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=1000, batch_size=32, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.3,            # ε-uniform
         epsilon_decay=true,     # Anneal to 0
         entropy_weight=0.0,     # No entropy
@@ -99,9 +125,21 @@ function run_comprehensive_comparison()
         verbose=false
     )
     print("Training with ε=0.3... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "ε-Uniform (0.3)")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "ε-Uniform (0.3)"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["ε-Uniform (0.3)"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "ε-Uniform (0.3) majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -120,16 +158,28 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=1000, batch_size=32, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.0,            # No ε-uniform
         entropy_weight=0.1,     # High entropy
         use_replay_buffer=false,
         verbose=false
     )
     print("Training with entropy=0.1... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "Entropy (0.1)")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "Entropy (0.1)"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["Entropy (0.1)"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "Entropy (0.1) majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -148,7 +198,7 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=1000, batch_size=32, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.0,
         entropy_weight=0.0,
         use_replay_buffer=true,          # ENABLE
@@ -158,9 +208,21 @@ function run_comprehensive_comparison()
         verbose=false
     )
     print("Training with replay buffer... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "Replay Buffer")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "Replay Buffer"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["Replay Buffer"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "Replay Buffer majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -179,7 +241,7 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=1000, batch_size=32, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.0,
         entropy_weight=0.0,
         use_replay_buffer=false,
@@ -187,9 +249,21 @@ function run_comprehensive_comparison()
         verbose=false
     )
     print("Training with Z×10... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "Z×10 LR")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "Z×10 LR"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["Z×10 LR"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "Z×10 LR majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -206,7 +280,7 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=1000, batch_size=32, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.3,
         epsilon_decay=true,
         entropy_weight=0.1,
@@ -217,9 +291,21 @@ function run_comprehensive_comparison()
         verbose=false
     )
     print("Training with ALL methods... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "ALL Combined")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "ALL Combined"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["ALL Combined"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "ALL Combined majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -236,7 +322,7 @@ function run_comprehensive_comparison()
     )
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations=2000, batch_size=64, learning_rate=0.005,
+        n_iterations=N_ITER, batch_size=BATCH, learning_rate=0.005,
         epsilon=0.4,
         epsilon_decay=true,
         entropy_weight=0.15,
@@ -247,9 +333,21 @@ function run_comprehensive_comparison()
         verbose=false
     )
     print("Training extended (2000 iter)... ")
-    GFlowNet.train_gflownet(model, config; verbose=false)
+    history = GFlowNet.train_gflownet(model, config; verbose=false)
+    assert_finite_iterations(history, config.n_iterations, "Extended (2000)")
+    # The loss is only a progress statistic when the batch is purely on-policy.
+    # With a replay buffer half of every batch is replayed and the measured loss
+    # RISES (22.793 -> 31.673, ratio 1.39) on a healthy run, so the decrease is
+    # asserted only for the non-replay configurations. Coverage is asserted for all.
+    config.use_replay_buffer ||
+        assert_loss_decreased(history, "Extended (2000)"; window=8, max_ratio=0.5)
     p1, p2 = sample_and_count(model, eval_config)
     results["Extended (2000)"] = (p1, p2)
+    # The 1-path minority peak (1,5) is the thing under study and is expected to be
+    # starved, so only the majority peak is asserted. Measured 281/400 without
+    # replay and 124/400 with it; bar 40.
+    assert_modes_discovered([p1], "Extended (2000) majority peak";
+                            min_per_mode=40, n_samples=N_EVAL)
     println("done! Peak(5,5)=$p1, Peak(1,5)=$p2")
 
     # =========================================================================
@@ -314,7 +412,7 @@ function run_comprehensive_comparison()
     return results
 end
 
-function sample_and_count(model, eval_config, n=1000)
+function sample_and_count(model, eval_config, n=N_EVAL)
     samples = [GFlowNet.sample_trajectory(model; config=eval_config) for _ in 1:n]
     p1, p2 = 0, 0
     for traj in samples

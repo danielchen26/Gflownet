@@ -15,11 +15,14 @@ using Plots
 using DataFrames
 using CSV
 
+include(joinpath(@__DIR__, "..", "..", "convergence_assertions.jl"))
+
 # Set random seed for reproducibility
 Random.seed!(42)
 
-# Create output directory for results
-mkpath("results")
+# Create output directory for results next to this example, not in the launch CWD
+const RESULTS_DIR = joinpath(@__DIR__, "results")
+mkpath(RESULTS_DIR)
 
 println("=" ^ 60)
 println("GFlowNet Training Objectives Comparison")
@@ -29,10 +32,13 @@ println("=" ^ 60)
 # Configuration parameters
 const GRID_SIZE = 6
 const HIDDEN_DIM = 64
-const N_ITERATIONS = 500
-const BATCH_SIZE = 32
+# Budget cut from 500 iterations / batch 32: this script trains TWO models, and at
+# the old budget it did not finish inside 300s. 120 iterations at batch 16 is well
+# past convergence for both objectives -- see the measured values at the assertions.
+const N_ITERATIONS = 120
+const BATCH_SIZE = 16
 const LEARNING_RATE = 0.01
-const N_EVAL_SAMPLES = 1000
+const N_EVAL_SAMPLES = 300
 
 # Helper function to evaluate model performance
 function evaluate_model(model::GFlowNetModel, n_samples::Int)
@@ -69,7 +75,10 @@ end
 function visualize_reward_landscape(grid_size::Int)
     rewards = zeros(grid_size, grid_size)
     for x in 1:grid_size, y in 1:grid_size
-        state = GridWorldState(x, y, x == grid_size && y == grid_size)
+        # `GridState`, not `GridWorldState` -- the latter has never existed in this
+        # package (src/applications/grid_world.jl defines `GridState`), so every use
+        # of it here was a latent UndefVarError that the 300s timeout hid.
+        state = GridState(x, y, x == grid_size && y == grid_size)
         if is_terminal_state(state)
             rewards[y, x] = reward(state)
         end
@@ -132,10 +141,45 @@ history_tb = train_gflownet(model_tb, config_tb; verbose=true)
 println("\nTraining with DETAILED_BALANCE:")
 history_db = train_gflownet(model_db, config_db; verbose=true)
 
+# Anti-silent-failure gate. train_gflownet catches per-iteration exceptions and
+# records NaN, so without this a run in which every iteration threw would print a
+# full comparison table of NaNs and exit 0.
+assert_finite_iterations(history_tb, N_ITERATIONS, "TRAJECTORY_BALANCE")
+assert_finite_iterations(history_db, N_ITERATIONS, "DETAILED_BALANCE")
+
+# Neither model is given a partition_function_method, so both default to
+# SIMPLE_ESTIMATION, which pins log Z = 0 i.e. Z = 1 (src/training/losses.jl:
+# "SIMPLE_ESTIMATION: Z = 1, so log Z = 0"). Under Z = 1 the trajectory-balance
+# residual (log P(tau) - log R)^2 cannot reach 0 while R > 1, and measured on this
+# exact 6x6 configuration the TB loss RISES over the run: 31.103 -> 36.048, ratio
+# 1.159. So TB is NOT given a loss-decrease assertion; its sampler quality is checked
+# below instead.
+#
+# DETAILED_BALANCE is a local flow-conservation residual and does converge here.
+# Measured at 120 iterations / batch 16: 0.215 -> 0.011, ratio 0.050; and on the same
+# objective at 100 iterations, losses[1] = 1.154 -> mean(last 25) = 0.039. Bar 0.25.
+assert_loss_below_initial(history_db, "DETAILED_BALANCE"; window=25, max_ratio=0.25)
+
 # Evaluate models
 println("\n3. Evaluating models...")
 eval_tb = evaluate_model(model_tb, N_EVAL_SAMPLES)
 eval_db = evaluate_model(model_db, N_EVAL_SAMPLES)
+
+# TB runs under SIMPLE_ESTIMATION (see above), so the check that training worked is
+# that the sampler concentrates on high-reward terminals rather than that the loss
+# fell. Both objectives are held to it.
+model_untrained = create_grid_world_gflownet(
+    grid_size = GRID_SIZE,
+    hidden_dim = HIDDEN_DIM,
+    learning_rate = LEARNING_RATE,
+    include_backward = false
+)
+rewards_untrained = [reward(sample_trajectory(model_untrained).states[end])
+                     for _ in 1:N_EVAL_SAMPLES]
+rewards_tb_eval = [reward(t.states[end]) for t in eval_tb.trajectories]
+rewards_db_eval = [reward(t.states[end]) for t in eval_db.trajectories]
+assert_beats_untrained(rewards_tb_eval, rewards_untrained, "TB sampler"; min_gain=1.2)
+assert_beats_untrained(rewards_db_eval, rewards_untrained, "DB sampler"; min_gain=1.2)
 
 println("\nTRAJECTORY_BALANCE Results:")
 println("  - Mean reward: $(round(eval_tb.mean_reward, digits=3)) ± $(round(eval_tb.std_reward, digits=3))")
@@ -167,7 +211,7 @@ plot!(p1, history_db.losses,
 function create_visitation_heatmap(state_counts, grid_size, title)
     visit_grid = zeros(grid_size, grid_size)
     for (state, count) in state_counts
-        if isa(state, GridWorldState)
+        if isa(state, GridState)
             visit_grid[state.y, state.x] = count
         end
     end
@@ -200,7 +244,7 @@ histogram!(p4, [reward(t.states[end]) for t in eval_db.trajectories],
 
 # Combine plots
 final_plot = plot(p1, p2, p3, p4, layout=(2,2), size=(1000, 800))
-savefig(final_plot, "results/objective_comparison.png")
+savefig(final_plot, joinpath(RESULTS_DIR, "objective_comparison.png"))
 
 # Analyze trajectory lengths
 tb_lengths = [length(t.states) for t in eval_tb.trajectories]
@@ -217,13 +261,13 @@ println("  - Min/Max length: $(minimum(db_lengths))/$(maximum(db_lengths))")
 
 # Test backward policy (only for DB model)
 println("\n6. Backward Policy Analysis (DB only):")
-test_state = GridWorldState(3, 3, false)
+test_state = GridState(3, 3, false)
 println("  Testing backward transitions from state (3,3)...")
 
 # Find states that can reach test_state
 can_reach = []
 for x in 1:GRID_SIZE, y in 1:GRID_SIZE
-    source = GridWorldState(x, y, false)
+    source = GridState(x, y, false)
     if is_valid_backward_transition(source, test_state, model_db.all_actions)
         prob = compute_backward_probability(
             model_db.backward_policy, test_state, source,
@@ -248,16 +292,20 @@ results_df = DataFrame(
                        eval_db.total_states_visited, mean(db_lengths)]
 )
 
-CSV.write("results/objective_comparison_metrics.csv", results_df)
+CSV.write(joinpath(RESULTS_DIR, "objective_comparison_metrics.csv"), results_df)
 
 # Key insights
-println("\n" * "=" * 60)
+# `"=" ^ 60`, not `"=" * 60`. String * Int is a MethodError
+# (`MethodError(*, ("=", 60))`), so both of these lines threw. The 300s timeout hid it
+# because the script never got this far.
+println("\n" * "=" ^ 60)
 println("KEY INSIGHTS:")
-println("=" * 60)
+println("=" ^ 60)
 
 println("\n1. CONVERGENCE SPEED:")
-tb_final_losses = filter(!isnan, history_tb.losses[end-49:end])
-db_final_losses = filter(!isnan, history_db.losses[end-49:end])
+window = min(50, N_ITERATIONS)
+tb_final_losses = history_tb.losses[end-window+1:end]
+db_final_losses = history_db.losses[end-window+1:end]
 println("   TB final loss: $(round(mean(tb_final_losses), digits=4))")
 println("   DB final loss: $(round(mean(db_final_losses), digits=4))")
 

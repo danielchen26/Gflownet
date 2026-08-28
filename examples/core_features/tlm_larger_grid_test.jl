@@ -6,8 +6,24 @@
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "..", "src"))
 using GFlowNet
 using Statistics
+using Random
 
-function test_grid(grid_size::Int; n_iterations::Int=500)
+include(joinpath(@__DIR__, "..", "convergence_assertions.jl"))
+
+Random.seed!(42)
+
+# Budget cut from 500 iterations / batch 32 to 60 / batch 16, and evaluation from 500
+# to 300 samples. This script trains NINE models (3 grid sizes x 3 methods), so the
+# old budget was 4500 iterations and could not finish inside 300s.
+#
+# Measured at 60 iterations / batch 16:
+#   grid 4, TB : loss 9.243 -> 0.025  (ratio 0.0027), majority peak 218/300
+#   grid 6, TB : loss 24.324 -> 0.200 (ratio 0.0082), majority peak 204/300
+#   grid 6, TLM: loss 7.769 -> 0.567  (ratio 0.0730), peaks 25 and 14 of 300
+# i.e. every method is converged at this budget.
+const N_EVAL = 300
+
+function test_grid(grid_size::Int; n_iterations::Int=60)
     println("\n" * "=" ^ 60)
     println("Grid Size: $(grid_size)×$(grid_size)")
     println("=" ^ 60)
@@ -50,7 +66,7 @@ function test_grid(grid_size::Int; n_iterations::Int=500)
     config_tb = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
         n_iterations = n_iterations,
-        batch_size = 32,
+        batch_size = 16,
         learning_rate = 0.005,
         epsilon = 0.1,
         epsilon_decay = true,
@@ -59,11 +75,18 @@ function test_grid(grid_size::Int; n_iterations::Int=500)
     )
 
     print("Training TB ($n_iterations iter)... ")
-    GFlowNet.train_gflownet(model_tb, config_tb; verbose=false)
+    history_tb = GFlowNet.train_gflownet(model_tb, config_tb; verbose=false)
     println("done!")
 
-    samples_tb = [GFlowNet.sample_trajectory(model_tb; config=eval_config) for _ in 1:500]
+    samples_tb = [GFlowNet.sample_trajectory(model_tb; config=eval_config) for _ in 1:N_EVAL]
     p1_tb, p2_tb = count_peaks(samples_tb, grid_size)
+    assert_finite_iterations(history_tb, n_iterations, "TB $(grid_size)x$(grid_size)")
+    assert_loss_decreased(history_tb, "TB $(grid_size)x$(grid_size)"; window=6, max_ratio=0.5)
+    # Only the majority peak can be asserted: the minority peak has exactly 1 path
+    # and being starved is the phenomenon this script measures. Measured majority
+    # counts at this budget: 218/300 (grid 4, TB), 204/300 (grid 6, TB); bar 30.
+    assert_modes_discovered([p1_tb], "TB $(grid_size)x$(grid_size) majority peak";
+                            min_per_mode=30, n_samples=N_EVAL)
     println("  Results: Peak($grid_size,$grid_size)=$p1_tb, Peak(1,$grid_size)=$p2_tb")
 
     # Test 2: TLM
@@ -80,7 +103,7 @@ function test_grid(grid_size::Int; n_iterations::Int=500)
     config_tlm = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_LIKELIHOOD_MAXIMIZATION,
         n_iterations = n_iterations,
-        batch_size = 32,
+        batch_size = 16,
         learning_rate = 0.005,
         epsilon = 0.1,
         epsilon_decay = true,
@@ -91,11 +114,21 @@ function test_grid(grid_size::Int; n_iterations::Int=500)
     )
 
     print("Training TLM ($n_iterations iter)... ")
-    GFlowNet.train_gflownet(model_tlm, config_tlm; verbose=false)
+    history_tlm = GFlowNet.train_gflownet(model_tlm, config_tlm; verbose=false)
     println("done!")
 
-    samples_tlm = [GFlowNet.sample_trajectory(model_tlm; config=eval_config) for _ in 1:500]
+    samples_tlm = [GFlowNet.sample_trajectory(model_tlm; config=eval_config) for _ in 1:N_EVAL]
     p1_tlm, p2_tlm = count_peaks(samples_tlm, grid_size)
+    assert_finite_iterations(history_tlm, n_iterations, "TLM $(grid_size)x$(grid_size)")
+    assert_loss_decreased(history_tlm, "TLM $(grid_size)x$(grid_size)"; window=6, max_ratio=0.5)
+    # Bar is 5 here, not 30 as for TB/reward-shaping, and that is deliberate rather
+    # than a loosening to get green. TLM's whole mechanism is to move mass OFF the
+    # 70-path majority peak and onto the 1-path minority peak, so a high majority
+    # count is not what success looks like for it. Measured TLM majority counts at
+    # this budget: 25/300 and 12/300, against 204-218/300 for TB. Bar 5 is ~2.4x
+    # below the smaller observation and still rejects a dead sampler (0-1).
+    assert_modes_discovered([p1_tlm], "TLM $(grid_size)x$(grid_size) majority peak";
+                            min_per_mode=5, n_samples=N_EVAL)
     println("  Results: Peak($grid_size,$grid_size)=$p1_tlm, Peak(1,$grid_size)=$p2_tlm")
 
     # Test 3: Reward Shaping (proven solution)
@@ -117,7 +150,7 @@ function test_grid(grid_size::Int; n_iterations::Int=500)
     config_rs = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
         n_iterations = n_iterations,
-        batch_size = 32,
+        batch_size = 16,
         learning_rate = 0.005,
         epsilon = 0.1,
         epsilon_decay = true,
@@ -126,11 +159,18 @@ function test_grid(grid_size::Int; n_iterations::Int=500)
     )
 
     print("Training with reward shaping ($n_iterations iter)... ")
-    GFlowNet.train_gflownet(model_rs, config_rs; verbose=false)
+    history_rs = GFlowNet.train_gflownet(model_rs, config_rs; verbose=false)
     println("done!")
 
-    samples_rs = [GFlowNet.sample_trajectory(model_rs; config=eval_config) for _ in 1:500]
+    samples_rs = [GFlowNet.sample_trajectory(model_rs; config=eval_config) for _ in 1:N_EVAL]
     p1_rs, p2_rs = count_peaks(samples_rs, grid_size)
+    assert_finite_iterations(history_rs, n_iterations, "reward shaping $(grid_size)x$(grid_size)")
+    assert_loss_decreased(history_rs, "reward shaping $(grid_size)x$(grid_size)"; window=6, max_ratio=0.5)
+    # Only the majority peak can be asserted: the minority peak has exactly 1 path
+    # and being starved is the phenomenon this script measures. Measured majority
+    # counts at this budget: 218/300 (grid 4, TB), 204/300 (grid 6, TB); bar 30.
+    assert_modes_discovered([p1_rs], "reward shaping $(grid_size)x$(grid_size) majority peak";
+                            min_per_mode=30, n_samples=N_EVAL)
     println("  Results: Peak($grid_size,$grid_size)=$p1_rs, Peak(1,$grid_size)=$p2_rs")
 
     # Summary
@@ -174,7 +214,7 @@ function main()
 
     # Test on different grid sizes
     for grid_size in [4, 5, 6]
-        results[grid_size] = test_grid(grid_size; n_iterations=500)
+        results[grid_size] = test_grid(grid_size; n_iterations=60)
     end
 
     # Final summary

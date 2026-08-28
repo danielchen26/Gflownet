@@ -18,6 +18,8 @@ using Random
 using Dates
 using Statistics
 
+include(joinpath(@__DIR__, "..", "convergence_assertions.jl"))
+
 # Include report generation if available
 HAS_REPORTING = try
     include("report_generation.jl")
@@ -107,8 +109,13 @@ println("   🚀 Starting training...")
 training_history = train_gflownet(model, config; verbose=true)
 
 # Extract training statistics
-successful_iterations = count(!isnan, training_history[:losses])
-final_loss = filter(!isnan, training_history[:losses])[end]
+# `filter(!isnan, ...)[end]` reported the last SURVIVING loss, so a run in which 49
+# of 50 iterations threw looked identical to a clean one (and a run in which all of
+# them threw died with a BoundsError). Asserted instead.
+assert_finite_iterations(training_history, config.n_iterations, "grid world main model")
+
+successful_iterations = count(isfinite, training_history[:losses])
+final_loss = training_history[:losses][end]
 total_time = sum(training_history[:iteration_times])
 
 println("   ✅ Training completed!")
@@ -148,6 +155,25 @@ analyze_grid_world_results(trajectories, 5)
 # Store these trajectories for consistent analysis throughout
 global main_trajectories = trajectories
 global main_rewards = [reward(traj.states[end]) for traj in trajectories]
+
+# This model is built with partition_function_method=SIMPLE_ESTIMATION, which pins
+# log Z = 0 i.e. Z = 1 (src/training/losses.jl: "SIMPLE_ESTIMATION: Z = 1, so
+# log Z = 0"). With rewards up to 50 the trajectory-balance residual
+# (log P(tau) - log R)^2 cannot reach 0, and measured on comparable SIMPLE_ESTIMATION
+# runs the loss RISES over training (28.021 -> 36.939). A loss-decrease assertion
+# would therefore be asserting something false. What must hold is that training pulls
+# the sampler toward the high-reward cells, so that is asserted.
+let untrained = create_grid_world_gflownet(
+        grid_size=5,
+        reward_positions=Dict(
+            (5, 5) => 50.0, (1, 5) => 40.0, (5, 1) => 40.0, (3, 3) => 30.0,
+            (2, 4) => 20.0, (4, 2) => 20.0, (1, 1) => 5.0
+        ),
+        allow_all_moves=true, hidden_dim=64, learning_rate=0.01)
+    untrained_rewards = [reward(sample_trajectory(untrained; config=acyclic_config).states[end])
+                         for _ in 1:n_trajectories]
+    assert_beats_untrained(main_rewards, untrained_rewards, "grid world sampler"; min_gain=1.15)
+end
 
 # =============================================================================
 # 4. Demonstrate Different Configurations

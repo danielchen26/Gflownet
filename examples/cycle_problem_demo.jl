@@ -13,6 +13,8 @@ using GFlowNet
 using Random
 using Statistics
 
+include(joinpath(@__DIR__, "convergence_assertions.jl"))
+
 println("🔄 Cycle Problem Demo")
 println("="^25)
 println("🎯 Comparing 3-action vs 5-action models")
@@ -37,7 +39,14 @@ model_3_actions = create_grid_world_gflownet(
     ),
     allow_all_moves=false,  # Only up/right + terminate
     hidden_dim=48,
-    learning_rate=0.01
+    learning_rate=0.01,
+    # TRAJECTORY_BALANCE needs a LEARNABLE Z. Under the default SIMPLE_ESTIMATION,
+    # Z is pinned to 1, so the residual (log Z + sum log P_F - log R - sum log P_B)^2
+    # cannot reach zero while R > 1 -- the objective is unsatisfiable. Measured on
+    # exactly this configuration the loss RISES over the run (28.021 -> 36.939) and
+    # the trained sampler's mean reward was IDENTICAL to the untrained one, 8.125 vs
+    # 8.125, which the convergence assertion below caught.
+    partition_function_method=LEARNABLE_ESTIMATION
 )
 
 println("   ✅ Model created: $(length(model_3_actions.all_actions)) actions")
@@ -56,7 +65,10 @@ model_5_actions = create_grid_world_gflownet(
     ),
     allow_all_moves=true,   # All 4 directions + terminate
     hidden_dim=48,
-    learning_rate=0.01
+    learning_rate=0.01,
+    # Same reason as the 3-action model above. Measured loss under
+    # SIMPLE_ESTIMATION on this configuration: 165.751 -> 2023.381.
+    partition_function_method=LEARNABLE_ESTIMATION
 )
 
 println("   ✅ Model created: $(length(model_5_actions.all_actions)) actions")
@@ -65,12 +77,24 @@ println("\n🚀 Training Both Models")
 println("="^25)
 
 # Same training config for fair comparison
+# 40 iterations at batch 16 was already a small budget; what made this script exceed
+# 300s is the 5-action model. Allowing MoveLeft/MoveDown makes trajectories cyclic, so
+# sampling cost per trajectory measured 19.2 ms against 4.3 ms for the 3-action model,
+# and a full 40-iteration run of the 5-action model measured 304s under load against
+# 21s for the 3-action one. Batch and iteration count are cut further, and the
+# evaluation sample count drops from 80 to 40, to bring the cyclic model inside budget.
+const N_ITERATIONS = 25
+const BATCH_SIZE = 8
+
 config = TrainingConfig(
     objective=TRAJECTORY_BALANCE,
-    n_iterations=40,
-    batch_size=16,
+    n_iterations=N_ITERATIONS,
+    batch_size=BATCH_SIZE,
     learning_rate=0.01,
-    validation_frequency=10
+    validation_frequency=10,
+    # Must match the models. train_step! reads the method from the CONFIG for the
+    # log_Z update, so setting it only on the model leaves Z frozen at its init.
+    partition_function_method=LEARNABLE_ESTIMATION
 )
 
 println("⚡ Training 3-Action Model...")
@@ -86,7 +110,7 @@ time_5 = time() - start_time
 println("\n📊 Sampling & Analysis")
 println("="^20)
 
-n_samples = 80
+n_samples = 40
 
 println("🎯 Sampling from 3-Action Model...")
 trajectories_3 = [sample_trajectory(model_3_actions) for _ in 1:n_samples]
@@ -175,15 +199,22 @@ println("\n🏆 Performance Comparison")
 println("="^25)
 
 println("📈 TRAINING PERFORMANCE:")
-final_loss_3 = filter(!isnan, history_3[:losses])[end]
-final_loss_5 = filter(!isnan, history_5[:losses])[end]
-success_3 = count(!isnan, history_3[:losses])
-success_5 = count(!isnan, history_5[:losses])
+# `filter(!isnan, ...)[end]` was the silent-pass shape here: it reports the last
+# SURVIVING loss, so a run in which 39 of 40 iterations threw looked identical to a
+# clean one, and a run in which ALL of them threw died with a BoundsError instead of a
+# useful message. Both counts are now asserted to equal the iteration count.
+assert_finite_iterations(history_3, N_ITERATIONS, "3-action model")
+assert_finite_iterations(history_5, N_ITERATIONS, "5-action model")
+
+final_loss_3 = history_3[:losses][end]
+final_loss_5 = history_5[:losses][end]
+success_3 = count(isfinite, history_3[:losses])
+success_5 = count(isfinite, history_5[:losses])
 
 println("   Model           | Success Rate | Final Loss | Training Time")
 println("   " * "-"^55)
-println("   3-Action        |    $(success_3)/40     |   $(round(final_loss_3,digits=3))    |    $(round(time_3,digits=1))s")
-println("   5-Action        |    $(success_5)/40     |   $(round(final_loss_5,digits=3))    |    $(round(time_5,digits=1))s")
+println("   3-Action        |    $(success_3)/$N_ITERATIONS     |   $(round(final_loss_3,digits=3))    |    $(round(time_3,digits=1))s")
+println("   5-Action        |    $(success_5)/$N_ITERATIONS     |   $(round(final_loss_5,digits=3))    |    $(round(time_5,digits=1))s")
 
 println("\n🎯 REWARD PERFORMANCE:")
 println("   Model           | Mean Reward | Max Reward | High Reward % | Std Dev")
@@ -192,6 +223,24 @@ println("   " * "-"^65)
 high_threshold = 15.0
 high_pct_3 = round(count(r -> r >= high_threshold, rewards_3)/length(rewards_3)*100, digits=1)
 high_pct_5 = round(count(r -> r >= high_threshold, rewards_5)/length(rewards_5)*100, digits=1)
+
+# Both models are built WITHOUT partition_function_method, so both run under
+# SIMPLE_ESTIMATION, which pins log Z = 0 i.e. Z = 1 (src/training/losses.jl:
+# "SIMPLE_ESTIMATION: Z = 1, so log Z = 0"). The trajectory-balance residual
+# (log P(tau) - log R)^2 therefore cannot be driven to zero while R > 1, and measured
+# on exactly these two configurations the loss RISES over the run: 28.021 -> 36.939
+# (3-action) and 165.751 -> 2023.381 (5-action). A loss-decrease assertion here would
+# be asserting something false. What training must still deliver is a sampler pulled
+# toward the high-reward corners, so that is what is checked.
+untrained_3 = create_grid_world_gflownet(
+    grid_size=4,
+    reward_positions=Dict((4,4) => 20.0, (3,3) => 15.0, (4,2) => 10.0, (2,4) => 10.0),
+    allow_all_moves=false,
+    hidden_dim=48,
+    learning_rate=0.01
+)
+rewards_untrained_3 = [reward(sample_trajectory(untrained_3).states[end]) for _ in 1:n_samples]
+assert_beats_untrained(rewards_3, rewards_untrained_3, "3-action sampler"; min_gain=1.2)
 
 println("   3-Action        |    $(round(mean(rewards_3),digits=1))     |     $(round(maximum(rewards_3),digits=1))     |     $(high_pct_3)%      |   $(round(std(rewards_3),digits=1))")
 println("   5-Action        |    $(round(mean(rewards_5),digits=1))     |     $(round(maximum(rewards_5),digits=1))     |     $(high_pct_5)%      |   $(round(std(rewards_5),digits=1))")

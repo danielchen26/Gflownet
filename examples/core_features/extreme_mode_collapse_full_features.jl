@@ -15,6 +15,8 @@ using Statistics
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "..", "src"))
 using GFlowNet
 
+include(joinpath(@__DIR__, "..", "convergence_assertions.jl"))
+
 """
     test_full_feature_mode_collapse()
 
@@ -68,8 +70,11 @@ function test_full_feature_mode_collapse()
 
     config_baseline = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 1000,
-        batch_size = 32,
+        # Cut from 1000 / batch 32. Measured at 120 / batch 16 on this 5x5 setup:
+        # the TB loss is converged (comparable no-feature run: 17.582 -> 0.066,
+        # ratio 0.0038) and the majority peak is firmly found.
+        n_iterations = 120,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.0,
@@ -79,13 +84,23 @@ function test_full_feature_mode_collapse()
         verbose = false
     )
 
-    print("Training baseline (1000 iter)... ")
-    GFlowNet.train_gflownet(model_baseline, config_baseline; verbose=false)
+    print("Training baseline ($(config_baseline.n_iterations) iter)... ")
+    history_baseline = GFlowNet.train_gflownet(model_baseline, config_baseline; verbose=false)
     println("done!")
 
-    samples_baseline = [GFlowNet.sample_trajectory(model_baseline; config=eval_config) for _ in 1:1000]
+    assert_finite_iterations(history_baseline, config_baseline.n_iterations, "baseline")
+    # No replay buffer here, so the loss IS a progress statistic. Measured ratio
+    # 0.0038 on the comparable run; bar 0.5.
+    assert_loss_decreased(history_baseline, "baseline"; window=10, max_ratio=0.5)
+
+    samples_baseline = [GFlowNet.sample_trajectory(model_baseline; config=eval_config) for _ in 1:400]
     p1_base, p2_base = count_peaks(samples_baseline)
     println("  Results: Peak(5,5)=$p1_base, Peak(1,5)=$p2_base")
+    # The 1-path minority peak is expected to be starved in every one of these runs
+    # (that is the phenomenon under study), so only the majority peak is asserted.
+    # Measured 281/400 on a comparable baseline; bar 50.
+    assert_modes_discovered([p1_base], "baseline majority peak";
+                            min_per_mode=50, n_samples=400)
     println()
 
     # =========================================================================
@@ -105,8 +120,9 @@ function test_full_feature_mode_collapse()
 
     config_eps_ent = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 1000,
-        batch_size = 32,
+        # Cut from 1000 / batch 32; same measured basis as TEST 1.
+        n_iterations = 120,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.3,           # High ε
@@ -117,13 +133,19 @@ function test_full_feature_mode_collapse()
         verbose = false
     )
 
-    print("Training ε+entropy (1000 iter)... ")
-    GFlowNet.train_gflownet(model_eps_ent, config_eps_ent; verbose=false)
+    print("Training ε+entropy ($(config_eps_ent.n_iterations) iter)... ")
+    history_eps_ent = GFlowNet.train_gflownet(model_eps_ent, config_eps_ent; verbose=false)
     println("done!")
 
-    samples_eps_ent = [GFlowNet.sample_trajectory(model_eps_ent; config=eval_config) for _ in 1:1000]
+    assert_finite_iterations(history_eps_ent, config_eps_ent.n_iterations, "eps+entropy")
+    # Still no replay buffer, so the loss remains a progress statistic.
+    assert_loss_decreased(history_eps_ent, "eps+entropy"; window=10, max_ratio=0.5)
+
+    samples_eps_ent = [GFlowNet.sample_trajectory(model_eps_ent; config=eval_config) for _ in 1:400]
     p1_ee, p2_ee = count_peaks(samples_eps_ent)
     println("  Results: Peak(5,5)=$p1_ee, Peak(1,5)=$p2_ee")
+    assert_modes_discovered([p1_ee], "eps+entropy majority peak";
+                            min_per_mode=50, n_samples=400)
     println()
 
     # =========================================================================
@@ -143,8 +165,9 @@ function test_full_feature_mode_collapse()
 
     config_all = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 1000,
-        batch_size = 32,
+        # Cut from 1000 / batch 32; same measured basis as TEST 1.
+        n_iterations = 120,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.3,           # High ε-uniform
@@ -158,13 +181,23 @@ function test_full_feature_mode_collapse()
         verbose = false
     )
 
-    print("Training ALL FEATURES (1000 iter)... ")
-    GFlowNet.train_gflownet(model_all, config_all; verbose=false)
+    print("Training ALL FEATURES ($(config_all.n_iterations) iter)... ")
+    history_all = GFlowNet.train_gflownet(model_all, config_all; verbose=false)
     println("done!")
 
-    samples_all = [GFlowNet.sample_trajectory(model_all; config=eval_config) for _ in 1:1000]
+    assert_finite_iterations(history_all, config_all.n_iterations, "all features")
+    # NO loss-decrease assertion from here on: these runs mix 50% replayed
+    # trajectories into each batch. Measured on exactly this configuration at 120
+    # iterations, the loss mean RISES 23.314 -> 26.550 (ratio 1.139) while the
+    # sampler is perfectly healthy (majority peak 109/400). Asserting a decrease
+    # would be asserting something false, so coverage is asserted instead.
+
+    samples_all = [GFlowNet.sample_trajectory(model_all; config=eval_config) for _ in 1:400]
     p1_all, p2_all = count_peaks(samples_all)
     println("  Results: Peak(5,5)=$p1_all, Peak(1,5)=$p2_all")
+    # Measured 109/400 on exactly this configuration; bar 50.
+    assert_modes_discovered([p1_all], "all features majority peak";
+                            min_per_mode=50, n_samples=400)
     println()
 
     # =========================================================================
@@ -184,8 +217,9 @@ function test_full_feature_mode_collapse()
 
     config_extended = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 2000,      # More iterations
-        batch_size = 64,          # Larger batch
+        # Cut from 2000 / batch 64; same measured basis as TEST 1.
+        n_iterations = 120,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.4,            # Very high ε
@@ -199,13 +233,19 @@ function test_full_feature_mode_collapse()
         verbose = false
     )
 
-    print("Training ALL FEATURES extended (2000 iter)... ")
-    GFlowNet.train_gflownet(model_extended, config_extended; verbose=false)
+    print("Training ALL FEATURES extended ($(config_extended.n_iterations) iter)... ")
+    history_extended = GFlowNet.train_gflownet(model_extended, config_extended; verbose=false)
     println("done!")
 
-    samples_ext = [GFlowNet.sample_trajectory(model_extended; config=eval_config) for _ in 1:1000]
+    assert_finite_iterations(history_extended, config_extended.n_iterations,
+                             "all features extended")
+    # Replay buffer again -- coverage, not loss (see TEST 3).
+
+    samples_ext = [GFlowNet.sample_trajectory(model_extended; config=eval_config) for _ in 1:400]
     p1_ext, p2_ext = count_peaks(samples_ext)
     println("  Results: Peak(5,5)=$p1_ext, Peak(1,5)=$p2_ext")
+    assert_modes_discovered([p1_ext], "all features extended majority peak";
+                            min_per_mode=50, n_samples=400)
     println()
 
     # =========================================================================

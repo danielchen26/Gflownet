@@ -18,6 +18,8 @@ using Statistics
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "..", "src"))
 using GFlowNet
 
+include(joinpath(@__DIR__, "..", "convergence_assertions.jl"))
+
 """
     test_extreme_mode_collapse()
 
@@ -61,8 +63,10 @@ function test_extreme_mode_collapse()
 
     config_no_exp = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 1000,  # More iterations for extreme case
-        batch_size = 32,
+        # Cut from 1000 iterations / batch 32. Measured at 150 / batch 16 on this
+        # 5x5 setup: loss falls 15.915 -> 0.020 (ratio 0.0012), i.e. converged.
+        n_iterations = 150,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.0,          # NO exploration
@@ -72,9 +76,14 @@ function test_extreme_mode_collapse()
         verbose = false
     )
 
-    print("Training 1000 iterations... ")
+    print("Training $(config_no_exp.n_iterations) iterations... ")
     history_no_exp = GFlowNet.train_gflownet(model_no_exp, config_no_exp; verbose=false)
     println("done!")
+
+    assert_finite_iterations(history_no_exp, config_no_exp.n_iterations,
+                             "TB no exploration")
+    # Measured ratio 0.0012 at this budget; bar ~400x looser.
+    assert_loss_decreased(history_no_exp, "TB no exploration"; window=10, max_ratio=0.5)
 
     # Sample with pure policy
     eval_config = GFlowNet.SamplingConfig(
@@ -83,8 +92,8 @@ function test_extreme_mode_collapse()
         max_trajectory_length = 100
     )
 
-    print("Sampling 1000 trajectories... ")
-    samples_no_exp = [GFlowNet.sample_trajectory(model_no_exp; config=eval_config) for _ in 1:1000]
+    print("Sampling 400 trajectories... ")
+    samples_no_exp = [GFlowNet.sample_trajectory(model_no_exp; config=eval_config) for _ in 1:400]
     println("done!")
 
     # Count modes
@@ -107,14 +116,22 @@ function test_extreme_mode_collapse()
 
     println()
     println("Results WITHOUT exploration:")
-    println("  Peak (5,5) samples: $peak1_no / 1000 ($(round(peak1_no/10, digits=1))%)")
-    println("  Peak (1,5) samples: $peak2_no / 1000 ($(round(peak2_no/10, digits=1))%)")
-    println("  Other terminals:    $other_no / 1000")
+    println("  Peak (5,5) samples: $peak1_no / 400 ($(round(peak1_no/4, digits=1))%)")
+    println("  Peak (1,5) samples: $peak2_no / 400 ($(round(peak2_no/4, digits=1))%)")
+    println("  Other terminals:    $other_no / 400")
     println("  Modes discovered: $modes_no / 2")
     if peak2_no <= 10
         println("  → MODE COLLAPSE: Peak (1,5) essentially not sampled!")
     end
     println()
+    # The minority peak (1,5) is EXPECTED to be starved here -- that is the whole
+    # point of the 70:1 demonstration -- so it cannot be asserted on. What can be
+    # asserted is that the majority peak is actually found, which is what proves the
+    # sampler learned the reward landscape at all. Measured 244/400 at this budget;
+    # bar set at 100.
+    assert_modes_discovered([peak1_no], "TB no exploration majority peak";
+                            min_per_mode=100, n_samples=400)
+
 
     # =========================================================================
     # TEST 2: WITH HIGH exploration
@@ -133,8 +150,10 @@ function test_extreme_mode_collapse()
 
     config_with_exp = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 1000,
-        batch_size = 32,
+        # Cut from 1000 / batch 32. Measured at 150 / batch 16: loss falls
+        # 16.212 -> -0.003 (ratio -0.0002), majority peak 270/400.
+        n_iterations = 150,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.2,           # HIGH exploration
@@ -144,12 +163,16 @@ function test_extreme_mode_collapse()
         verbose = false
     )
 
-    print("Training 1000 iterations with exploration... ")
+    print("Training $(config_with_exp.n_iterations) iterations with exploration... ")
     history_with_exp = GFlowNet.train_gflownet(model_with_exp, config_with_exp; verbose=false)
     println("done!")
 
-    print("Sampling 1000 trajectories (pure policy)... ")
-    samples_with_exp = [GFlowNet.sample_trajectory(model_with_exp; config=eval_config) for _ in 1:1000]
+    assert_finite_iterations(history_with_exp, config_with_exp.n_iterations,
+                             "TB high exploration")
+    assert_loss_decreased(history_with_exp, "TB high exploration"; window=10, max_ratio=0.5)
+
+    print("Sampling 400 trajectories (pure policy)... ")
+    samples_with_exp = [GFlowNet.sample_trajectory(model_with_exp; config=eval_config) for _ in 1:400]
     println("done!")
 
     # Count modes
@@ -172,10 +195,14 @@ function test_extreme_mode_collapse()
 
     println()
     println("Results WITH exploration:")
-    println("  Peak (5,5) samples: $peak1_with / 1000 ($(round(peak1_with/10, digits=1))%)")
-    println("  Peak (1,5) samples: $peak2_with / 1000 ($(round(peak2_with/10, digits=1))%)")
-    println("  Other terminals:    $other_with / 1000")
+    println("  Peak (5,5) samples: $peak1_with / 400 ($(round(peak1_with/4, digits=1))%)")
+    println("  Peak (1,5) samples: $peak2_with / 400 ($(round(peak2_with/4, digits=1))%)")
+    println("  Other terminals:    $other_with / 400")
     println("  Modes discovered: $modes_with / 2")
+
+    # Measured 270/400 on the majority peak at this budget; bar set at 100.
+    assert_modes_discovered([peak1_with], "TB high exploration majority peak";
+                            min_per_mode=100, n_samples=400)
 
     # Analyze ratio
     if peak1_with > 10 && peak2_with > 10
@@ -203,8 +230,10 @@ function test_extreme_mode_collapse()
 
     config_extreme = GFlowNet.TrainingConfig(
         objective = GFlowNet.TRAJECTORY_BALANCE,
-        n_iterations = 2000,      # More iterations
-        batch_size = 64,          # Larger batch
+        # Cut from 2000 / batch 64. Measured at 150 / batch 16: loss falls
+        # 14.984 -> -0.043 (ratio -0.0028), majority peak 273/400.
+        n_iterations = 150,
+        batch_size = 16,
         learning_rate = 0.005,
         temperature = 1.0,
         epsilon = 0.4,            # VERY HIGH exploration
@@ -214,12 +243,16 @@ function test_extreme_mode_collapse()
         verbose = false
     )
 
-    print("Training 2000 iterations with extreme exploration... ")
+    print("Training $(config_extreme.n_iterations) iterations with extreme exploration... ")
     history_extreme = GFlowNet.train_gflownet(model_extreme, config_extreme; verbose=false)
     println("done!")
 
-    print("Sampling 1000 trajectories (pure policy)... ")
-    samples_extreme = [GFlowNet.sample_trajectory(model_extreme; config=eval_config) for _ in 1:1000]
+    assert_finite_iterations(history_extreme, config_extreme.n_iterations,
+                             "TB extreme exploration")
+    assert_loss_decreased(history_extreme, "TB extreme exploration"; window=10, max_ratio=0.5)
+
+    print("Sampling 400 trajectories (pure policy)... ")
+    samples_extreme = [GFlowNet.sample_trajectory(model_extreme; config=eval_config) for _ in 1:400]
     println("done!")
 
     # Count modes
@@ -242,10 +275,14 @@ function test_extreme_mode_collapse()
 
     println()
     println("Results with EXTREME exploration:")
-    println("  Peak (5,5) samples: $peak1_ext / 1000 ($(round(peak1_ext/10, digits=1))%)")
-    println("  Peak (1,5) samples: $peak2_ext / 1000 ($(round(peak2_ext/10, digits=1))%)")
-    println("  Other terminals:    $other_ext / 1000")
+    println("  Peak (5,5) samples: $peak1_ext / 400 ($(round(peak1_ext/4, digits=1))%)")
+    println("  Peak (1,5) samples: $peak2_ext / 400 ($(round(peak2_ext/4, digits=1))%)")
+    println("  Other terminals:    $other_ext / 400")
     println("  Modes discovered: $modes_ext / 2")
+
+    # Measured 273/400 on the majority peak at this budget; bar set at 100.
+    assert_modes_discovered([peak1_ext], "TB extreme exploration majority peak";
+                            min_per_mode=100, n_samples=400)
 
     if peak1_ext > 10 && peak2_ext > 10
         actual_ratio = peak1_ext / peak2_ext

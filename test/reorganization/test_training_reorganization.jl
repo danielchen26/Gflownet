@@ -112,11 +112,19 @@ println("\n🔧 Testing Training Code Reorganization...")
             println("    Testing $obj_name...")
             
             # Create appropriate model
+            # Each objective gets the components ITS loss branch dereferences, taken
+            # from the declarative table rather than guessed: DB needs a backward
+            # policy, FM needs a flow estimator. Building one model shape for all
+            # three meant FLOW_MATCHING trained with no F at all, which
+            # validate_training_config now refuses -- correctly, since there is
+            # nothing for it to optimise.
             include_backward = (objective == DETAILED_BALANCE)
+            include_flow = (objective == FLOW_MATCHING)
             model = create_grid_world_gflownet(
                 grid_size = 3,
                 hidden_dim = 16,
-                include_backward = include_backward
+                include_backward = include_backward,
+                include_flow_estimator = include_flow
             )
             
             config = TrainingConfig(
