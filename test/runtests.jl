@@ -26,6 +26,24 @@ test_groups = [
         "theory/test_reward_proportionality.jl",
         "theory/test_objective_health.jl"
     ]),
+
+    # SAMPLING ACCURACY -- the strongest check in the repo, and deliberately its own
+    # group because it is the slow one. It trains all five objectives to convergence
+    # and compares the empirical terminal distribution against R(x)/Z by exact
+    # enumeration.
+    #
+    # Kept separate from the group above because the two answer different questions.
+    # test_objective_health.jl asks whether each objective CAN learn: live gradients,
+    # loss responds to reward. This asks whether it learns the RIGHT THING. The
+    # distinction is not academic -- SUB_TRAJECTORY_BALANCE passed every health check
+    # (all component gradients live, loss moved 3.09 under a 100x reward change) while
+    # sampling one terminal state with probability 1.000, TV 0.9474 from the target.
+    # Only enumeration catches a wrong fixed point.
+    #
+    # Set GFLOWNET_SKIP_SLOW=true to omit it when iterating locally.
+    ("Sampling Accuracy", [
+        "theory/test_samples_proportional_to_reward.jl"
+    ]),
     ("Neural Networks", [
         "core/neural_networks/test_neural_networks.jl"
     ]),
@@ -107,6 +125,20 @@ test_groups = [
         "visualization/test_real_training_viz.jl"
     ]),
 ]
+
+# Groups that train to convergence and therefore cost minutes rather than seconds.
+# Omitted when GFLOWNET_SKIP_SLOW=true so local iteration stays quick. This is a real
+# switch, not a documented intention: the filter below actually applies it, and the
+# suite prints which groups were skipped so a fast run cannot be mistaken for a full
+# one.
+const SLOW_GROUPS = Set(["Sampling Accuracy"])
+const SKIP_SLOW = get(ENV, "GFLOWNET_SKIP_SLOW", "false") == "true"
+
+if SKIP_SLOW
+    skipped = [name for (name, _) in test_groups if name in SLOW_GROUPS]
+    test_groups = [(name, files) for (name, files) in test_groups if !(name in SLOW_GROUPS)]
+    @warn "GFLOWNET_SKIP_SLOW=true -- convergence groups NOT RUN" skipped
+end
 
 # Optional debugging tests (not run by default)
 debugging_tests = [
