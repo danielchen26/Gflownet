@@ -25,7 +25,9 @@ include(joinpath(@__DIR__, "test_setup.jl"))
         @test model isa GFlowNetModel
     end
 
-    if @isdefined(RDKitBridge)
+    # Was `@isdefined(RDKitBridge)`; RDKIT_AVAILABLE is the single gate from
+    # test/fixtures/molecular.jl.
+    if RDKIT_AVAILABLE
         @testset "trajectory sampling" begin
             model = create_molecular_gflownet(rng=Random.MersenneTwister(42))
             traj = GFlowNet.sample_trajectory(model)
@@ -36,8 +38,8 @@ include(joinpath(@__DIR__, "test_setup.jl"))
             @test GFlowNet.is_terminal_state(traj.states[end])
         end
     else
-        @info "Skipping trajectory sampling test (RDKitBridge not loaded)"
-        @test_skip "RDKit not available"
+        @warn "Molecular trajectory-sampling assertions SKIPPED" reason = rdkit_reason()
+        @test_skip "trajectory sampling requires RDKit"
     end
 
     @testset "state equality and hashing" begin

@@ -127,8 +127,10 @@ include(joinpath(@__DIR__, "test_setup.jl"))
         @test !isnothing(model.z_network)
     end
 
-    # Trajectory sampling and reward tests require RDKit
-    if @isdefined(RDKitBridge)
+    # Trajectory sampling and reward tests require RDKit. This used to read
+    # `@isdefined(RDKitBridge)` -- the third guard idiom for one condition, and
+    # the one test/fixtures/molecular.jl exists to replace.
+    if RDKIT_AVAILABLE
         @testset "MOGFN backward compatibility" begin
             rng = Random.MersenneTwister(42)
             model = create_molecular_gflownet(rng=rng)
@@ -158,28 +160,30 @@ include(joinpath(@__DIR__, "test_setup.jl"))
         @testset "scalarized reward with preference vectors" begin
             state = MolState("c1ccccc1", Int[], 1, true, zeros(Float32, 1024))
             objs = compute_all_objectives(state)
-            if !isempty(objs)
-                for i in 1:4
-                    w = zeros(4)
-                    w[i] = 1.0
-                    r = GFlowNet.reward(state, w)
-                    @test r ≈ objs[i] atol=1e-4
-                end
-                w = [0.5, 0.3, 0.1, 0.1]
+            # Was `if !isempty(objs)` around the whole body, so an empty
+            # objective vector would have deleted every assertion here silently.
+            @test length(objs) >= 4
+
+            for i in 1:4
+                w = zeros(4)
+                w[i] = 1.0
                 r = GFlowNet.reward(state, w)
-                expected = sum(w .* objs)
-                @test r ≈ expected atol=1e-4
-                for _ in 1:10
-                    w = sample_preference(4)
-                    r = GFlowNet.reward(state, w)
-                    @test r > 0.0
-                    @test isfinite(r)
-                end
+                @test r ≈ objs[i] atol=1e-4
+            end
+            w = [0.5, 0.3, 0.1, 0.1]
+            r = GFlowNet.reward(state, w)
+            expected = sum(w .* objs[1:4])
+            @test r ≈ expected atol=1e-4
+            for _ in 1:10
+                w = sample_preference(4)
+                r = GFlowNet.reward(state, w)
+                @test r > 0.0
+                @test isfinite(r)
             end
         end
     else
-        @info "Skipping RDKit-dependent MOGFN tests (trajectory sampling and reward)"
-        @test_skip "RDKit not available for trajectory/reward tests"
+        @warn "MOGFN trajectory-sampling and reward assertions SKIPPED" reason = rdkit_reason()
+        @test_skip "MOGFN trajectory/reward assertions require RDKit"
     end
 
     @testset "MULTI_OBJECTIVE_TB enum exists" begin
@@ -233,35 +237,34 @@ include(joinpath(@__DIR__, "test_setup.jl"))
         @test isnothing(standard.z_network)
     end
 
-    @testset "_sample_gamma edge cases" begin
-        # _sample_gamma is a private function; skip if not accessible
-        if !isdefined(GFlowNet, :_sample_gamma)
-            @test_skip "_sample_gamma not exported (private function)"
-        else
-            try
-                # alpha = 1.0 should use exponential sampling
-                for _ in 1:20
-                    g = GFlowNet._sample_gamma(1.0)
-                    @test g > 0.0
-                    @test isfinite(g)
-                end
+    @testset "gamma samplers for non-unit Dirichlet" begin
+        # Both live gamma samplers, checked by name. The old version of this
+        # testset asked `isdefined(GFlowNet, :_sample_gamma)` -- which is false,
+        # because _sample_gamma is defined in
+        # src/applications/molecular_generation.jl:710 and loaded into Main by
+        # test_setup.jl, not into the GFlowNet module -- and so skipped forever.
+        # It then wrapped the assertions in a bare try/catch that turned any
+        # failure into another skip.
+        #
+        # GFlowNet._mogfn_sample_gamma (src/training/losses.jl:1024) is the
+        # second, independent copy used inside the MOGFN loss. Both are checked
+        # here so the pair cannot drift.
+        # Seeded: both samplers draw from the global RNG, and the mean check
+        # below is a 4-sigma bound -- deterministic beats a 1-in-2600 flake.
+        Random.seed!(20260828)
 
-                # alpha < 1.0 (uses Ahrens-Dieter method)
-                for _ in 1:20
-                    g = GFlowNet._sample_gamma(0.5)
-                    @test g > 0.0
-                    @test isfinite(g)
-                end
-
-                # alpha > 1.0 (Marsaglia & Tsang)
-                for _ in 1:20
-                    g = GFlowNet._sample_gamma(2.5)
-                    @test g > 0.0
-                    @test isfinite(g)
-                end
-            catch e
-                @warn "Skipping _sample_gamma tests: $e"
-                @test_skip "GFlowNet._sample_gamma not accessible"
+        for sampler in (_sample_gamma, GFlowNet._mogfn_sample_gamma)
+            # alpha = 1.0: Gamma(1,1) = Exponential(1)
+            # alpha < 1.0: Gamma(a) = Gamma(a+1) * U^(1/a) boost
+            # alpha > 1.0: Marsaglia & Tsang squeeze
+            for alpha in (1.0, 0.5, 2.5)
+                draws = [sampler(alpha) for _ in 1:200]
+                @test all(>(0.0), draws)
+                @test all(isfinite, draws)
+                # Gamma(alpha, 1) has mean alpha. 200 draws put the standard
+                # error at sqrt(alpha/200), so 4 s.e. is a loose but non-vacuous
+                # bound that a wrong-shape sampler fails.
+                @test abs(Statistics.mean(draws) - alpha) < 4 * sqrt(alpha / 200)
             end
         end
     end

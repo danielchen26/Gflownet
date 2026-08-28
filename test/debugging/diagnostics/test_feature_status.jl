@@ -1,207 +1,153 @@
-# Test to Document Working vs Broken Features
-# This test explicitly shows what works and what doesn't in GFlowNet.jl
+# Feature-status regression test.
+#
+# HISTORY, and the reason this file is now the inverse of what it was: it used to
+# be titled "Working vs Broken Features Documentation" and asserted that
+# DETAILED_BALANCE training, FLOW_MATCHING training, flow(),
+# compute_recursive_flow(), partition_function(), validate_flow_conservation()
+# and the DAG helpers get_next_states()/get_previous_states()/get_root_state()
+# were all BROKEN. Two of those claims were `@test_broken`, the rest were
+# `@test_throws UndefVarError`, and it closed with a 70-line println telling
+# readers to "stick to TRAJECTORY_BALANCE".
+#
+# Every one of those claims is false as of 2026-08-28 on Julia 1.11.6. Observed:
+# DETAILED_BALANCE and FLOW_MATCHING both train to completion with finite
+# losses; flow/partition_function/compute_recursive_flow return 19.0 for the 3x3
+# grid (the enumerated Z that test/theory/test_reward_proportionality.jl pins);
+# validate_flow_conservation returns true; all three DAG helpers are defined in
+# src/core/graphs.jl and work when handed the model itself. `@test_broken
+# train_gflownet(...)` even reported "Expression evaluated to non-Boolean"
+# because train_gflownet returns a TrainingHistory -- the marker was structurally
+# incapable of ever passing OR failing usefully.
+#
+# So the file now pins the capabilities the repair delivered. A regression to the
+# old broken state fails here instead of being documented as normal.
 
 using Test
 using GFlowNet
 
-@testset "Working vs Broken Features Documentation" begin
-    
-    @testset "Working Features (Safe to Use)" begin
-        # Create a simple model
-        model = create_grid_world_gflownet(
-            grid_size=3,
-            reward_positions=Dict((3,3) => 10.0),
-            hidden_dim=16
-        )
-        
-        @testset "Trajectory Balance Training (WORKS)" begin
-            # This is what examples use - it works perfectly
+@testset "Feature Status" begin
+
+    @testset "objectives that used to be documented as broken" begin
+        # A model with backward policy and flow estimator: the configuration
+        # DETAILED_BALANCE and FLOW_MATCHING actually need.
+        for objective in (TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING)
+            model = create_grid_world_gflownet(
+                grid_size=3,
+                reward_positions=Dict((3, 3) => 10.0),
+                hidden_dim=16,
+                include_backward=true,
+                include_flow_estimator=true
+            )
             config = TrainingConfig(
-                objective=TRAJECTORY_BALANCE,  # ✅ This works
+                objective=objective,
                 n_iterations=5,
                 batch_size=4,
                 learning_rate=0.01
             )
-            
-            # Training works fine
-            @test_nowarn history = train_gflownet(model, config; verbose=false)
-            
-            # Sampling works fine
-            @test_nowarn trajectory = sample_trajectory(model)
-            
-            # The trajectory balance loss computation only needs:
-            # - forward_probability() ✅
-            # - get_applicable_actions() ✅
-            # - apply_action() ✅
-            # - reward() ✅
-            # It does NOT need flow(), get_next_states(), etc.
-        end
-        
-        @testset "Core Interface Functions (WORK)" begin
-            state = GridState(2, 2, false)
-            
-            # These all work correctly
-            @test length(state_to_features(state)) == 3
-            @test !is_terminal_state(state)
-            @test is_applicable(MoveRight(), state)
-            
-            new_state = apply_action(MoveRight(), state)
-            @test new_state.x == 3
-            
-            # On-demand computation works
-            actions = get_applicable_actions(state, model.all_actions)
-            @test length(actions) > 0
+
+            history = train_gflownet(model, config; verbose=false)
+
+            @test history isa GFlowNet.TrainingHistory
+            @test length(history.losses) == 5
+            @test all(isfinite, history.losses)
+            @test all(>=(0.0), history.losses)
+            # A silently-dead objective produces a constant loss and zero
+            # gradients; both would slip past an isfinite check alone.
+            @test all(isfinite, history.gradient_norms)
+            @test any(>(0.0), history.gradient_norms)
         end
     end
-    
-    @testset "Broken Features (Will Cause Errors)" begin
-        model = create_grid_world_gflownet(grid_size=3, hidden_dim=16)
+
+    @testset "core interface functions" begin
+        model = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=16
+        )
         state = GridState(2, 2, false)
-        
-        @testset "Detailed Balance Training (BROKEN)" begin
-            # This would fail because model has no backward_policy field
-            config = TrainingConfig(
-                objective=DETAILED_BALANCE,  # ❌ This is broken
-                n_iterations=5,
-                batch_size=4
-            )
-            
-            # This would throw an error about missing backward_policy
-            @test_broken train_gflownet(model, config; verbose=false)
-        end
-        
-        @testset "Flow Matching Training (BROKEN)" begin
-            # This would fail because flow_matching_loss calls get_next_states()
-            config = TrainingConfig(
-                objective=FLOW_MATCHING,  # ❌ This is broken
-                n_iterations=5,
-                batch_size=4
-            )
-            
-            # This would throw UndefVarError: get_next_states not defined
-            @test_broken train_gflownet(model, config; verbose=false)
-        end
-        
-        @testset "Flow Computation (BROKEN)" begin
-            # These functions exist but call non-existent get_next_states()
-            @test_throws UndefVarError flow(model, state)
-            @test_throws UndefVarError compute_recursive_flow(model, state)
-            @test_throws UndefVarError partition_function(model)
-            @test_throws UndefVarError validate_flow_conservation(model, state)
-        end
-        
-        @testset "Missing DAG Functions (DON'T EXIST)" begin
-            # These functions are called but never defined
-            @test_throws UndefVarError get_next_states(model.dag, state)
-            @test_throws UndefVarError get_previous_states(model.dag, state)
-            @test_throws UndefVarError get_root_state(model.dag)
-        end
-        
-        @testset "Model Fields (DON'T EXIST)" begin
-            # Model doesn't have these fields
-            @test !hasproperty(model, :backward_policy)
-            @test !hasproperty(model, :state_dim)
-            @test !hasproperty(model, :dag)  # No explicit DAG object
-        end
+
+        @test length(state_to_features(state)) == 3
+        @test !is_terminal_state(state)
+        @test is_applicable(MoveRight(), state)
+
+        new_state = apply_action(MoveRight(), state)
+        @test new_state.x == 3
+
+        # On-demand action enumeration
+        actions = get_applicable_actions(state, model.all_actions)
+        @test length(actions) > 0
+        @test all(a -> is_applicable(a, state), actions)
     end
-    
-    @testset "Why Examples Work" begin
-        # Document the exact code path that makes examples work
-        
-        @testset "Trajectory Balance Loss Implementation" begin
-            # The loss is computed in compute_single_trajectory_loss()
-            # It only computes:
-            # 1. Sum of log P_F(a|s) for each action in trajectory
-            # 2. Log reward of terminal state
-            # 3. Loss = (log_prob_sum - log_reward)²
-            
-            # No flow computation needed!
-            # No backward policy needed!
-            # No DAG traversal needed!
-            
-            @test true  # This is documentation
-        end
-        
-        @testset "On-Demand Architecture Success" begin
-            # Working functions use:
-            # - get_applicable_actions() instead of get_next_states()
-            # - apply_action() for state transitions
-            # - Simple forward sampling
-            
-            # This avoids all the broken DAG infrastructure
-            @test true  # This is documentation
-        end
+
+    @testset "flow computation" begin
+        model = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=16,
+            include_backward=true,
+            include_flow_estimator=true
+        )
+        s0 = model.initial_state
+
+        # These enumerate the DAG, so they do not depend on the (untrained)
+        # weights: F(s_0) == Z, and Z == 19 exactly for this grid.
+        @test flow(model, s0) ≈ 19.0 atol=1e-6
+        @test partition_function(model) ≈ flow(model, s0)
+        @test compute_recursive_flow(model, s0) ≈ flow(model, s0)
+        @test validate_flow_conservation(model, s0)
+
+        # Downstream flow must be strictly smaller than the total.
+        @test 0.0 < flow(model, GridState(2, 2, false)) < flow(model, s0)
+    end
+
+    @testset "DAG helpers" begin
+        model = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=16
+        )
+        state = GridState(2, 2, false)
+
+        # The `dag` argument is duck-typed: anything with `all_actions` and
+        # `initial_state`, i.e. the model (src/core/graphs.jl:217-224).
+        nexts = GFlowNet.get_next_states(model, state)
+        @test GridState(3, 2, false) in nexts
+        @test GridState(2, 3, false) in nexts
+        @test GridState(2, 2, true) in nexts
+
+        prevs = GFlowNet.get_previous_states(model, state)
+        @test GridState(1, 2, false) in prevs
+        @test GridState(2, 1, false) in prevs
+        @test !(state in prevs)  # no self-loops
+
+        @test GFlowNet.get_root_state(model) == model.initial_state
+
+        # Contract: a non-model DAG argument is rejected, not silently accepted.
+        @test_throws ArgumentError GFlowNet.get_previous_states(model.all_actions, state)
+    end
+
+    @testset "model fields" begin
+        model = create_grid_world_gflownet(grid_size=3, hidden_dim=16)
+
+        # backward_policy and flow_estimator ARE fields; they hold `nothing`
+        # unless requested. The old test asserted the fields did not exist.
+        @test hasproperty(model, :backward_policy)
+        @test hasproperty(model, :flow_estimator)
+        @test isnothing(model.backward_policy)
+        @test isnothing(model.flow_estimator)
+
+        equipped = create_grid_world_gflownet(
+            grid_size=3,
+            hidden_dim=16,
+            include_backward=true,
+            include_flow_estimator=true
+        )
+        @test !isnothing(equipped.backward_policy)
+        @test !isnothing(equipped.flow_estimator)
+        @test keys(equipped.parameters) == (:forward, :backward, :flow)
+
+        # Still true: there is no explicit DAG object and no stored state_dim.
+        @test !hasproperty(model, :dag)
+        @test !hasproperty(model, :state_dim)
     end
 end
-
-println("""
-
-=== COMPREHENSIVE ANALYSIS: Why Grid World Example Works ===
-
-The grid world example (and other examples) work perfectly because they use 
-a specific subset of GFlowNet functionality that has been successfully 
-migrated to the new architecture.
-
-1. TRAJECTORY BALANCE IS SELF-CONTAINED
-   
-   The loss computation in compute_single_trajectory_loss() only needs:
-   - log_prob_sum = Σ log P_F(action_i | state_i)  [Forward policy]
-   - log_reward = log(reward(terminal_state))       [Reward function]
-   - loss = (log_prob_sum - log_reward)²           [Simple MSE]
-   
-   This enforces P_F(τ) ∝ R(s_T) without needing flow computation!
-
-2. THE WORKING CODE PATH
-   
-   Training with TRAJECTORY_BALANCE uses:
-   ✅ forward_probability() - Works perfectly
-   ✅ get_applicable_actions() - On-demand computation
-   ✅ apply_action() - Pure state transitions
-   ✅ sample_forward_action() - Forward sampling
-   ✅ reward() - Terminal rewards
-   
-   It completely avoids:
-   ❌ flow() - Would call non-existent get_next_states()
-   ❌ backward_policy - Model doesn't have this field
-   ❌ partition_function() - Would call non-existent get_root_state()
-   ❌ detailed_balance_loss() - Needs backward_policy
-   ❌ flow_matching_loss() - Needs get_next_states()
-
-3. TWO PARALLEL ARCHITECTURES
-   
-   OLD (Broken):
-   - Explicit DAG: DirectedAcyclicGraph objects
-   - Functions: get_next_states(), get_previous_states(), get_root_state()
-   - Status: Called but never implemented
-   
-   NEW (Working):
-   - On-demand: No explicit DAG construction
-   - Functions: get_applicable_actions(), apply_action()
-   - Status: Fully implemented and used by examples
-
-4. WHY NO ERRORS IN EXAMPLES
-   
-   The examples specifically use:
-   config = TrainingConfig(
-       objective=TRAJECTORY_BALANCE,  # ← This is why it works!
-       partition_function_method=SIMPLE_ESTIMATION,  # ← Not actually used
-       n_iterations=50
-   )
-   
-   If they used:
-   objective=DETAILED_BALANCE  # ← Would fail immediately
-   objective=FLOW_MATCHING     # ← Would fail immediately
-
-5. MATHEMATICAL INSIGHT
-   
-   Trajectory Balance is a complete training objective by itself:
-   - It learns P_F(τ) ∝ R(s_T) directly
-   - No explicit flow computation needed
-   - No backward policy needed
-   - This is why GFlowNet training still works!
-
-CONCLUSION: The core training loop has been successfully modernized to 
-on-demand computation, but advanced mathematical features (flow computation, 
-detailed balance) haven't been migrated yet. Users can train GFlowNets 
-successfully as long as they stick to TRAJECTORY_BALANCE objective.
-""")

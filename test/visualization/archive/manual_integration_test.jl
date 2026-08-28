@@ -15,15 +15,19 @@ println()
 # Test loading core modules
 println("Step 2: Loading visualization core modules...")
 println("  Loading adapters.jl...")
-include("../../src/utils/visualization/core/adapters.jl")
+# ../../ was correct while this file sat in test/visualization/. The Feb 3 2026
+# move into archive/ added a directory level, so ../../src resolved to test/src
+# and every run died with SystemError: opening file ".../test/src/utils/
+# visualization/core/adapters.jl". Now ../../../src, i.e. the repo root.
+include("../../../src/utils/visualization/core/adapters.jl")
 println("  ✓ adapters.jl loaded")
 
 println("  Loading metrics.jl...")
-include("../../src/utils/visualization/core/metrics.jl")
+include("../../../src/utils/visualization/core/metrics.jl")
 println("  ✓ metrics.jl loaded")
 
 println("  Loading domains/grid_world.jl...")
-include("../../src/utils/visualization/domains/grid_world.jl")
+include("../../../src/utils/visualization/domains/grid_world.jl")
 println("  ✓ grid_world.jl loaded")
 
 println("  Loading training_session.jl...")
@@ -56,7 +60,7 @@ function create_model_and_adapter(domain_type::String, config::Dict)
     return model, adapter
 end
 
-include("../../src/utils/visualization/core/training_session.jl")
+include("../../../src/utils/visualization/core/training_session.jl")
 println("  ✓ training_session.jl loaded")
 println()
 
@@ -211,17 +215,20 @@ empty_metrics = compute_gflownet_metrics(model, GFlowNet.Trajectory[])
 println("✓ Error handling works correctly")
 println()
 
-# Final summary
+# Final summary.
+#
+# This used to print "ALL MANUAL TESTS PASSED! ✅" and "Implementation is VERIFIED
+# and PRODUCTION-READY! 🎉". This file contains no `using Test`, no `@testset` and
+# no `@test`: nothing here can fail a check, because there are no checks. The
+# banner asserted a verdict it had no evidence for, which is precisely the
+# silent-pass pattern this repo has been removing. Reaching this line proves only
+# that no statement above threw.
 println("="^70)
-println("ALL MANUAL TESTS PASSED! ✅")
+println("Script ran to completion — no statement above threw.")
 println("="^70)
 println()
-println("Summary:")
-println("  ✓ All modules load correctly")
-println("  ✓ Adapter interface fully functional")
-println("  ✓ Training session creation works")
-println("  ✓ Real training steps execute successfully")
-println("  ✓ Metrics computation accurate")
-println("  ✓ Error handling robust")
-println()
-println("Implementation is VERIFIED and PRODUCTION-READY! 🎉")
+println("What that does and does not tell you:")
+println("  - Exercised without throwing: module loading, the adapter interface,")
+println("    session creation, real training steps, metrics, the error path.")
+println("  - NOT verified: any actual value. This script asserts nothing.")
+println("    For assertions, run ../test_real_training_viz.jl (193 of them).")

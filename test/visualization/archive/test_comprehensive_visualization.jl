@@ -1,4 +1,26 @@
-# Comprehensive Test for GFlowNet Visualization System
+# DEAD TEST — targets a visualization API that no longer exists. Do not trust it,
+# do not wire it into runtests.jl, and do not "fix" it without deciding first
+# whether the subsystem it tests is coming back.
+#
+# Measured 2026-08-28:
+#   julia --project=. -e 'using Test, GFlowNet; include(...)'
+#   -> Test Summary: GFlowNet Visualization System Tests | Error 1, Total 1, 1.4s
+#      "Some tests did not pass: 0 passed, 0 failed, 1 errored, 0 broken."
+#
+# It errors on the very first statement, line 19 below:
+# `create_grid_world_gflownet(; target_states, target_rewards, include_backward)`
+# destructured into `(gflownet, grid_size)`. The current signature
+# (src/applications/grid_world.jl:238-243) takes `reward_positions::Dict` and has
+# no `target_states`, `target_rewards`, or `include_backward` kwarg, and returns
+# one model rather than a tuple.
+#
+# Every symbol the rest of the file exercises is also gone: a repo-wide grep for
+# GFlowNetVisualizer, set_gflownet_theme!, TrainingMonitor, get_color_palette and
+# export_figure finds no definition anywhere under src/. This was the Makie-based
+# visualization layer, which the Oxygen/JS dashboard under
+# src/utils/visualization/ replaced.
+#
+# Original header: Comprehensive Test for GFlowNet Visualization System
 # Tests all visualization features to ensure they work correctly
 
 using Test
@@ -53,7 +75,13 @@ Random.seed!(42)
     @testset "Core Infrastructure Tests" begin
         println("\n🏗️ Testing Core Infrastructure...")
         
-        # Test visualizer creation with different backends
+        # Test visualizer creation with different backends.
+        # The catch below used to swallow every exception and only println a
+        # warning, so if all three backends failed to construct, this testset ran
+        # ZERO assertions and still reported green. `working_backends` makes that
+        # impossible: an unavailable backend now WARNS with the concrete reason,
+        # and the run still fails if none of them worked.
+        working_backends = Symbol[]
         for backend in [:wgl, :gl, :cairo]
             try
                 viz = GFlowNetVisualizer(
@@ -64,7 +92,7 @@ Random.seed!(42)
                     auto_export = false
                 )
                 println("  ✓ Created visualizer with $backend backend")
-                
+
                 # Test observable updates
                 @test_nowarn update!(viz, Dict(
                     :loss => 1.0,
@@ -72,15 +100,17 @@ Random.seed!(42)
                     :gradient_norm => 0.5,
                     :iteration => 1
                 ))
-                
+
                 @test length(viz.loss_history[]) == 1
                 @test viz.loss_history[][1] == 1.0
                 @test viz.current_iteration[] == 1
-                
+                push!(working_backends, backend)
+
             catch e
-                println("  ⚠️  Backend $backend not available: $(typeof(e))")
+                @warn "Backend $backend unavailable — its assertions did NOT run" backend exception=(e, catch_backtrace())
             end
         end
+        @test !isempty(working_backends)
         
         # Test export functionality
         viz = GFlowNetVisualizer(backend = :cairo)  # Cairo for headless testing

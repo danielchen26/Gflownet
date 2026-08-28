@@ -5,13 +5,16 @@ using Test
 
 include(joinpath(@__DIR__, "test_setup.jl"))
 
-const _rdkit_avail_reward = @isdefined(RDKitBridge)
+# Was `@isdefined(RDKitBridge)` -- one of the three competing guard idioms that
+# test/fixtures/molecular.jl was written to replace.
+const _rdkit_avail_reward = RDKIT_AVAILABLE
 
 @testset "Reward Function" begin
 
     if !_rdkit_avail_reward
-        @info "Skipping reward function tests (RDKitBridge not loaded — reward() requires RDKit)"
-        @test_skip "RDKit not available"
+        @warn "ENTIRE reward-function suite SKIPPED -- reward(::MolState) calls \
+               RDKitBridge.compute_mol_properties" reason = rdkit_reason()
+        @test_skip "reward(::MolState) requires RDKit"
     else
         @testset "single-objective reward basics" begin
             state = MolState("c1ccccc1", Int[], 1, false, zeros(Float32, 1024))
@@ -39,47 +42,53 @@ const _rdkit_avail_reward = @isdefined(RDKitBridge)
             end
         end
 
+        # The three testsets below used to wrap their whole body in
+        # `if !isempty(objs)`, so an empty objective vector would have made them
+        # pass with zero assertions -- silently deleting the multi-objective
+        # dispatch, backward-compatibility and normalization checks. objs is
+        # asserted non-empty instead; "compute_all_objectives" above already
+        # pins length(objs) == 4.
         @testset "multi-objective reward dispatch" begin
             state = MolState("c1ccccc1", Int[], 1, true, zeros(Float32, 1024))
             objs = compute_all_objectives(state)
-            if !isempty(objs)
-                w_equal = [0.25, 0.25, 0.25, 0.25]
-                r_equal = GFlowNet.reward(state, w_equal)
-                @test r_equal > 0.0
-                @test isfinite(r_equal)
+            @test length(objs) >= 4
 
-                w_qed = [1.0, 0.0, 0.0, 0.0]
-                r_qed = GFlowNet.reward(state, w_qed)
-                @test r_qed ≈ objs[1] atol=1e-4
+            w_equal = [0.25, 0.25, 0.25, 0.25]
+            r_equal = GFlowNet.reward(state, w_equal)
+            @test r_equal > 0.0
+            @test isfinite(r_equal)
 
-                w_sa = [0.0, 1.0, 0.0, 0.0]
-                r_sa = GFlowNet.reward(state, w_sa)
-                @test r_sa ≈ objs[2] atol=1e-4
-            end
+            w_qed = [1.0, 0.0, 0.0, 0.0]
+            r_qed = GFlowNet.reward(state, w_qed)
+            @test r_qed ≈ objs[1] atol=1e-4
+
+            w_sa = [0.0, 1.0, 0.0, 0.0]
+            r_sa = GFlowNet.reward(state, w_sa)
+            @test r_sa ≈ objs[2] atol=1e-4
         end
 
         @testset "reward backward compatibility" begin
             state = MolState("c1ccccc1", Int[], 1, true, zeros(Float32, 1024))
             r_single = GFlowNet.reward(state)
             objs = compute_all_objectives(state)
-            if !isempty(objs)
-                expected = (objs[1]^0.4) * (objs[2]^0.3) * (objs[3]^0.2) * (objs[4]^0.1)
-                expected = max(expected, 1e-4)
-                @test r_single ≈ expected atol=1e-6
-                r_multi = GFlowNet.reward(state, [0.4, 0.3, 0.2, 0.1])
-                @test r_multi > 0.0
-            end
+            @test length(objs) >= 4
+
+            expected = (objs[1]^0.4) * (objs[2]^0.3) * (objs[3]^0.2) * (objs[4]^0.1)
+            expected = max(expected, 1e-4)
+            @test r_single ≈ expected atol=1e-6
+            r_multi = GFlowNet.reward(state, [0.4, 0.3, 0.2, 0.1])
+            @test r_multi > 0.0
         end
 
         @testset "objective normalization ranges" begin
             aspirin_state = MolState("CC(=O)Oc1ccccc1C(=O)O", Int[], 3, true, zeros(Float32, 1024))
             objs = compute_all_objectives(aspirin_state)
-            if !isempty(objs)
-                @test 0.0 < objs[1] < 1.0
-                @test objs[2] > 0.3
-                @test 0.0 < objs[3] <= 1.0
-                @test 0.0 < objs[4] <= 1.0
-            end
+            @test length(objs) >= 4
+
+            @test 0.0 < objs[1] < 1.0
+            @test objs[2] > 0.3
+            @test 0.0 < objs[3] <= 1.0
+            @test 0.0 < objs[4] <= 1.0
         end
     end
 end

@@ -8,13 +8,23 @@ include(joinpath(@__DIR__, "test_setup.jl"))
 # RDKit availability comes from the single gate in test/fixtures/molecular.jl
 # (loaded by test_setup.jl above), which also logs WHY it is unavailable.
 # Previously this read `isdefined(Main, :RDKitBridge)` while sibling files used
-# `@isdefined(RDKitBridge)` — three idioms for one condition.
-const _rdkit_available = RDKIT_AVAILABLE
+# `@isdefined(RDKitBridge)` — three idioms for one condition. The name is
+# file-local because test_docking.jl defines its own; both used to write
+# `const _rdkit_available` into Main.
+const _rdkit_avail_diversity = RDKIT_AVAILABLE
+
+# All ten testsets below are RDKit-only: every one of them calls into
+# RDKitBridge (compute_tanimoto_matrix, compute_diversity_stats,
+# compute_scaffold_diversity, find_nearest_neighbors). Say so once, loudly --
+# ten bare @test_skips report "Broken" and explain nothing.
+if !_rdkit_avail_diversity
+    @warn "ALL 10 diversity/scaffold testsets SKIPPED" reason = rdkit_reason()
+end
 
 @testset "Tanimoto Diversity Metrics" begin
 
     @testset "Tanimoto matrix — identical fingerprints" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             # Identical fingerprints should have Tanimoto = 1.0
@@ -37,7 +47,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "Tanimoto matrix — orthogonal fingerprints" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             # Non-overlapping fingerprints should have Tanimoto = 0.0
@@ -55,7 +65,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "Tanimoto matrix — symmetry" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             fp1 = Float32[1, 0, 1, 1, 0, 0, 1, 0]
@@ -71,7 +81,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "Tanimoto matrix — empty input" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             sim_matrix = RDKitBridge.compute_tanimoto_matrix(Vector{Float32}[])
@@ -80,7 +90,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "diversity_stats — diverse set" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             # Create diverse fingerprints
@@ -106,7 +116,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "diversity_stats — identical set" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             fp = Float32[1, 1, 1, 0, 0, 0, 0, 0]
@@ -121,7 +131,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "diversity_stats — single molecule" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             fp = Float32[1, 0, 1, 0]
@@ -134,7 +144,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "scaffold diversity — known molecules" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             # Benzene and naphthalene have different scaffolds
@@ -153,7 +163,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "scaffold diversity — empty input" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             scaffold_stats = RDKitBridge.compute_scaffold_diversity(String[])
@@ -163,7 +173,7 @@ const _rdkit_available = RDKIT_AVAILABLE
     end
 
     @testset "nearest neighbors" begin
-        if !_rdkit_available
+        if !_rdkit_avail_diversity
             @test_skip "RDKitBridge not available"
         else
             fp1 = Float32[1, 1, 0, 0, 0, 0, 0, 0]

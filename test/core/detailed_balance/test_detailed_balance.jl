@@ -192,16 +192,15 @@ using Random
         println("TB losses: $(history_tb.losses)")
         println("DB losses: $(history_db.losses)")
         
-        # Both should produce valid training histories
-        @test !all(isnan, history_tb.losses)
-        valid_db_losses = filter(!isnan, history_db.losses)
-        @test !isempty(valid_db_losses)  # At least one valid loss
-        
-        # If we have valid losses, they should be different
-        if !isempty(valid_db_losses) && !all(isnan, history_tb.losses)
-            # Compare only the valid losses
-            @test !isapprox(valid_db_losses[1], history_tb.losses[1], rtol=0.1)
-        end
+        # No NaN filtering and no guard: lines 196-198 already asserted both
+        # halves of the old `if !isempty(valid_db_losses) && !all(isnan, ...)`
+        # condition, so the guard could only ever hide the comparison below.
+        @test all(isfinite, history_tb.losses)
+        @test all(isfinite, history_db.losses)
+
+        # The two objectives are different functions of the same parameters, so
+        # their first losses must differ by more than 10%.
+        @test !isapprox(history_db.losses[1], history_tb.losses[1], rtol=0.1)
     end
 end
 

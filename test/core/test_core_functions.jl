@@ -328,20 +328,64 @@ using Optimisers
     end
     
     @testset "Backward Policy Functions" begin
-        model = create_grid_world_gflownet(grid_size=3, hidden_dim=8)
+        # This used to build a model WITHOUT a backward policy and then guard its
+        # single assertion with `!isnothing(model.backward_policy)`, so the
+        # testset was empty on every run. Build the model that actually has one.
+        model = create_grid_world_gflownet(grid_size=3, hidden_dim=8,
+                                           include_backward=true)
         state = GridState(2, 2, false)
         next_state = GridState(3, 2, false)
-        
-        @testset "backward_probability" begin
-            # For grid world without backward policy, this might not be implemented
-            # But let's test if the function exists and can be called
-            if isdefined(model, :backward_policy) && !isnothing(model.backward_policy)
-                prob = GFlowNet.backward_probability(
-                    model.backward_policy, state, next_state,
-                    model.parameters.backward, model.states.backward
-                )
-                @test 0 <= prob <= 1
-            end
+
+        @testset "compute_backward_probability" begin
+            @test !isnothing(model.backward_policy)
+
+            # (2,2) and (3,1) are the two parents of (3,2) in a 3x3 grid with
+            # right/up moves, so P_B there is a real distribution, not a forced 1.
+            p_from_22 = GFlowNet.compute_backward_probability(
+                model.backward_policy, next_state, state,
+                model.parameters.backward, model.states.backward, model.all_actions
+            )
+            p_from_31 = GFlowNet.compute_backward_probability(
+                model.backward_policy, next_state, GridState(3, 1, false),
+                model.parameters.backward, model.states.backward, model.all_actions
+            )
+
+            @test 0 < p_from_22 < 1
+            @test 0 < p_from_31 < 1
+            @test p_from_22 + p_from_31 ≈ 1.0 atol=1e-6
+
+            # A non-parent gets exactly zero, not a leaked share of the mass.
+            @test GFlowNet.compute_backward_probability(
+                model.backward_policy, next_state, GridState(1, 1, false),
+                model.parameters.backward, model.states.backward, model.all_actions
+            ) == 0.0
+
+            # The model-level wrapper must agree with the policy-level function.
+            @test backward_transition_probability(model, next_state, state) ≈ p_from_22
+        end
+
+        @testset "backward_probability (DEAD, BROKEN — see comment)" begin
+            # DEFECT, reported not fixed: src/core/policies.jl:262
+            # `backward_probability(policy, target, source, parameters, states, dag)`
+            # is a pre-repair leftover superseded by compute_backward_probability
+            # (policies.jl:494). It feeds ONLY the target features into
+            # compute_backward_logits, but the backward network built by
+            # create_backward_policy takes the JOINT (target, parent) vector, and
+            # it emits ONE scalar logit, not one per parent. Both contracts are
+            # violated at once:
+            #   DimensionMismatch: A has dimensions (8,6) but B has dimensions (3,1)
+            # (network input width 6, features width 3, grid_size=3 hidden_dim=8).
+            # It has ZERO callers in src/, examples/ or test/ -- grep confirms --
+            # which is why nothing caught it: its only test was the vacuously
+            # guarded testset this one replaces. The clean cutover is to DELETE it
+            # and keep compute_backward_probability as the single implementation;
+            # that touches src/core/policies.jl, outside this change's ownership.
+            # Marked @test_broken so the day it is fixed or removed, Julia reports
+            # an Unexpected Pass and forces this comment to be dealt with.
+            @test_broken GFlowNet.backward_probability(
+                model.backward_policy, next_state, state,
+                model.parameters.backward, model.states.backward, model
+            ) isa Float64
         end
     end
 end

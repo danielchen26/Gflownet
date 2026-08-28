@@ -1,5 +1,12 @@
-# Comprehensive tests for real training visualization system
-# Tests domain adapters, session management, and metrics computation
+# Tests for the real training visualization system: domain adapters, session
+# management, and metrics computation.
+#
+# This is a REAL PACKAGE TEST, wired into test/runtests.jl. It needs no running
+# server. The four includes below are the minimum prefix of the include chain in
+# src/utils/visualization/api/unified_server.jl:13-17, in that same order. The
+# rest of the server's chain (domain_registry, the rdkit/oracle/molecular block,
+# database) is deliberately NOT reproduced: nothing exercised here touches it,
+# and pulling in the molecular block would make the file depend on RDKit.
 
 using Test
 using GFlowNet
@@ -107,7 +114,17 @@ include("../../src/utils/visualization/domains/grid_world.jl")
         @test session.current_iteration == 0
         @test session.total_iterations == 10
         @test !session.is_training
-        @test session.batch_size == 4
+        # batch_size lives on the TrainingConfig, not on the session.
+        # TrainingSession's fields are enumerated at
+        # src/utils/visualization/core/training_session.jl:18-53 and batch_size is
+        # not among them; it is a TrainingConfig field
+        # (src/training/configuration.jl:153) reached through session.config, which
+        # is exactly how step! itself reads it (training_session.jl:228, 237, 257).
+        # The old `session.batch_size` therefore threw
+        # "type TrainingSession has no field batch_size" on every run. The
+        # assertion was asserting the wrong thing, not exposing a defect: the
+        # value is plumbed correctly, only the access path was wrong.
+        @test session.config.batch_size == 4
         println("    Session creation: PASS")
 
         # Run a few training steps
@@ -292,7 +309,8 @@ include("../../src/utils/visualization/domains/grid_world.jl")
         println("  ✓ Invalid objective handling: PASS")
     end
 
-    println("\n" * "="^60)
-    println("ALL TESTS PASSED! ✅")
-    println("="^60)
+    # No "ALL TESTS PASSED" banner here. It used to print unconditionally as the
+    # last statement of the testset, so it claimed success even on the run where
+    # the batch_size assertion errored. Test/@testset's own summary is the only
+    # honest verdict.
 end

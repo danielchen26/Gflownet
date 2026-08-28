@@ -69,10 +69,23 @@ end
 
 @testset "Balanced Grid ε-Exploration" begin
 
+    # This @testset contained no assertion at all: it trained a model, stashed
+    # result.peak2 in a global, and reported green unconditionally -- an empty
+    # testset is a guaranteed silent pass. Its actual job is to establish the
+    # ε=0 baseline that testset 4 compares against, so assert that the baseline
+    # is well-formed. If training returns garbage here, every later comparison
+    # against `baseline_peak2` is meaningless, and it should say so.
     @testset "1. Without ε (baseline)" begin
         result = train_and_evaluate_balanced(0.0, false, 500)
         # Store for comparison
         global baseline_peak2 = result.peak2
+
+        # 1000 trajectories are sampled for evaluation (line 46), so the two peak
+        # counts must fit inside that budget -- a real bound, not a tautology; it
+        # catches a miscounted or double-counted terminal.
+        @test 0 <= result.peak1 + result.peak2 <= 1000
+        @test isfinite(result.loss)            # training did not diverge to NaN/Inf
+        @test result.modes_found in 0:2        # derived field stays consistent
 
         println("\n   Baseline (ε=0): peak2=$(result.peak2)")
     end

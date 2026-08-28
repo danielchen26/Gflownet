@@ -1,6 +1,20 @@
-# Comprehensive test: TB vs SubTB on hard problem with 70:1 path asymmetry
-# This test verifies that SubTB provides better credit assignment than TB
-# on problems where mode discovery is difficult due to path asymmetry
+# RESEARCH COMPARISON SCRIPT — deliberately NOT in test/runtests.jl.
+#
+# TB vs SubTB on a hard problem with 70:1 path asymmetry. Verifies that SubTB
+# provides better credit assignment than TB when mode discovery is hard.
+#
+# Why it is not a package test: it trains two models for 2000 iterations each.
+# Measured 2026-08-28 on an M1 Pro, it was still inside the FIRST of the two
+# trainings when a 900 s timeout killed it, so a full run costs well over 15
+# minutes -- comparable to the entire rest of the suite. It also asserts on
+# stochastic mode-discovery outcomes (`modes_found >= 1`, `peak_a > 100`), which
+# is a research question, not an invariant, so it would be flaky in CI.
+#
+# Run it by hand when investigating SubTB credit assignment:
+#   julia --project=. -e 'using Test, GFlowNet; include("test/visualization/test_subtb_vs_tb_hard_problem.jl")'
+#
+# The real, fast, CI-wired visualization test is test_real_training_viz.jl in
+# this directory.
 
 using Test
 using GFlowNet
@@ -191,6 +205,11 @@ println("=" ^ 70)
 
             # Test that both methods eventually work (with enough epsilon)
             @test tb_result.peak_a > 100 || subtb_result.peak_a > 100  # At least one finds Peak A well
+        else
+            # Without this branch the testset ran zero assertions and reported
+            # green whenever SubTB training threw. A skipped check must say so
+            # out loud; it must never look like a pass.
+            @warn "Comparison Analysis skipped: SubTB training threw, so there is no SubTB result to compare against. See the 'SubTB Error' line above; that failure is already reported by the SubTB testset."
         end
     end
 

@@ -20,7 +20,15 @@ end
 # chemistry assertions are skipped -- previously they were skipped silently, so
 # test_reward_function.jl and test_diversity.jl ran zero real assertions and
 # still looked green.
-include(joinpath(@__DIR__, "..", "..", "fixtures", "molecular.jl"))
+#
+# The include is guarded: without the guard every molecular test file replaced
+# module MolecularFixture, which printed "WARNING: replacing module
+# MolecularFixture" plus "ignoring conflicting import of
+# MolecularFixture.rdkit_reason into Main" (so Main kept the FIRST module's
+# binding) and re-entered _load_rdkit once per file.
+if !@isdefined(MolecularFixture)
+    include(joinpath(@__DIR__, "..", "..", "fixtures", "molecular.jl"))
+end
 using .MolecularFixture: RDKIT_AVAILABLE, EXPECTED_FRAGMENT_COUNT, rdkit_reason
 
 if RDKIT_AVAILABLE

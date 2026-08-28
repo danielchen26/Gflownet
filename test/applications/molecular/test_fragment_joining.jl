@@ -5,7 +5,9 @@ using Test
 
 include(joinpath(@__DIR__, "test_setup.jl"))
 
-const _rdkit_avail_joining = @isdefined(RDKitBridge)
+# Was `@isdefined(RDKitBridge)` -- one of the three competing guard idioms that
+# test/fixtures/molecular.jl was written to replace.
+const _rdkit_avail_joining = RDKIT_AVAILABLE
 
 @testset "Fragment Joining" begin
 
@@ -24,13 +26,20 @@ const _rdkit_avail_joining = @isdefined(RDKitBridge)
             starter = FRAGMENT_LIBRARY[42]
             empty_state = MolState("", Int[], 0, false, zeros(Float32, 1024))
             state1 = GFlowNet.apply_action(starter, empty_state)
-            if !isempty(state1.attachment_points)
-                benzene = FRAGMENT_LIBRARY[1]
-                state2 = GFlowNet.apply_action(benzene, state1)
-                @test !isempty(state2.smiles)
-                @test state2.n_fragments == 2
-                @test !state2.is_terminated
-            end
+            # Was `if !isempty(state1.attachment_points)`, which made the whole
+            # testset report 0 tests whenever fragment placement regressed --
+            # observed as "join_fragment to molecule | 0 tests" in a session
+            # where RDKit had silently become uninitialized. FRAGMENT_LIBRARY[42]
+            # is 1,3-disubstituted benzene, so it leaves attachment points [0, 6].
+            @test state1.attachment_points == [0, 6]
+
+            benzene = FRAGMENT_LIBRARY[1]
+            state2 = GFlowNet.apply_action(benzene, state1)
+            @test !isempty(state2.smiles)
+            @test state2.n_fragments == 2
+            @test !state2.is_terminated
+            # One attachment point consumed by the join.
+            @test length(state2.attachment_points) == length(state1.attachment_points) - 1
         end
 
         @testset "terminate action" begin
@@ -55,8 +64,9 @@ const _rdkit_avail_joining = @isdefined(RDKitBridge)
             end
         end
     else
-        @info "Skipping RDKit-dependent fragment joining tests (RDKitBridge not loaded)"
-        @test_skip "RDKit not available"
+        @warn "Fragment JOINING assertions SKIPPED (place_first_fragment, \
+               join_fragment, terminate, starter-fragment validity)" reason = rdkit_reason()
+        @test_skip "fragment joining requires RDKit"
     end
 
     @testset "fragment library validation" begin

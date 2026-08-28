@@ -287,7 +287,9 @@ model = GFlowNet.create_grid_world_gflownet(
 
 ## Manual Integration Test Summary
 
-**Test Script**: `test/visualization/manual_integration_test.jl`
+**Test Script**: `test/visualization/archive/manual_integration_test.jl`
+(archived 2026-02-03). NOTE: this script contains no `@test`; the "PASSED" wording
+in the captured output below means "did not throw", not "verified".
 
 **Test Steps**: 9 comprehensive scenarios
 
@@ -348,15 +350,27 @@ ALL MANUAL TESTS PASSED! ✅
 
 ### Test Files Created
 
-1. **`test/visualization/test_real_training_viz.jl`** (267 lines)
-   - Automated test suite with 8 test sets
-   - Status: Blocked by package dependency issue (not run)
-   - Purpose: Comprehensive automated testing (for future use once environment resolved)
+1. **`test/visualization/test_real_training_viz.jl`**
+   - Automated test suite, 8 testsets
+   - Status (2026-08-28): ✅ **193 assertions pass, 0 fail, ~55 s**, and it is now
+     wired into `test/runtests.jl` under the "Visualization" group. The
+     "blocked by package dependency issue (not run)" note below was true when this
+     document was written; the blocker is gone. It needs no running server — its
+     four includes are the minimum prefix of
+     `src/utils/visualization/api/unified_server.jl:13-17`.
+   - One genuine defect was found and fixed while wiring it up: it asserted
+     `session.batch_size`, but `batch_size` is a `TrainingConfig` field reached via
+     `session.config`, so the assertion errored on every run.
 
-2. **`test/visualization/manual_integration_test.jl`** (228 lines)
-   - Manual integration test bypassing HTTP/Oxygen dependencies
-   - Status: ✅ **ALL TESTS PASSED**
-   - Purpose: Verify core functionality works correctly
+2. **`test/visualization/archive/manual_integration_test.jl`** (moved to `archive/`
+   on 2026-02-03; this document's old `test/visualization/` path was stale)
+   - Manual integration script bypassing HTTP/Oxygen dependencies
+   - Status (2026-08-28): runs to completion in ~90 s, **but it contains no
+     `@test` at all.** Its old "ALL TESTS PASSED ✅ / PRODUCTION-READY 🎉" banner
+     was an unfounded claim and has been replaced with a factual completion
+     message. Treat it as a smoke script, not verification.
+   - The archive move had silently broken it: its `../../src/...` includes resolved
+     to `test/src/...`. Fixed to `../../../src/...`.
 
 ### Training Evidence
 
@@ -413,19 +427,19 @@ Errors:         0
 
 ## Appendix: Test Execution Commands
 
-### Manual Integration Test
+### Manual Integration Script (asserts nothing; smoke only)
 ```bash
-julia --project=. test/visualization/manual_integration_test.jl
+julia --project=. test/visualization/archive/manual_integration_test.jl
 ```
 
-### Automated Test Suite (requires package resolution)
+### Automated Test Suite
+No dependency resolution step is needed any more, and the file must be `include`d
+from a session that has already loaded `Test` and `GFlowNet`:
 ```bash
-# First resolve dependencies
-julia --project=. -e 'using Pkg; Pkg.resolve()'
-
-# Then run tests
-julia --project=. test/visualization/test_real_training_viz.jl
+julia --project=. -e 'using Test, GFlowNet; include("test/visualization/test_real_training_viz.jl")'
 ```
+Measured 2026-08-28: `Real Training Visualization | 193 pass, 193 total, 55.1s`.
+It also runs as part of `test/runtests.jl` ("Visualization" group).
 
 ### Server Launch (requires package resolution)
 ```julia

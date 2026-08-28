@@ -39,17 +39,87 @@ using Random
         # Note: The model doesn't store state_dim directly
     end
     
+    # These two testsets used to be `@test_broken false` with a comment saying
+    # "This test is removed because forward_action_probabilities,
+    # sample_forward_action and forward_probability don't exist as model
+    # methods". They do exist -- as POLICY methods, taking (policy, state,
+    # actions, parameters, states); the note recorded a signature mismatch and
+    # then deleted the coverage. `@test_broken false` can never fail, so nothing
+    # would ever have reopened it.
     @testset "Policy Functions" begin
-        # This test is removed because forward_action_probabilities, sample_forward_action, 
-        # and forward_probability don't exist as model methods in the current interface.
-        # The actual functions exist in policies.jl but require different signatures.
-        @test_broken false  # real assertions were deleted; see the note above
+        model = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=8
+        )
+        s = model.initial_state
+
+        probs = GFlowNet.forward_action_probabilities(
+            model.forward_policy, s, model.all_actions,
+            model.parameters.forward, model.states.forward
+        )
+        @test length(probs) == length(model.all_actions)
+        @test all(>=(0.0f0), probs)
+        @test sum(probs) ≈ 1.0 atol=1e-5
+
+        # P_F must put exactly zero mass on inapplicable actions -- at (1,1) of a
+        # 3x3 grid that is Terminate(), and leaking mass there is how a policy
+        # silently samples an illegal transition.
+        for (i, a) in enumerate(model.all_actions)
+            if !GFlowNet.is_applicable(a, s)
+                @test probs[i] == 0.0f0
+            else
+                @test probs[i] > 0.0f0
+            end
+        end
+
+        # sample_forward_action returns (action, probability) -- note the
+        # docstring in src/core/policies.jl:135 still says (action, index).
+        action, p = GFlowNet.sample_forward_action(
+            model.forward_policy, s, model.all_actions,
+            model.parameters.forward, model.states.forward;
+            rng=Random.MersenneTwister(0)
+        )
+        @test GFlowNet.is_applicable(action, s)
+        idx = findfirst(==(action), model.all_actions)
+        @test p ≈ probs[idx] atol=1e-6
+
+        # forward_probability must agree with the full distribution it is a
+        # single entry of.
+        @test GFlowNet.forward_probability(
+            model.forward_policy, s, action,
+            model.parameters.forward, model.states.forward, model.all_actions
+        ) ≈ probs[idx] atol=1e-6
     end
-    
+
     @testset "Flow Functions" begin
-        # This test is removed because flow_estimate doesn't exist as a model method.
-        # The actual function exists in policies.jl but requires different signature.
-        @test_broken false  # real assertions were deleted; see the note above
+        # flow_estimate is a FlowEstimator method, so the model has to be built
+        # with include_flow_estimator=true; the old comment claimed the function
+        # did not exist.
+        model = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=8,
+            include_backward=true,
+            include_flow_estimator=true
+        )
+        s = model.initial_state
+
+        f = GFlowNet.flow_estimate(
+            model.flow_estimator, s, model.parameters.flow, model.states.flow
+        )
+        @test f isa Float64
+        @test isfinite(f)
+        @test f > 0.0  # the estimator exponentiates a log-flow
+
+        # The exact flow functions enumerate the DAG, so they are independent of
+        # the (untrained) weights: F(s_0) is the partition function, and the 3x3
+        # grid with reward 10 at (3,3) has Z = 19 -- the same constant
+        # test/theory/test_reward_proportionality.jl pins by enumeration.
+        @test GFlowNet.flow(model, s) ≈ GFlowNet.partition_function(model)
+        @test GFlowNet.flow(model, s) ≈ 19.0 atol=1e-6
+        @test GFlowNet.compute_recursive_flow(model, s) ≈ GFlowNet.flow(model, s)
+        @test GFlowNet.validate_flow_conservation(model, s)
     end
     
     @testset "Trajectory Functions" begin
@@ -116,8 +186,35 @@ using Random
     end
     
     @testset "Validation Functions" begin
-        # These specific validation functions don't exist in the current interface.
-        # The actual validation is done through other mechanisms.
-        @test_broken false  # real assertions were deleted; see the note above
+        # Was `@test_broken false` with "These specific validation functions
+        # don't exist in the current interface". They do:
+        # validate_policy_consistency and is_valid_trajectory are both exported
+        # from src/core/policies.jl and src/core/trajectories.jl.
+        model = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=8
+        )
+
+        # Returns nothing and throws ArgumentError on inconsistency.
+        @test GFlowNet.validate_policy_consistency(model) === nothing
+
+        equipped = create_grid_world_gflownet(
+            grid_size=3,
+            reward_positions=Dict((3, 3) => 10.0),
+            hidden_dim=8,
+            include_backward=true,
+            include_flow_estimator=true
+        )
+        @test GFlowNet.validate_policy_consistency(equipped) === nothing
+
+        # A sampled trajectory must validate, and the validator must be capable
+        # of saying no: the states/actions length invariant is enforced at
+        # construction, so a malformed trajectory cannot even be built.
+        traj = GFlowNet.sample_trajectory(model)
+        @test GFlowNet.is_valid_trajectory(traj)
+        @test_throws ArgumentError GFlowNet.Trajectory(
+            traj.states, traj.actions[1:end-1]
+        )
     end
 end

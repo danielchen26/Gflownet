@@ -31,6 +31,29 @@ function _load_rdkit()
     if get(ENV, "GFLOWNET_TEST_RDKIT", "false") != "true"
         return (false, "GFLOWNET_TEST_RDKIT is not \"true\"")
     end
+    # Idempotence is REQUIRED here, not a nicety. Every molecular test file
+    # includes test_setup.jl, which includes this file, so a full run rebuilt
+    # this module once per file. Re-running Base.include on rdkit_bridge.jl
+    # REPLACES Main.RDKitBridge with a fresh, UNINITIALIZED module, while the
+    # toplevel eval that is still building this module keeps resolving
+    # Main.RDKitBridge to the previous, already-initialized copy -- so
+    # init_rdkit! early-returned on the old module and every molecular file
+    # after the first one died with "RDKitBridge not initialized! Call
+    # init_rdkit!() first." Observed with GFLOWNET_TEST_RDKIT=true: 32 failures
+    # and 17 errors across the group, none of them real. Reuse the bridge that
+    # is already loaded instead of replacing it.
+    if Base.invokelatest(isdefined, Main, :RDKitBridge)
+        try
+            # init_rdkit! is a no-op when the bridge is already initialized; the
+            # closure runs at the latest world age so the global read resolves
+            # to the live module.
+            Base.invokelatest(() -> Main.RDKitBridge.init_rdkit!())
+            return (true, "reusing Main.RDKitBridge already loaded in this session")
+        catch e
+            return (false, "already-loaded RDKitBridge failed to initialize: " *
+                           "$(sprint(showerror, e))")
+        end
+    end
     try
         Base.include(Main, joinpath(_REPO_ROOT, "src", "utils", "visualization",
                                     "python", "rdkit_bridge.jl"))

@@ -1,102 +1,108 @@
+"""
+DETAILED_BALANCE implementation verification.
+
+This file used to be a println script with ZERO `@test` assertions, wired into
+runtests.jl as part of the "Detailed Balance" group and closing with
+
+    println("✅ Gradient computation: Working correctly")
+    println("✅ Balance equation: Satisfied within numerical tolerance")
+    println("The DETAILED_BALANCE implementation is fully functional!")
+
+None of which was checked. It computed `has_forward_grads`/`has_backward_grads`/
+`has_flow_grads` and PRINTED "Present" or "Missing" -- a missing gradient, i.e.
+an untrained component, printed a cheerful line and the file still passed. The
+balance-error loop swallowed every exception with a bare `catch  # Skip if states
+aren't connected`, and the whole reporting block was guarded by
+`if !isempty(balance_errors)`, so a loop that produced nothing at all also
+passed. Two more sections were guarded by `if length(valid_losses) >= 2`.
+"""
+
+using Test
 using GFlowNet
 using GFlowNet: compute_trajectory_loss
 using Statistics
-
-println("=== DETAILED_BALANCE Implementation Verification ===\n")
-
-# Create model with backward policy
-model = create_grid_world_gflownet(
-    grid_size=4,
-    hidden_dim=32,
-    include_backward=true
-)
-
-# Test 1: Gradient Computation
-println("1. Testing gradient computation...")
-trajectories = [sample_trajectory(model) for _ in 1:8]
-
 using Zygote
-loss_val, grads = Zygote.withgradient(model.parameters) do ps
-    Zygote.@ignore clear_flow_cache!()
-    compute_trajectory_loss(model, trajectories, ps, TrainingConfig(objective=DETAILED_BALANCE))
-end
+using Random
 
-# Check if gradients exist for all components
-has_forward_grads = haskey(grads[1], :forward) && !isnothing(grads[1].forward)
-has_backward_grads = haskey(grads[1], :backward) && !isnothing(grads[1].backward)
-has_flow_grads = haskey(grads[1], :flow) && !isnothing(grads[1].flow)
+@testset "DETAILED_BALANCE verification" begin
+    Random.seed!(23)
 
-println("✓ Loss computed: $(round(loss_val, digits=4))")
-println("✓ Forward policy gradients: $(has_forward_grads ? "Present" : "Missing")")
-println("✓ Backward policy gradients: $(has_backward_grads ? "Present" : "Missing")")
-println("✓ Flow estimator gradients: $(has_flow_grads ? "Present" : "Missing")")
+    model = create_grid_world_gflownet(
+        grid_size=4,
+        hidden_dim=32,
+        include_backward=true,
+        include_flow_estimator=true
+    )
 
-# Test 2: Training Performance
-println("\n2. Testing DETAILED_BALANCE training...")
+    @testset "gradients reach every trained component" begin
+        trajectories = [sample_trajectory(model) for _ in 1:8]
 
-config = TrainingConfig(
-    objective=DETAILED_BALANCE,
-    n_iterations=50,
-    batch_size=16,
-    learning_rate=0.01
-)
+        loss_val, grads = Zygote.withgradient(model.parameters) do ps
+            Zygote.@ignore clear_flow_cache!()
+            compute_trajectory_loss(model, trajectories, ps,
+                                    TrainingConfig(objective=DETAILED_BALANCE))
+        end
 
-history = train_gflownet(model, config; verbose=false)
-valid_losses = filter(!isnan, history.losses)
+        @test isfinite(loss_val)
+        @test loss_val >= 0.0
 
-if length(valid_losses) >= 2
-    initial_loss = valid_losses[1]
-    final_loss = valid_losses[end]
-    reduction = (1 - final_loss/initial_loss) * 100
-    
-    println("✓ Training completed successfully")
-    println("  - Iterations: $(length(valid_losses))/$(config.n_iterations)")
-    println("  - Initial loss: $(round(initial_loss, digits=4))")
-    println("  - Final loss: $(round(final_loss, digits=4))")
-    println("  - Loss reduction: $(round(reduction, digits=1))%")
-    
-    # Check convergence
-    last_10_losses = valid_losses[max(1, end-9):end]
-    loss_variance = var(last_10_losses)
-    println("  - Loss variance (last 10): $(round(loss_variance, digits=6))")
-end
-
-# Test 3: Detailed Balance Satisfaction
-println("\n3. Verifying detailed balance equation...")
-
-# Sample trajectories and compute balance ratios
-test_trajectories = [sample_trajectory(model) for _ in 1:20]
-balance_errors = Float64[]
-
-for traj in test_trajectories
-    for i in 1:(length(traj.states)-1)
-        source = traj.states[i]
-        target = traj.states[i+1]
-        
-        if !is_terminal_state(source)
-            # Compute detailed balance loss directly
-            try
-                db_loss = detailed_balance_loss(model, source, target)
-                push!(balance_errors, sqrt(db_loss))  # Take sqrt to get actual error
-            catch
-                # Skip if states aren't connected
-            end
+        g = grads[1]
+        # DETAILED_BALANCE trains all three components. "Missing" here means a
+        # silently untrained network, which is what the old printlns tolerated.
+        for component in (:forward, :backward, :flow)
+            @test haskey(g, component)
+            @test !isnothing(getproperty(g, component))
+            # Present-but-all-zero is the same defect wearing a disguise.
+            @test any(!iszero, getproperty(g, component))
+            @test all(isfinite, getproperty(g, component))
         end
     end
-end
 
-if !isempty(balance_errors)
-    mean_error = mean(balance_errors)
-    max_error = maximum(balance_errors)
-    
-    println("✓ Detailed balance analysis:")
-    println("  - Mean balance error: $(round(mean_error, digits=4))")
-    println("  - Max balance error: $(round(max_error, digits=4))")
-    println("  - Errors < 0.1: $(sum(balance_errors .< 0.1))/$(length(balance_errors)) ($(round(sum(balance_errors .< 0.1)/length(balance_errors)*100, digits=1))%)")
-end
+    @testset "training produces a usable loss curve" begin
+        config = TrainingConfig(
+            objective=DETAILED_BALANCE,
+            n_iterations=50,
+            batch_size=16,
+            learning_rate=0.01
+        )
 
-println("\n=== Summary ===")
-println("✅ Gradient computation: Working correctly")
-println("✅ DETAILED_BALANCE training: Converges successfully")
-println("✅ Balance equation: Satisfied within numerical tolerance")
-println("\nThe DETAILED_BALANCE implementation is fully functional!")
+        history = train_gflownet(model, config; verbose=false)
+
+        # No NaN filtering: a NaN loss is a failure, not a datum to skip. The old
+        # version filtered them out and then only reported `if length >= 2`.
+        @test length(history.losses) == config.n_iterations
+        @test all(isfinite, history.losses)
+        @test all(>=(0.0), history.losses)
+
+        # Loss must actually come down over 50 iterations: compare the mean of
+        # the first five against the mean of the last five, which is robust to
+        # per-batch noise while still failing a flat or diverging curve.
+        @test mean(history.losses[1:5]) > mean(history.losses[end-4:end])
+    end
+
+    @testset "detailed balance equation is satisfied on real transitions" begin
+        # The old loop wrapped detailed_balance_loss in a bare `catch` and then
+        # reported nothing if the result list came out empty. Transitions taken
+        # from a sampled trajectory are connected by construction, so there is
+        # nothing legitimate to catch.
+        test_trajectories = [sample_trajectory(model) for _ in 1:20]
+        balance_errors = Float64[]
+
+        for traj in test_trajectories
+            for i in 1:(length(traj.states) - 1)
+                source = traj.states[i]
+                is_terminal_state(source) && continue
+                target = traj.states[i + 1]
+                db_loss = detailed_balance_loss(model, source, target)
+                @test isfinite(db_loss)
+                @test db_loss >= 0.0
+                push!(balance_errors, sqrt(db_loss))
+            end
+        end
+
+        # 20 trajectories on a 4x4 grid always contain at least one non-terminal
+        # transition; an empty list means sampling broke.
+        @test !isempty(balance_errors)
+        @test all(isfinite, balance_errors)
+    end
+end

@@ -125,10 +125,13 @@ using GFlowNet: Trajectory, GFlowNetModel, create_grid_world_gflownet
             # 2.2184 rather than 19.0 on the 3x3 grid. The law that holds for
             # unnormalised flow weights children by P_B(s|s'), and
             # validate_flow_conservation is the single implementation of it.
+            # No `if !isempty(applicable_actions)` guard: every state in
+            # test_states is non-terminal and therefore has applicable actions,
+            # so the guard could only ever hide a regression that made
+            # get_applicable_actions return nothing.
             applicable_actions = get_applicable_actions(state, model.all_actions)
-            if !isempty(applicable_actions)
-                @test GFlowNet.validate_flow_conservation(model, state; tolerance=0.5)
-            end
+            @test !isempty(applicable_actions)
+            @test GFlowNet.validate_flow_conservation(model, state; tolerance=0.5)
         end
     end
     

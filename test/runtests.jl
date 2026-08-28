@@ -97,7 +97,15 @@ test_groups = [
         "applications/molecular/test_reaction_constraints.jl",
         "applications/molecular/test_integration.jl",
         "applications/molecular/test_state_dim_consistency.jl",
-    ])
+    ]),
+    ("Visualization", [
+        # Previously orphaned: on disk since the visualization work but never
+        # referenced here, so its failures went unreported for months. It needs
+        # no running server; the file reproduces the minimum prefix of the
+        # include chain in src/utils/visualization/api/unified_server.jl:13-17.
+        # Verified standalone: 193 pass, 0 fail, ~55s.
+        "visualization/test_real_training_viz.jl"
+    ]),
 ]
 
 # Optional debugging tests (not run by default)

@@ -1,92 +1,123 @@
 """
-Test grid world with both forward-only and full backward policy versions
+Grid world with forward-only and full backward-policy models.
+
+This file used to be a println script with ZERO `@test` assertions, wired into
+runtests.jl as half the "Grid World Application" group and closing with
+`println("✅ Both versions work correctly!")`. It could only fail by throwing,
+and section 3 was additionally wrapped in `if length(traj.states) >= 2`, so its
+comparison could vanish without a trace.
 """
 
+using Test
 using GFlowNet
 using Random
 using Statistics: mean
 
-println("🧪 Testing Grid World with Both Policy Versions")
-println("=" ^ 60)
+@testset "Grid World Policy Versions" begin
+    Random.seed!(11)
 
-# Test 1: Forward-only version (original)
-println("\n1️⃣ Testing Forward-Only Version (Original)")
-println("-" ^ 40)
+    config = TrainingConfig(
+        objective = TRAJECTORY_BALANCE,
+        n_iterations = 10,
+        batch_size = 8,
+        learning_rate = 0.01
+    )
 
-model_forward_only = create_grid_world_gflownet(
-    grid_size = 4,
-    hidden_dim = 32,
-    learning_rate = 0.01,
-    include_backward = false  # Original version
-)
+    model_forward_only = create_grid_world_gflownet(
+        grid_size = 4,
+        hidden_dim = 32,
+        learning_rate = 0.01,
+        include_backward = false
+    )
+    model_with_backward = create_grid_world_gflownet(
+        grid_size = 4,
+        hidden_dim = 32,
+        learning_rate = 0.01,
+        include_backward = true
+    )
 
-config = TrainingConfig(
-    objective = TRAJECTORY_BALANCE,
-    n_iterations = 10,
-    batch_size = 8,
-    learning_rate = 0.01
-)
+    """Every recorded action must actually produce the next recorded state."""
+    function trajectory_is_consistent(traj)
+        for i in 1:length(traj.actions)
+            is_applicable(traj.actions[i], traj.states[i]) || return false
+            apply_action(traj.actions[i], traj.states[i]) == traj.states[i+1] || return false
+        end
+        return true
+    end
 
-println("Training forward-only model...")
-history_forward = train_gflownet(model_forward_only, config; verbose=false)
-println("✅ Forward-only training completed!")
-println("   Final loss: $(history_forward.losses[end])")
+    @testset "forward-only model trains and samples" begin
+        @test isnothing(model_forward_only.backward_policy)
+        @test !haskey(model_forward_only.parameters, :backward)
 
-# Sample some trajectories
-trajectories_forward = [sample_trajectory(model_forward_only) for _ in 1:5]
-avg_length_forward = mean(length(t.states) for t in trajectories_forward)
-println("   Average trajectory length: $avg_length_forward")
+        history = train_gflownet(model_forward_only, config; verbose=false)
+        @test length(history.losses) == 10
+        @test all(isfinite, history.losses)
+        @test all(>=(0.0), history.losses)
 
-# Test 2: Full backward policy version
-println("\n2️⃣ Testing Full Backward Policy Version")
-println("-" ^ 40)
+        trajectories = [sample_trajectory(model_forward_only) for _ in 1:5]
+        for t in trajectories
+            @test length(t.states) >= 2
+            @test length(t.actions) == length(t.states) - 1
+            @test t.states[1] == model_forward_only.initial_state
+            @test is_terminal_state(t.states[end])
+            @test trajectory_is_consistent(t)
+        end
+    end
 
-model_with_backward = create_grid_world_gflownet(
-    grid_size = 4,
-    hidden_dim = 32,
-    learning_rate = 0.01,
-    include_backward = true  # New version with backward policy
-)
+    @testset "backward-policy model trains and samples" begin
+        @test !isnothing(model_with_backward.backward_policy)
+        @test haskey(model_with_backward.parameters, :backward)
 
-println("Training model with backward policy...")
-history_backward = train_gflownet(model_with_backward, config; verbose=false)
-println("✅ Backward policy training completed!")
-println("   Final loss: $(history_backward.losses[end])")
+        history = train_gflownet(model_with_backward, config; verbose=false)
+        @test length(history.losses) == 10
+        @test all(isfinite, history.losses)
+        @test all(>=(0.0), history.losses)
 
-# Sample some trajectories
-trajectories_backward = [sample_trajectory(model_with_backward) for _ in 1:5]
-avg_length_backward = mean(length(t.states) for t in trajectories_backward)
-println("   Average trajectory length: $avg_length_backward")
+        trajectories = [sample_trajectory(model_with_backward) for _ in 1:5]
+        for t in trajectories
+            @test length(t.states) >= 2
+            @test length(t.actions) == length(t.states) - 1
+            @test is_terminal_state(t.states[end])
+            @test trajectory_is_consistent(t)
+        end
+    end
 
-# Test 3: Verify backward probabilities are used
-println("\n3️⃣ Verifying Backward Policy Usage")
-println("-" ^ 40)
+    @testset "the two versions differ in P_B, not just in prose" begin
+        # Explicit trajectory through (2,2), which has two parents, so P_B there
+        # is a real choice rather than a forced 1. The old version sampled a
+        # trajectory and only inspected it `if length(traj.states) >= 2`.
+        states = GridState[
+            GridState(1, 1, false),
+            GridState(2, 1, false),
+            GridState(2, 2, false),
+            GridState(2, 2, true),
+        ]
+        actions = GridAction[MoveRight(), MoveUp(), Terminate()]
+        traj = GFlowNet.Trajectory(states, actions)
 
-# Sample a trajectory and check backward probabilities
-traj = sample_trajectory(model_with_backward)
-if length(traj.states) >= 2
-    s1 = traj.states[1]
-    s2 = traj.states[2]
-    
-    # Check forward probability
-    p_forward = forward_transition_probability(model_with_backward, s1, s2)
-    println("   P_F($(s2)|$(s1)) = $p_forward")
-    
-    # Check backward probability
-    p_backward = backward_transition_probability(model_with_backward, s2, s1)
-    println("   P_B($(s1)|$(s2)) = $p_backward")
-    
-    # Compute trajectory balance components
-    loss_forward_only = trajectory_balance_loss(model_forward_only, traj)
-    loss_with_backward = trajectory_balance_loss(model_with_backward, traj)
-    
-    println("\n   Trajectory balance losses:")
-    println("   - Forward-only model: $loss_forward_only")
-    println("   - With backward model: $loss_with_backward")
+        p_forward = forward_transition_probability(model_with_backward,
+                                                  states[1], states[2])
+        @test 0.0 < p_forward <= 1.0
+
+        p_backward = backward_transition_probability(model_with_backward,
+                                                    states[3], states[2])
+        @test 0.0 < p_backward < 1.0
+
+        # Give both models IDENTICAL forward parameters, so the only remaining
+        # difference in the trajectory-balance loss is the sum of log P_B terms.
+        # Without this the two losses would differ merely because the two models
+        # were initialized from different random draws, and the assertion below
+        # would prove nothing.
+        model_with_backward.parameters.forward .= model_forward_only.parameters.forward
+
+        loss_forward_only = trajectory_balance_loss(model_forward_only, traj)
+        loss_with_backward = trajectory_balance_loss(model_with_backward, traj)
+        @test isfinite(loss_forward_only)
+        @test isfinite(loss_with_backward)
+
+        # Forward-only TB uses P_B = 1, i.e. log P_B = 0. The backward model adds
+        # a learned, strictly-less-than-1 P_B at (2,2), so the losses MUST differ.
+        # This is the assertion the closing println only claimed.
+        @test loss_forward_only != loss_with_backward
+    end
 end
-
-println("\n✅ Both versions work correctly!")
-println("\n📊 Summary:")
-println("   - Forward-only version: Uses simplified TB with P_B = 1")
-println("   - Full backward version: Uses complete TB with learned P_B")
-println("   - Both versions converge and sample valid trajectories")
