@@ -435,11 +435,45 @@ function sample_trajectory(model::GFlowNetModel; config = SamplingConfig())
             break
         end
 
-        # Sample action using Zygote-safe operations
-        action = sample_action_from_policy(model, current_state, applicable_actions; config = config)
+        # Sample an action that ACTUALLY ADVANCES the state.
+        #
+        # An action leaving the state unchanged is not a DAG edge. A domain can
+        # approve an action in `is_applicable` and then fail to perform it, returning
+        # the state untouched -- the fragment domain does exactly that when RDKit
+        # rejects a join (molecular_generation.jl:545 and :552 both `return state`).
+        # Measured on the real fragment library with RDKit working: 57 of 1838
+        # applied actions, 3.1%, were silent self-loops.
+        #
+        # Recording one corrupts the structure Trajectory Balance depends on. The
+        # graph stops being acyclic; the trajectory gains a step that moved nowhere;
+        # and `is_valid_backward_transition(s, s)` becomes true, so the state becomes
+        # ITS OWN PARENT. That inflates the parent set P_B normalises over, feeding a
+        # wrong n(x) straight into the TB optimum -- the same path-count bias that was
+        # measured on the grid as Z = 78 instead of 19.
+        #
+        # Resampling only on a detected self-loop keeps the common path free: filtering
+        # upfront would need one compute_next_state for EVERY action every step, which
+        # in the molecular domain is 51 RDKit joins per step.
+        #
+        # Terminating actions are exempt: they legitimately produce a state that may
+        # compare equal on the fields `==` inspects.
+        action = nothing
+        next_state = current_state
+        candidates = applicable_actions
+        while true
+            candidate = sample_action_from_policy(model, current_state, candidates; config = config)
+            proposed = compute_next_state(candidate, current_state)
+            if proposed != current_state || is_terminal_state(proposed)
+                action = candidate
+                next_state = proposed
+                break
+            end
+            candidates = Zygote.@ignore filter(a -> a != candidate, candidates)
+            isempty(candidates) && break
+        end
 
-        # Apply action
-        next_state = compute_next_state(action, current_state)
+        # Every applicable action was a self-loop; this state cannot advance.
+        action === nothing && break
 
         # Update visited states for acyclic control
         if config.acyclic_rate > 0.0

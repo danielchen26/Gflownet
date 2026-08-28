@@ -80,6 +80,12 @@ test_groups = [
         "applications/grid_world/test_grid_world_versions.jl"
     ]),
     ("Molecular Generation", [
+        # FIRST in this group, deliberately. It pins the tree structure of the
+        # fragment DAG, which is what makes the constant P_B = 1 returned for
+        # MolState exact rather than an approximation. If the join site ever
+        # becomes a choice, the DAG turns into a lattice and Trajectory Balance
+        # silently converges to n(x)R(x) instead of R(x). See the file header.
+        "applications/molecular/test_fragment_dag_is_tree.jl",
         "applications/molecular/test_state_features.jl",
         "applications/molecular/test_fragment_joining.jl",
         "applications/molecular/test_reward_function.jl",
