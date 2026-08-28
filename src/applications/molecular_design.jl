@@ -1,4 +1,6 @@
 using ..GFlowNet: AbstractState, AbstractAction, state_to_features, is_applicable, apply_action, reward
+using ..GFlowNet: PartitionFunctionMethod, SIMPLE_ESTIMATION
+using Random
 
 """
     MoleculeData
@@ -53,6 +55,33 @@ An action that marks the molecule as complete.
 """
 struct TerminateMoleculeAction <: AbstractAction end
 
+# =============================================================================
+# Environment configuration
+# =============================================================================
+
+# Size limits are properties of the environment, not of a state or an action, so
+# `is_applicable` has nowhere else to read them from. Same mechanism as
+# `GRID_CONFIG` in grid_world.jl:176.
+#
+# Before this existed, `create_molecular_design_model`'s `max_atoms` only sized the
+# bond-action enumeration and `max_bonds` was accepted and then never read, while
+# `is_applicable(::AddAtomAction, …)` hardcoded a cap of 20 atoms.
+const MOLECULE_CONFIG = Ref{NamedTuple}()
+
+const DEFAULT_MOLECULE_LIMITS = (max_atoms = 10, max_bonds = 15)
+
+"""
+    molecule_limits()
+
+Active `(max_atoms, max_bonds)` limits, or `DEFAULT_MOLECULE_LIMITS` when
+`create_molecular_design_model` has not been called in this session.
+"""
+molecule_limits() = isassigned(MOLECULE_CONFIG) ? MOLECULE_CONFIG[] : DEFAULT_MOLECULE_LIMITS
+
+# Element channels of the feature vector. Fixed and ordered: it defines the input
+# layout the policy network is built against.
+const FEATURE_ATOM_TYPES = (:C, :H, :O, :N, :S, :P, :F, :Cl, :Br, :I)
+
 # Implementation of required methods for the GFlowNet framework
 
 """
@@ -74,59 +103,31 @@ GFlowNet.is_terminal_state(state::MoleculeState)::Bool = state.complete
 Convert a molecule state to a feature vector for neural network inputs.
 """
 function state_to_features(state::MoleculeState)
-    # This is a simple implementation - in a real application,
-    # you would use more sophisticated molecular featurization
-
-    # Basic features: number of atoms, number of bonds, is_complete
-    features = Float32[
-        length(state.data.atoms),
-        length(state.data.bonds),
-        state.complete ? 1.0 : 0.0
-    ]
-
-    # Atom type counts
-    atom_types = [:C, :H, :O, :N, :S, :P, :F, :Cl, :Br, :I]
-    for atom_type in atom_types
-        count_val = Base.count(a -> a == atom_type, state.data.atoms)
-        push!(features, count_val)
-    end
-
-    return features
-end
-
-"""
-    base_reward(state::MoleculeState)
-
-Calculate the base reward for a molecule state based on its properties.
-This implements the required interface method.
-"""
-function base_reward(state::MoleculeState)
-    if !state.complete
-        return 0.0
-    end
-
-    # In a real application, you would compute molecular properties
-    # like drug-likeness, binding affinity, etc.
-
-    # Simple example reward: prefer molecules with 5-20 atoms
-    n_atoms = length(state.data.atoms)
-    if n_atoms < 5
-        return 0.1
-    elseif n_atoms > 20
-        return 0.2
-    else
-        # Reward based on size and complexity
-        bond_count = length(state.data.bonds)
-        complexity_score = bond_count / n_atoms
-        return 1.0 + complexity_score
-    end
+    # Deliberately allocation-then-`vcat` rather than `push!`: Zygote rejects array
+    # mutation ("Mutating arrays is not supported"), and SUB_TRAJECTORY_BALANCE
+    # differentiates through the features of every intermediate state.
+    counts = Float32[Base.count(isequal(t), state.data.atoms) for t in FEATURE_ATOM_TYPES]
+    return vcat(
+        Float32[
+            length(state.data.atoms),
+            length(state.data.bonds),
+            state.complete ? 1 : 0
+        ],
+        counts
+    )
 end
 
 """
     reward(state::MoleculeState)
 
-Calculate the reward for a molecule state based on its properties.
-This is the full reward interface for compatibility.
+Reward of a molecule state: 0 while under construction, and for a completed molecule
+a triangular preference for size, peaking at 12-13 atoms.
+
+This is the sole reward method for the domain. A second, unreachable
+`base_reward(::MoleculeState)` used to sit here returning `1.0 + bonds/atoms` — a
+different scale and a different shape from this function. Nothing in `src/core`
+calls `base_reward`, so it was dead weight that contradicted the live reward; it has
+been removed rather than reconciled.
 """
 function reward(state::MoleculeState)
     if !state.complete
@@ -136,16 +137,14 @@ function reward(state::MoleculeState)
     # In a real application, you would compute molecular properties
     # like drug-likeness, binding affinity, etc.
 
-    # Simple example reward: prefer molecules with 5-20 atoms
+    # Simple example reward: prefer molecules with 5-20 atoms. Note that with the
+    # default `max_atoms = 10` the peak at 12.5 is out of reach, so the reward is
+    # monotone in size over the reachable states and the optimum is "fill the cap".
     n_atoms = length(state.data.atoms)
-    if n_atoms < 5
+    if n_atoms < 5 || n_atoms > 20
         return 0.1
-    elseif n_atoms > 20
-        return 0.1
-    else
-        # Higher reward for medium-sized molecules
-        return 1.0 - 0.05 * abs(n_atoms - 12.5)
     end
+    return 1.0 - 0.05 * abs(n_atoms - 12.5)
 end
 
 """
@@ -160,7 +159,7 @@ function is_applicable(action::AddAtomAction, state::MoleculeState)
     end
 
     # Limit the total number of atoms
-    if length(state.data.atoms) >= 20
+    if length(state.data.atoms) >= molecule_limits().max_atoms
         return false
     end
 
@@ -180,6 +179,11 @@ Check if adding a bond is valid for the current molecule state.
 function is_applicable(action::AddBondAction, state::MoleculeState)
     # Can't add bonds to a completed molecule
     if state.complete
+        return false
+    end
+
+    # Limit the total number of bonds
+    if length(state.data.bonds) >= molecule_limits().max_bonds
         return false
     end
 
@@ -290,58 +294,102 @@ function create_initial_molecule_state()
 end
 
 """
-    create_molecular_design_model(atom_types, max_atoms, max_bonds)
+    create_molecular_design_model(; atom_types, lattice_size, max_atoms, max_bonds,
+                                  hidden_dim, learning_rate, include_flow_estimator,
+                                  partition_function_method, rng)
 
-Create a GFlowNet model for molecular design.
+Create a GFlowNet model for lattice-based molecular design.
+
+Builds the action set — one `AddAtomAction` per (element, lattice site), one
+`AddBondAction` per (atom-index pair, bond order), one `TerminateMoleculeAction` —
+installs the size limits that `is_applicable` enforces, and hands the whole thing to
+[`create_gflownet`](@ref), which owns the policy network, the `ComponentArray`
+parameters, the optimiser and the per-layer states.
+
+# Arguments
+- `atom_types::Vector{Symbol}=[:C, :H, :O, :N]`: elements that may be added
+- `lattice_size::Int=1`: sites per axis, so `lattice_size^3` positions per element.
+  Defaults to 1 on purpose: `apply_action(::AddAtomAction, …)` records only
+  `action.atom_type`, never `action.position`, so two `AddAtomAction`s that differ
+  only in position produce *identical* child states. Raising `lattice_size`
+  therefore adds parallel edges, not reachable states — it multiplies the per-step
+  `is_applicable` sweep by `lattice_size^3` and shifts probability mass from
+  terminating towards growing the molecule, without enlarging the state space.
+- `max_atoms::Int=10`: hard cap on atoms; also the largest bond index enumerated
+- `max_bonds::Int=15`: hard cap on bonds
+- `hidden_dim::Int=64`: hidden layer size
+- `learning_rate::Float64=0.01`: optimiser learning rate
+- `include_flow_estimator::Bool=false`: needed by DIRECT_FLOW / FLOW_MATCHING
+- `partition_function_method::PartitionFunctionMethod=SIMPLE_ESTIMATION`
+- `rng::AbstractRNG`: random number generator
+
+There is no `include_backward`: a backward policy is only usable together with
+`get_previous_states` (core/graphs.jl:216), which recovers parents by brute-force
+enumeration of the reachable state space. That is fine for a 5x5 grid and hopeless
+here, so DETAILED_BALANCE is not offered for this domain.
+
+# Returns
+- `GFlowNetModel`: ready for `train_gflownet` / `sample_trajectory`
+
+# Example
+```julia
+model = create_molecular_design_model(max_atoms = 6, max_bonds = 6)
+history = train_gflownet(model, TrainingConfig(n_iterations = 20, batch_size = 4))
+molecules = [sample_trajectory(model).states[end] for _ in 1:20]
+```
 """
-function create_molecular_design_model(atom_types=[:C, :H, :O, :N], max_atoms=10, max_bonds=15)
-    # Create the initial state
+function create_molecular_design_model(;
+    atom_types::Vector{Symbol} = [:C, :H, :O, :N],
+    lattice_size::Int = 1,
+    max_atoms::Int = 10,
+    max_bonds::Int = 15,
+    hidden_dim::Int = 64,
+    learning_rate::Float64 = 0.01,
+    include_flow_estimator::Bool = false,
+    partition_function_method::PartitionFunctionMethod = SIMPLE_ESTIMATION,
+    rng::AbstractRNG = Random.default_rng()
+)
+    # Validate inputs
+    isempty(atom_types) && throw(ArgumentError("atom_types must not be empty"))
+    allunique(atom_types) || throw(ArgumentError("atom_types must not contain duplicates"))
+    lattice_size >= 1 || throw(ArgumentError("lattice_size must be at least 1"))
+    max_atoms >= 1 || throw(ArgumentError("max_atoms must be at least 1"))
+    max_bonds >= 0 || throw(ArgumentError("max_bonds must be non-negative"))
+    hidden_dim > 0 || throw(ArgumentError("hidden_dim must be positive"))
+    0 < learning_rate < 1 || throw(ArgumentError("learning_rate must be in (0,1)"))
+
+    # Set global configuration for domain functions
+    MOLECULE_CONFIG[] = (atom_types = atom_types, max_atoms = max_atoms, max_bonds = max_bonds)
+
     initial_state = create_initial_molecule_state()
 
-    # Create actions
     actions = AbstractAction[]
 
-    # Add atom actions
-    for atom_type in atom_types
-        for x in 1:3, y in 1:3, z in 1:3
-            push!(actions, AddAtomAction(atom_type, (Float64(x), Float64(y), Float64(z))))
-        end
+    for atom_type in atom_types,
+        x in 1:lattice_size, y in 1:lattice_size, z in 1:lattice_size
+
+        push!(actions, AddAtomAction(atom_type, (Float64(x), Float64(y), Float64(z))))
     end
 
-    # Add bond actions (will be filtered by is_applicable)
-    for i in 1:max_atoms
-        for j in (i+1):max_atoms
-            for bond_type in 1:3
-                push!(actions, AddBondAction(i, j, bond_type))
-            end
-        end
+    # Bond actions are enumerated for every index pair; `is_applicable` filters out
+    # the ones whose endpoints do not exist yet.
+    for i in 1:max_atoms, j in (i + 1):max_atoms, bond_type in 1:3
+        push!(actions, AddBondAction(i, j, bond_type))
     end
 
-    # Add terminate action
     push!(actions, TerminateMoleculeAction())
 
-    # The terminal states are empty at first - they'll be discovered during sampling
-    terminal_states = MoleculeState[]
-
-    # Create a special terminal sink state
-    terminal_sink = MoleculeState(
-        MoleculeData(Symbol[:SINK], Tuple{Int,Int,Int}[]),
-        true
+    # Create model using on-demand approach
+    return GFlowNet.create_gflownet(
+        initial_state,
+        actions;
+        state_dim = length(state_to_features(initial_state)),
+        hidden_dim = hidden_dim,
+        learning_rate = learning_rate,
+        include_flow_estimator = include_flow_estimator,
+        partition_function_method = partition_function_method,
+        rng = rng
     )
-
-    # Create the DAG
-    dag = create_dag(initial_state, terminal_states, terminal_sink, actions)
-
-    # Create a simple neural network for the forward policy
-    # In a real application, you would use a more sophisticated model
-    # that could handle molecular graphs
-
-    # For demonstration purposes only:
-    forward_policy = ForwardPolicy(identity) # Placeholder
-
-    # NOTE: This molecular design model is outdated and needs to be migrated
-    # to the new API. For now, throw an informative error.
-    throw(ArgumentError("Molecular design model needs to be updated to new API. Use create_grid_world_gflownet() as a reference."))
 end
 
 # Function to visualize molecules using the composition-based approach

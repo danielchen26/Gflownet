@@ -29,58 +29,10 @@ using Random
 using StatsBase  # Added for the sample function
 using Plots  # For visualization of training progress
 
-"""
-    build_molecular_design_model(; atom_types, lattice_size, max_atoms, hidden_dim, learning_rate, rng)
-
-Assemble the molecular-design GFlowNet with the current on-demand API.
-
-`GFlowNet.create_molecular_design_model` still builds its action set the old way
-and then throws
-`ArgumentError("Molecular design model needs to be updated to new API. Use
-create_grid_world_gflownet() as a reference.")`, so this example follows that
-reference: hand the initial state plus the full action set to
-`GFlowNet.create_gflownet`, which builds the policy network, the
-`ComponentArray` parameters, the optimiser and the per-layer states itself.
-"""
-function build_molecular_design_model(;
-    atom_types = [:C, :H, :O, :N],
-    lattice_size::Int = 2,
-    max_atoms::Int = 6,
-    hidden_dim::Int = 64,
-    learning_rate::Float64 = 0.001,
-    rng = Random.default_rng()
-)
-    actions = GFlowNet.AbstractAction[]
-
-    # One AddAtomAction per (element, lattice position) pair. `lattice_size` and
-    # `max_atoms` are kept small on purpose: every sampling step evaluates
-    # `is_applicable` for the whole action set, so the action count is the main
-    # driver of this example's runtime.
-    for atom_type in atom_types,
-        x in 1:lattice_size, y in 1:lattice_size, z in 1:lattice_size
-
-        push!(actions, AddAtomAction(atom_type, (Float64(x), Float64(y), Float64(z))))
-    end
-
-    # Bond actions are enumerated for every index pair; `is_applicable` filters
-    # out the ones whose endpoints do not exist yet.
-    for i in 1:max_atoms, j in (i + 1):max_atoms, bond_type in 1:3
-        push!(actions, AddBondAction(i, j, bond_type))
-    end
-
-    push!(actions, TerminateMoleculeAction())
-
-    initial_state = GFlowNet.create_initial_molecule_state()
-
-    return GFlowNet.create_gflownet(
-        initial_state,
-        actions;
-        state_dim = length(state_to_features(initial_state)),
-        hidden_dim = hidden_dim,
-        learning_rate = learning_rate,
-        rng = rng
-    )
-end
+# The model is built by `GFlowNet.create_molecular_design_model`. This example used to
+# carry its own `build_molecular_design_model` because the library factory threw
+# `ArgumentError("Molecular design model needs to be updated to new API…")`; that
+# factory now works, so the local copy is gone.
 
 """
     run_molecule_example()
@@ -105,9 +57,16 @@ function run_molecule_example()
     # Set random seed for reproducibility
     Random.seed!(42)
     
-    # Create the GFlowNet model for molecular design
-    # Using default parameters: C, H, O, N atoms, max 10 atoms
-    model = build_molecular_design_model(rng = Random.MersenneTwister(42))
+    # Create the GFlowNet model for molecular design. `max_atoms`/`max_bonds` are kept
+    # small on purpose: every sampling step evaluates `is_applicable` over the whole
+    # action set, so the action count is the main driver of this example's runtime.
+    model = create_molecular_design_model(
+        max_atoms = 6,
+        max_bonds = 6,
+        learning_rate = 0.001,
+        partition_function_method = GFlowNet.LEARNABLE_ESTIMATION,
+        rng = Random.MersenneTwister(42)
+    )
     
     println("Created molecular design model")
     println("Initial state:")
@@ -167,17 +126,29 @@ function run_molecule_example()
     println("TRAINING MOLECULAR DESIGN GFLOWNET")
     println("="^60)
     
-    # Create training configuration for molecular design. This is a demo budget:
-    # a molecule trajectory can run to `SamplingConfig`'s 100-step cap, so even a
-    # handful of iterations takes tens of seconds.
+    # Create training configuration for molecular design. This is a demo budget: a
+    # molecule trajectory here runs up to max_atoms + max_bonds + 1 = 13 steps, and a
+    # step costs one `is_applicable` sweep over all 50 actions, so even a handful of
+    # iterations takes tens of seconds.
     #
-    # SUB_TRAJECTORY_BALANCE cannot be used here: it evaluates the flow estimator
-    # on intermediate states inside the Zygote tape, and
-    # `GFlowNet.state_to_features(::MoleculeState)` builds its vector with
-    # `push!`, which Zygote rejects ("Mutating arrays is not supported").
+    # LEARNABLE_ESTIMATION, not SIMPLE_ESTIMATION: this domain's terminal set is not
+    # enumerable (500 samples from the trained model produced 489 distinct molecules),
+    # so pinning Z = 1 makes the trajectory-balance residual irreducible. Measured
+    # over 40 iterations, seed 1234: with SIMPLE_ESTIMATION the loss went 233.2 ->
+    # 448.6 and sampling gave mean R = 0.589; with LEARNABLE_ESTIMATION it went
+    # 233.2 -> 227.6, Z was learned as 4.3e4, and mean R rose to 0.619.
+    #
+    # SUB_TRAJECTORY_BALANCE is still not used here, but for a different reason than
+    # before: it no longer dies on `state_to_features` (that function is mutation-free
+    # now, so Zygote accepts it) and `sub_trajectory_balance_loss_batch` returns a
+    # finite 174.7 on a fresh 4-atom model. Training it for two iterations
+    # nevertheless reports NaN losses. The flow estimator is unconstrained and emits
+    # negative F on this domain (-0.61 to +0.08 over one measured trajectory), which
+    # `balance.jl`'s `log(max(F, 1e-8))` clamps to a constant with no gradient, so the
+    # divergence is in the SubTB/flow path, not in the molecule domain.
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        partition_function_method=GFlowNet.SIMPLE_ESTIMATION,  # Molecular spaces often enumerable
+        partition_function_method=GFlowNet.LEARNABLE_ESTIMATION,
         batch_size=4,
         learning_rate=0.001,
         n_iterations=5,
@@ -187,7 +158,7 @@ function run_molecule_example()
 
     println("Training configuration for molecular design:")
     println("  Objective: $(config.objective)")
-    println("  Partition function method: $(config.partition_function_method) (enumerable chemical spaces)")
+    println("  Partition function method: $(config.partition_function_method) (Z is learned; the terminal set is not enumerable)")
     println("  Batch size: $(config.batch_size)")
     println("  Iterations: $(config.n_iterations)")
     

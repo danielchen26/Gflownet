@@ -282,6 +282,7 @@ export monitor_backward_policy_learning
 
 # Molecular design application (atom-level, from molecular_design.jl)
 export MoleculeState, MoleculeData, AddAtomAction, AddBondAction, TerminateMoleculeAction
+export create_molecular_design_model, create_initial_molecule_state, visualize_molecule
 # Fragment-based molecular types (MolState, FragmentAction, etc.) are in
 # molecular_generation.jl, loaded by the visualization server — not this module.
 # Reaction GFlowNet factory (Gap 4, from interface.jl)
