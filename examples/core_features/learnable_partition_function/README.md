@@ -38,19 +38,33 @@ The comprehensive demo includes:
 
 The trajectory balance equation becomes:
 ```
-(log Z + log P_F(τ) - log R(s_T))² → 0
+(log Z + log P_F(τ) - log P_B(τ) - log R(s_T))² → 0
 ```
 
 Where:
 - Z is the learnable partition function
 - P_F(τ) is the forward trajectory probability
+- P_B(τ) is the backward trajectory probability, normalised over each state's parents
 - R(s_T) is the terminal reward
 
-### Perfect Learning Example
+The P_B term is required. Dropping it sets P_B ≡ 1 unnormalised, which is a distribution
+only when every state has exactly one parent; the 2×2 grid's (2,2) has two.
+`src/training/losses.jl` now uses uniform-over-parents, P_B = 1/|parents|, when no backward
+policy is configured.
 
-In a 2×2 grid world, we can verify exact learning:
-- Theoretical: Z = 4R (satisfies trajectory balance)
-- Achieved: <0.1% error with proper hyperparameters
+### Exact Target
+
+In a 2×2 grid world the exact partition function is Z = Σ_x R(x) over the states that may
+terminate. (1,1) is not terminable, so its reward of 0.1 is excluded and
+Z = 1.0 + 1.0 + R: 12.0 at R = 10, 3.0 at R = 1.
+
+Measured with the repaired loss: Z = 12.000 at R = 10 with a forward policy only
+(0.0% error). On the 3×3 grid (exact Z = 19.0): 18.955 forward-only, 19.008 with a learned
+backward policy.
+
+This file previously gave the target as "Z = 4R". The value that matched, 22.0 at R = 10,
+was the path-count-biased optimum Σ_x n_paths(x)·R(x) of the loss before the backward term
+was restored (measured 22.000 on the 2×2, 77.928 on the 3×3).
 
 ## Key Results
 
@@ -58,9 +72,11 @@ In a 2×2 grid world, we can verify exact learning:
 - **SIMPLE_ESTIMATION**: 75% max reward achievement
 - **LEARNABLE_ESTIMATION**: 95% max reward achievement
 
-### 2. Perfect Learning
-Across different reward scales (1.0, 10.0, 100.0):
-- Consistently achieves <0.1% error
+### 2. Exact Learning
+- Z = 12.000 against an exact 12.0 on the 2×2 grid at R = 10 (0.0% error)
+- Z = 18.955 against an exact 19.0 on the 3×3 grid (0.2% error)
+- The forward-only and learned-backward arms agree (18.955 vs 19.008), the invariance
+  trajectory balance requires of any fixed normalised P_B
 - Robust to initialization
 - Converges in 500-2000 iterations
 

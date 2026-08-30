@@ -92,7 +92,11 @@ function ZConvergenceMonitor(; true_z=nothing, tolerance=0.001, patience=1000)
     )
 end
 
-function update!(monitor::ZConvergenceMonitor, current_z::Float64)
+# `::Real`, not `::Float64`: log_Z follows the network parameter eltype, which is
+# Float32 for a Lux model. Pinning this to Float64 made the monitor unusable with
+# every default model -- MethodError: no method matching update!(..., ::Float32).
+# The Float64 history above is deliberate (error accumulation); push! converts.
+function update!(monitor::ZConvergenceMonitor, current_z::Real)
     monitor.iteration += 1
     push!(monitor.history, current_z)
 
@@ -269,10 +273,51 @@ println("    MC estimate of Z: $(round(mc_estimate_learnable, digits=2))")
 println("\n\n🎯 PART 2: Perfect Z Learning (2×2 Grid)")
 println("=" ^ 40)
 
-# Theoretical Z for 2x2 grid
-# In 2x2 grid: 2 paths from (1,1) to (2,2), each with P(τ) = 0.25
-# Trajectory balance: Z × P(τ) = R, so Z = R/0.25 = 4R
-theoretical_z_2x2(reward) = 4.0 * reward  # Z that satisfies trajectory balance
+# Z = sum over TERMINABLE states of R(x), enumerated against the live reward table.
+#
+# This target took four attempts, and the history is the point -- every wrong version
+# was internally consistent and one of them was confirmed by measurement.
+#
+# (1) `theoretical_z_2x2(reward) = 4.0 * reward`, justified as "2 paths from (1,1) to
+#     (2,2), each with P(tau) = 0.25, so Z = R/0.25 = 4R". It drops every other
+#     terminal state. The live table at R = 10 is (1,2)=1.0, (2,1)=1.0, (2,2)=10.0
+#     -- constants that do not scale with R, which is why it passed at R = 1 (4R = 4.0
+#     coincides with the true 2 + 2R there) and failed at R = 10.
+#
+# (2) Then sum_x R(x) over ALL cells. Wrong: grid world FORBIDS terminating at the
+#     start state (grid_world.jl:107, `state.x != 1 || state.y != 1`), so (1,1) is not
+#     a terminal state. Including it shifts Z by R(1,1) = 0.1 -- a mistake
+#     test/theory/enumerate.jl warns about verbatim, in the docstring of the
+#     `can_terminate` helper that exists precisely to prevent it.
+#
+# (3) Then sum_x n_paths(x) R(x), because training measurably converged to 22.0 at
+#     R = 10 and pinned there from iteration 600 to 2000 -- a fixed point, matched to
+#     0.45%, reproduced on the 3x3 grid at 77.928 against 78.0, with an
+#     include_backward=true control arm landing on the unweighted sum instead. Three
+#     operating points and a control, all agreeing.
+#
+#     It was still wrong. That measurement was faithfully reproducing a BUG: the TB
+#     loss skipped its sum log P_B term when no backward policy was present
+#     (losses.jl:535), which is P_B == 1 unnormalised, valid only where every state has
+#     one parent. Agreement with a defective implementation is not validation of a
+#     target. test/theory/test_reward_proportionality.jl called that same
+#     path-count-biased law "the bug that was fixed" while only exercising the analytic
+#     helpers, never the coded loss -- so the regression test guarded a repair that had
+#     never been applied.
+#
+# (4) With P_B repaired to uniform-over-parents, TB converges to sum_x R(x) as the
+#     theorem requires -- measured 12.000 vs 12.0 on this grid and 18.955 vs 19.0 on
+#     the 3x3 -- and the two P_B arms now COLLAPSE onto the same Z instead of
+#     dissociating. That collapse is the real check: TB is valid for ANY fixed
+#     normalised P_B, so the optimum must not depend on which one is used.
+#
+# MUST be called after create_grid_world_gflownet: reward_positions is installed as
+# global reward state at model construction, so this reads the live reward table.
+function enumerated_z(grid_size::Int)
+    return sum(GFlowNet.reward(GridState(i, j, true))
+               for i in 1:grid_size, j in 1:grid_size
+               if GFlowNet.is_applicable(GFlowNet.Terminate(), GridState(i, j, false)))
+end
 
 # Test perfect learning with different configurations
 println("\nTesting perfect learning with optimal hyperparameters...")
@@ -302,21 +347,16 @@ for reward_val in reward_scales
         n_iterations=250,
         batch_size=128,
         learning_rate=0.01/sqrt(reward_val),  # Scaled learning rate
-
-        # Raised from the default 10, and this is the knob that matters here.
-        #
-        # log Z has to travel from log(1) = 0 to log(4R), which is 3.69 nats at R = 10
-        # but only 1.39 at R = 1 -- yet the base learning rate above SHRINKS as
-        # 1/sqrt(R), so the case with the longest journey gets the smallest step. At
-        # multiplier 10 the R = 10 run reached Z = 21.99 against a target of 40.0, a
-        # 45% error that tripped the assertion below. Tripling the iteration budget
-        # would also fix it, but this is the parameter that exists for exactly this
-        # purpose and it costs no extra runtime.
-        z_learning_rate_multiplier=30.0
+        # z_learning_rate_multiplier left at its default 10.0. It had been raised to
+        # 30.0 to close the gap to a target of 40.0 -- a target that no longer exists.
+        # At the default, this configuration reaches Z = 12.000 against the enumerated
+        # 12.0 (0.0%), so the bump bought nothing once the oracle and the P_B term were
+        # both correct. Tuning an optimiser to reach a wrong number is how a wrong
+        # number survives.
     )
     
-    # Create convergence monitor
-    theoretical_z = theoretical_z_2x2(reward_val)
+    # Enumerated AFTER the model exists, so it reads this model's reward table.
+    theoretical_z = enumerated_z(2)
     monitor = ZConvergenceMonitor(
         true_z=theoretical_z,
         tolerance=0.01,  # Relaxed for demo
@@ -356,21 +396,22 @@ for reward_val in reward_scales
     )
 end
 
-# This is the strongest assertion available anywhere in this slice: the 2x2 grid has
-# a CLOSED-FORM partition function. Two paths from (1,1) to (2,2), each of
-# probability 0.25, so trajectory balance Z * P(tau) = R gives Z = R / 0.25 = 4R
-# exactly (this is `theoretical_z_2x2` above). No measured threshold is needed for
-# the target itself -- only for how close the demo is required to get.
+# The strongest assertion available in this slice: Z is ENUMERATED from the live reward
+# table of the model actually built, so the target needs no measured threshold -- only
+# the tolerance on how close the demo has to get. Derivation, and the three wrong
+# targets that preceded it, at the top of Part 2.
 #
-# The learned Z is checked against 4R with a 35% relative-error bar. Part 2's own
-# convergence monitor uses a 1% tolerance and stops early when it is met, so 35% is a
-# loose floor that still fails loudly if Z learning is broken: a run that never
-# trains sits at its initial Z = 1, which is a 75% error at R = 1 and a 97.5% error
-# at R = 10.
+# Bar is 0.05, not the 0.35 this used to carry. 0.35 was wide enough to admit a run
+# sitting 34% away, which is the difference between "correct" and "not too far from
+# something". An untrained run stays at its initial Z = 1, a 67% error at R = 1 and 92%
+# at R = 10 against the enumerated 3.0 and 12.0, so 0.05 still fails loudly rather than
+# hair-trigger.
 for reward_val in reward_scales
     result = perfect_results[reward_val]
-    assert_relative_error_below(result.final_z, theoretical_z_2x2(reward_val),
-                                "Part 2 learned Z at R=$reward_val"; max_rel_error=0.35)
+    # result.theoretical_z was enumerated while THIS reward's model was live, so it is
+    # the right ground truth even though the global reward table has since moved on.
+    assert_relative_error_below(result.final_z, result.theoretical_z,
+                                "Part 2 learned Z at R=$reward_val"; max_rel_error=0.05)
 end
 
 println("\n✅ Perfect Learning Summary:")
@@ -390,10 +431,24 @@ println("=" ^ 40)
 # Test different initialization strategies - reduced for demo
 println("\nTesting initialization strategies...")
 reward_value = 10.0
-theoretical_z = theoretical_z_2x2(reward_value)
+
+# Install this part's reward table and enumerate against it. The construction below is
+# a 2x2 / hidden-32 model, so the cost is negligible, and it makes the ground truth
+# unambiguous: computing theoretical_z here previously happened to be right only
+# because Part 2's last model used the same reward scale. That is the kind of ordering
+# dependence that breaks the moment reward_scales changes.
+create_grid_world_gflownet(grid_size=2,
+                           reward_positions=Dict((2,2) => reward_value),
+                           hidden_dim=32,
+                           partition_function_method=LEARNABLE_ESTIMATION)
+theoretical_z = enumerated_z(2)
+
+# Init points stated RELATIVE to the enumerated truth. The second label used to read
+# "Near true (Z~40)" from the discredited 4R formula -- log(35) is 2.9x off the real
+# Z of 12.1, so the "near true" arm was actually the far one.
 init_values = [
-    ("Zero (Z=1)", 0.0), 
-    ("Near true (Z≈40)", log(35.0))
+    ("Zero (Z=1)", 0.0),
+    ("Near true (Z=$(round(theoretical_z, digits=1)))", log(theoretical_z))
 ]  # Just 2 cases for demo
 
 init_results = Dict()

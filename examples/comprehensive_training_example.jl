@@ -68,6 +68,25 @@ function build_model(;
 end
 
 """
+    flags_for(objective)
+
+The `build_model` / `TrainingConfig` knobs that supply everything `objective`
+requires, DERIVED from `get_objective_requirements` rather than hand-listed.
+
+Every site in this file that builds a model for a given objective goes through here,
+so no site can drift from the library's own declaration of what that objective needs.
+"""
+function flags_for(objective::TrainingObjective)
+    reqs = get_objective_requirements(objective)
+    return (;
+        include_backward = "backward_policy" in reqs,
+        include_flow_estimator = "flow_estimator" in reqs,
+        partition_function_method = "learnable_log_Z" in reqs ?
+            LEARNABLE_ESTIMATION : SIMPLE_ESTIMATION
+    )
+end
+
+"""
     summarize_history(history)
 
 Reduce a `TrainingHistory` to `(final_loss, successful, total)`.
@@ -119,33 +138,39 @@ function demonstrate_training_objectives()
     println("🎯 Demonstrating All Implemented Training Objectives")
     println("=" ^ 60)
 
-    # (objective, label, model flags). `get_objective_requirements` reports the
-    # declared requirements, but SUB_TRAJECTORY_BALANCE's loss additionally
-    # demands a flow estimator, so the flags below are what the losses actually
-    # read, not a restatement of that function's output.
+    # Flags are DERIVED from get_objective_requirements, never hand-listed.
+    #
+    # This table used to be maintained by hand, with a comment explaining that it
+    # deliberately disagreed with get_objective_requirements because that function
+    # under-reported SUB_TRAJECTORY_BALANCE. The function is correct now -- it and
+    # validate_training_config read one declarative table -- so duplicating it here
+    # would only be a second copy free to drift again. Deriving instead means this
+    # demo also proves the reported requirements are sufficient to actually train.
     objectives = [
-        (TRAJECTORY_BALANCE, "Trajectory Balance", (;)),
-        (DETAILED_BALANCE, "Detailed Balance", (; include_backward = true)),
-        (FLOW_MATCHING, "Flow Matching", (; include_flow_estimator = true)),
-        (SUB_TRAJECTORY_BALANCE, "Sub-Trajectory Balance", (; include_flow_estimator = true)),
-        (TRAJECTORY_LIKELIHOOD_MAXIMIZATION, "Trajectory Likelihood Maximization (TLM)",
-         (; include_backward = true))
+        (TRAJECTORY_BALANCE, "Trajectory Balance"),
+        (DETAILED_BALANCE, "Detailed Balance"),
+        (FLOW_MATCHING, "Flow Matching"),
+        (SUB_TRAJECTORY_BALANCE, "Sub-Trajectory Balance"),
+        (TRAJECTORY_LIKELIHOOD_MAXIMIZATION, "Trajectory Likelihood Maximization (TLM)")
     ]
 
     results = Dict{String,TrainingHistory}()
 
-    for (objective, name, flags) in objectives
+    for (objective, name) in objectives
+        flags = flags_for(objective)
         println("\n📈 $name")
         println("   Declared requirements: " *
                 "$(join(get_objective_requirements(objective), ", "))")
         println("   Model built with: " *
-                (isempty(flags) ? "forward policy only" :
-                 join(["$k=$v" for (k, v) in pairs(flags)], ", ")))
+                join(["$k=$v" for (k, v) in pairs(flags)], ", "))
 
         model = build_model(; flags...)
         config = TrainingConfig(
             objective = objective,
-            partition_function_method = SIMPLE_ESTIMATION,
+            # Must MATCH the model: train_step! reads the method from the config
+            # when deciding whether to update log_Z, so a config saying SIMPLE
+            # against a model that has a learnable Z silently freezes it.
+            partition_function_method = flags.partition_function_method,
             n_iterations = DEMO_ITERATIONS,
             batch_size = DEMO_BATCH,
             learning_rate = 0.01,
@@ -178,11 +203,14 @@ function demonstrate_partition_function_methods()
     println("\n🔢 Demonstrating Partition Function Methods")
     println("=" ^ 60)
 
+    # Only the two methods that EXIST. SAMPLING_ESTIMATION and ADAPTIVE_ESTIMATION are
+    # exported enum values documented "Not implemented"; nothing allocates or updates a
+    # log_Z for them, so they silently pin Z = 1. This demo used to train all four and
+    # report four sets of numbers, three of which were the same fixed-Z run under
+    # different labels. They are demonstrated below as REFUSED instead.
     methods = [
         (SIMPLE_ESTIMATION, "Simple Estimation (Z fixed at 1)"),
-        (LEARNABLE_ESTIMATION, "Learnable Z (gradient descent on log Z)"),
-        (SAMPLING_ESTIMATION, "Sampling-Based Estimation"),
-        (ADAPTIVE_ESTIMATION, "Adaptive Method Switching")
+        (LEARNABLE_ESTIMATION, "Learnable Z (gradient descent on log Z)")
     ]
 
     results = Dict{String,TrainingHistory}()
@@ -212,6 +240,24 @@ function demonstrate_partition_function_methods()
         end
 
         results[name] = history
+    end
+
+    # The two unimplemented methods, shown being refused. This is the useful thing to
+    # demonstrate about them: previously a caller got numbers back and no indication
+    # that Z had been pinned at 1.
+    println("\n🚫 Methods that are refused rather than silently pinning Z = 1")
+    for method in (SAMPLING_ESTIMATION, ADAPTIVE_ESTIMATION)
+        try
+            train_gflownet(build_model(; partition_function_method = method),
+                           TrainingConfig(objective = TRAJECTORY_BALANCE,
+                                          partition_function_method = method,
+                                          n_iterations = 1, batch_size = 2);
+                           verbose = false)
+            error("$method was accepted -- the guard in validate_training_config is gone")
+        catch e
+            e isa ArgumentError || rethrow()
+            println("   $method -> refused: $(first(split(e.msg, " -- ")))")
+        end
     end
 
     return results
@@ -270,9 +316,15 @@ function demonstrate_advanced_configurations()
     # 3. Sub-trajectory balance with a shorter sub-path window: more, smaller
     #    balance constraints per trajectory.
     println("\n🪜 Sub-trajectory balance with a short sub-path window")
-    model_subtb = build_model(; include_flow_estimator = true)
+    # flags_for, not a hand-picked flag: SubTB needs a backward policy and a learnable
+    # Z as well as the flow estimator. With only the estimator every iteration threw
+    # and train_gflownet recorded NaN, so this block reported a finished run that had
+    # trained on nothing.
+    subtb_flags = flags_for(SUB_TRAJECTORY_BALANCE)
+    model_subtb = build_model(; subtb_flags...)
     config_subtb = TrainingConfig(
         objective = SUB_TRAJECTORY_BALANCE,
+        partition_function_method = subtb_flags.partition_function_method,
         n_iterations = DEMO_ITERATIONS,
         batch_size = DEMO_BATCH,
         learning_rate = 0.01,
@@ -294,21 +346,30 @@ function compare_methods_performance()
     println("\n📊 Performance Comparison")
     println("=" ^ 60)
 
+    # (label, objective, Z method). Components come from flags_for, so only the Z
+    # method varies per row -- that is the axis this comparison is about.
+    #
+    # Two rows used to read ADAPTIVE_ESTIMATION and SAMPLING_ESTIMATION. Neither is
+    # implemented, so both were really running fixed Z = 1 under a label claiming
+    # otherwise, and the "Sub-TB + adaptive Z" row was the degenerate configuration
+    # that collapses onto one terminal state. Only the two methods that exist appear
+    # now, and SUB_TRAJECTORY_BALANCE takes LEARNABLE because it has no valid
+    # fixed-Z form.
     scenarios = [
-        ("TB + fixed Z", TRAJECTORY_BALANCE, SIMPLE_ESTIMATION, (;)),
-        ("TB + learnable Z", TRAJECTORY_BALANCE, LEARNABLE_ESTIMATION, (;)),
-        ("Sub-TB + adaptive Z", SUB_TRAJECTORY_BALANCE, ADAPTIVE_ESTIMATION,
-         (; include_flow_estimator = true)),
-        ("DB + sampling Z", DETAILED_BALANCE, SAMPLING_ESTIMATION,
-         (; include_backward = true))
+        ("TB + fixed Z", TRAJECTORY_BALANCE, SIMPLE_ESTIMATION),
+        ("TB + learnable Z", TRAJECTORY_BALANCE, LEARNABLE_ESTIMATION),
+        ("Sub-TB + learnable Z", SUB_TRAJECTORY_BALANCE, LEARNABLE_ESTIMATION),
+        ("DB + fixed Z", DETAILED_BALANCE, SIMPLE_ESTIMATION)
     ]
 
     results = Dict{String,TrainingHistory}()
 
-    for (name, objective, z_method, flags) in scenarios
+    for (name, objective, z_method) in scenarios
         println("\n🔬 $name")
 
-        model = build_model(; partition_function_method = z_method, flags...)
+        # Components from flags_for; the row's z_method overrides only the Z axis.
+        flags = merge(flags_for(objective), (; partition_function_method = z_method))
+        model = build_model(; flags...)
         config = TrainingConfig(
             objective = objective,
             partition_function_method = z_method,

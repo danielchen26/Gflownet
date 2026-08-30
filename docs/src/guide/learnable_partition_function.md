@@ -60,7 +60,7 @@ Where:
 - $Z$ is the partition function (normalization constant)
 - $P_F(\tau)$ is the forward probability of trajectory $\tau$
 - $R(s_T)$ is the reward at terminal state $s_T$
-- $P_B(\tau)$ is the backward probability (if used)
+- $P_B(\tau)$ is the backward probability, which must be a normalised distribution over each state's parents
 
 With `LEARNABLE_ESTIMATION`, we learn $\log Z$ as a parameter to satisfy this equation exactly.
 
@@ -74,9 +74,12 @@ With `LEARNABLE_ESTIMATION`, we learn $\log Z$ as a parameter to satisfy this eq
 2. **Loss Computation**:
    ```julia
    # Trajectory balance loss with learnable Z
-   trajectory_balance_error = log_Z + log_P_F - log_R
+   trajectory_balance_error = log_Z + log_P_F - log_P_B - log_R
    loss = trajectory_balance_error^2
    ```
+   The `log_P_B` term stays in the expression even without a learned backward policy:
+   `src/training/losses.jl` then uses uniform-over-parents, $P_B = 1/|\text{parents}|$.
+   Omitting it sets $P_B \equiv 1$ unnormalised, valid only when every state has one parent.
 
 3. **Optimization**:
    - $\log Z$ is updated along with policy parameters
@@ -98,10 +101,17 @@ Based on extensive testing:
 - Theoretical guarantees on distribution correctness
 
 ### Example: 2×2 Grid World
-In a simple 2×2 grid with reward R at corner:
-- Theory: Z should equal 4R (with specific reward structure)
-- LEARNABLE_ESTIMATION: Learns Z ≈ 4R with <1% error
+In a 2×2 grid with reward R at the far corner, $Z = \sum_x R(x)$ over the states that may
+terminate. (1,1) may not terminate, so its reward of 0.1 is excluded, leaving
+$Z = 1.0 + 1.0 + R$: 12.0 at $R = 10$, 3.0 at $R = 1$.
+- LEARNABLE_ESTIMATION, forward policy only: Z = 12.000 at $R = 10$ (0.0% error)
+- On the 3×3 grid, exact Z = 19.0: 18.955 forward-only, 19.008 with a learned backward policy
 - SIMPLE_ESTIMATION: Assumes Z = 1 (incorrect but often works)
+
+This page previously claimed "Z should equal 4R". The value it was describing, 22.0 at
+$R = 10$, was the path-count-biased optimum $\sum_x n_\text{paths}(x) R(x)$ of a trajectory
+balance loss that skipped its backward term (measured 22.000 on the 2×2, 77.928 on the 3×3
+against a true 19.0). The loss has since been repaired in `src/training/losses.jl`.
 
 ## Advanced Usage
 

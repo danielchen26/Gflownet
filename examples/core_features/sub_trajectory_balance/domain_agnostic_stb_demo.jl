@@ -124,18 +124,24 @@ history_tb = train_gflownet(model_tb, config_tb; verbose=false)
 
 # Train with SUB_TRAJECTORY_BALANCE
 println("\n2. Training with SUB_TRAJECTORY_BALANCE...")
-# SUB_TRAJECTORY_BALANCE balances F(sᵢ) against F(sⱼ) on every sub-path, so the
-# model needs a flow estimator. Without include_flow_estimator=true every
-# iteration throws and the recorded loss is NaN, i.e. no training happens.
+# SUB_TRAJECTORY_BALANCE balances F(sᵢ) against F(sⱼ) on every sub-path, and it
+# anchors F(s₀) = Z. So it needs THREE things, not just the flow estimator this
+# demo used to pass: a flow estimator, a backward policy, and a learnable Z.
+# `get_objective_requirements(SUB_TRAJECTORY_BALANCE)` is the authority; with any
+# of them missing, validate_training_config now refuses up front rather than
+# letting every iteration throw and record NaN.
 model_stb = create_gflownet(
     initial_state,
     all_actions;
     state_dim=2,
     hidden_dim=64,
-    include_flow_estimator=true
+    include_flow_estimator=true,
+    include_backward=true,
+    partition_function_method=LEARNABLE_ESTIMATION
 )
 config_stb = TrainingConfig(
     objective=SUB_TRAJECTORY_BALANCE,
+    partition_function_method=LEARNABLE_ESTIMATION,
     n_iterations=50,
     batch_size=16,
     sub_trajectory_length=4

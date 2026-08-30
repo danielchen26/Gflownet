@@ -26,7 +26,7 @@ using Dates
 try
     using GFlowNet
     using GFlowNet: AbstractState, AbstractAction, TrainingConfig, TrainingObjective, PartitionFunctionMethod
-    using GFlowNet: SUB_TRAJECTORY_BALANCE, ADAPTIVE_ESTIMATION
+    using GFlowNet: SUB_TRAJECTORY_BALANCE, LEARNABLE_ESTIMATION
     global GFLOWNET_AVAILABLE = true
     println("✅ GFlowNet package loaded successfully")
 catch e
@@ -39,7 +39,9 @@ catch e
     abstract type AbstractAction end
     
     @enum TrainingObjective SUB_TRAJECTORY_BALANCE
-    @enum PartitionFunctionMethod ADAPTIVE_ESTIMATION
+    # Mirrors the method the real config above requests, so the mock path and the
+    # GFlowNet path cannot disagree.
+    @enum PartitionFunctionMethod LEARNABLE_ESTIMATION
     
     struct TrainingConfig
         objective::TrainingObjective
@@ -1607,7 +1609,11 @@ function run_comprehensive_benchmark()
     config = if GFLOWNET_AVAILABLE
         GFlowNet.TrainingConfig(
             objective = GFlowNet.SUB_TRAJECTORY_BALANCE,
-            partition_function_method = GFlowNet.ADAPTIVE_ESTIMATION,
+            # LEARNABLE is REQUIRED by SUB_TRAJECTORY_BALANCE, which anchors
+            # F(s_0) = Z. ADAPTIVE_ESTIMATION is not implemented and pinned Z = 1,
+            # i.e. exactly the configuration measured to collapse the sampler onto a
+            # single terminal state (TV 0.9474).
+            partition_function_method = GFlowNet.LEARNABLE_ESTIMATION,
             batch_size = 32,
             learning_rate = 0.001,
             n_iterations = 2000,
@@ -1615,7 +1621,7 @@ function run_comprehensive_benchmark()
             early_stopping_patience = 400
         )
     else
-        TrainingConfig(SUB_TRAJECTORY_BALANCE, ADAPTIVE_ESTIMATION, 32, 0.001, 2000, 200, 400, Dict())
+        TrainingConfig(SUB_TRAJECTORY_BALANCE, LEARNABLE_ESTIMATION, 32, 0.001, 2000, 200, 400, Dict())
     end
     
     println("⚙️  Training Configuration:")
@@ -1753,7 +1759,7 @@ function test_integration()
         
         println("✓ PartitionFunctionMethod enums:")
         println("   • SIMPLE_ESTIMATION: $(GFlowNet.SIMPLE_ESTIMATION)")
-        println("   • ADAPTIVE_ESTIMATION: $(GFlowNet.ADAPTIVE_ESTIMATION)")
+        println("   • LEARNABLE_ESTIMATION: $(GFlowNet.LEARNABLE_ESTIMATION)")
         
         # Test TrainingConfig creation
         test_config = GFlowNet.TrainingConfig(

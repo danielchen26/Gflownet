@@ -219,7 +219,13 @@ end
     assert_relative_error_below(observed, expected, label; max_rel_error) -> Float64
 
 Require `|observed - expected| / |expected| <= max_rel_error`. Use where the demo
-has an exact analytic target (e.g. the 2×2 grid partition function Z = 4R).
+has an exact analytic target, e.g. the grid world partition function
+`Z = sum_x R(x)` over the states that may terminate. (1,1) may not terminate
+(`src/applications/grid_world.jl:107`), so on the 2x2 grid with reward R at (2,2) the
+target is `1.0 + 1.0 + R` — 12.0 at R = 10, not the `4R` this docstring used to cite.
+The old `4R`-ish figure of 22.0 was `sum_x n_paths(x) R(x)`, the optimum of a trajectory
+balance loss missing its backward term; measured 22.000 on the 2x2 and 77.928 on the 3x3
+(true 19.0) before `src/training/losses.jl` was repaired.
 """
 function assert_relative_error_below(observed::Real, expected::Real,
                                      label::AbstractString; max_rel_error::Real)

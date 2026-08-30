@@ -145,7 +145,10 @@ function main()
         hidden_dim = 128,
         learning_rate = 0.001,
         include_flow_estimator = true,
-        partition_function_method = GFlowNet.SAMPLING_ESTIMATION,
+        # LEARNABLE, not SAMPLING: SAMPLING_ESTIMATION is not implemented and
+        # silently pinned Z = 1 here, so trajectory balance was unsatisfiable on a
+        # reward set that does not sum to 1.
+        partition_function_method = GFlowNet.LEARNABLE_ESTIMATION,
         rng = rng
     )
     
@@ -157,7 +160,9 @@ function main()
     # that the example finishes in well under a minute of training.
     config = GFlowNet.TrainingConfig(
         objective=GFlowNet.TRAJECTORY_BALANCE,
-        partition_function_method=GFlowNet.SAMPLING_ESTIMATION,  # Complex graph spaces need sampling
+        # Must match the model. The old comment here claimed "complex graph spaces
+        # need sampling", asserting a benefit from an unimplemented no-op.
+        partition_function_method=GFlowNet.LEARNABLE_ESTIMATION,
         batch_size=4,
         learning_rate=0.001,
         n_iterations=10,

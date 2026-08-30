@@ -14,12 +14,19 @@
 
 In GFlowNets, the partition function $Z$ is the total flow through the initial state $s_0$:
 
-$$Z = F(s_0) = \sum_{\tau: s_0 \to s_T} P_F(\tau) R(s_T)$$
+$$Z = F(s_0) = \sum_{x \in \mathcal{X}} R(x)$$
+
+Equivalently, decomposing each terminal state's reward over the trajectories that reach it:
+
+$$Z = \sum_{\tau: s_0 \to x} R(x) \, P_B(\tau \mid x)$$
 
 Where:
-- $\tau$ represents all possible trajectories from $s_0$ to any terminal state $s_T$
-- $P_F(\tau)$ is the forward probability of trajectory $\tau$
-- $R(s_T)$ is the reward at terminal state $s_T$
+- $\mathcal{X}$ is the set of terminal states, each counted **once**
+- $\tau$ represents all possible trajectories from $s_0$ to a terminal state $x$
+- $P_B(\tau \mid x)$ is the backward probability of $\tau$ given its endpoint, so $\sum_{\tau \to x} P_B(\tau \mid x) = 1$
+- $R(x)$ is the reward at terminal state $x$
+
+Weighting trajectories by $P_F(\tau)$ instead of $P_B(\tau \mid x)$ does not give $Z$. That substitution is what produced the discredited "$Z = 4R$" claim this document used to carry; the worked 2×2 example below shows where it went wrong.
 
 ### Trajectory Balance Condition
 
@@ -239,7 +246,7 @@ learned_Z = exp(model.parameters.log_Z)
 - All examples use fixed initial states
 - The math is valid for both $P(\tau|s_0)$ and proper normalization
 - Training successfully learns both good policies and correct Z values
-- In 2×2 grid: learns Z = 4R with <1% error (mathematically exact)
+- In 2×2 grid with the reward corner at $R = 10$: learns $Z = 12.000$, the exact $\sum_x R(x)$ (0.0% error)
 
 ### What's Still Missing
 1. **Flow network implementation** for $F(s)$ computation
@@ -268,7 +275,7 @@ You need proper $Z$ computation when:
 ### Benefits of LEARNABLE_ESTIMATION
 1. **Improved Exploration**: ~42% better mode discovery in complex environments
 2. **Theoretical Correctness**: Exact trajectory balance equation satisfaction
-3. **Diagnostic Value**: Learned Z reveals problem structure (e.g., Z = 4R in 2×2 grid)
+3. **Diagnostic Value**: Learned Z reveals problem structure and is checkable against $\sum_x R(x)$ (12.0 on the 2×2 grid at $R = 10$, 19.0 on the 3×3)
 4. **Future-Proofing**: Easy transition to multi-start GFlowNets
 
 ### When to Use Each Method
@@ -287,42 +294,33 @@ You need proper $Z$ computation when:
 3. **Future**: Full flow networks for arbitrary DAGs
 4. **Research**: Theoretical analysis of convergence
 
-## Mathematical Example: Why Z = 4R in 2×2 Grid
+## Mathematical Example: Z in the 2×2 Grid
 
-In a 2×2 grid world starting at (1,1) with reward R only at (2,2):
+In a 2×2 grid world starting at (1,1) with reward $R$ at (2,2):
 
-### Path Analysis
-There are exactly 2 paths from (1,1) to (2,2):
-1. (1,1) → (1,2) → (2,2)
-2. (1,1) → (2,1) → (2,2)
+### Which States Count
+
+`is_applicable` forbids `Terminate` at the start (`src/applications/grid_world.jl:107`, `state.x != 1 || state.y != 1`), so (1,1) is not a terminal state and its reward of 0.1 is excluded from $Z$. The terminable states are (1,2), (2,1) and (2,2), with rewards 1.0, 1.0 and $R$ under the distance-based rule in `GFlowNet.reward(::GridState)`.
 
 ### Partition Function Calculation
-With uniform random policy (P = 0.5 for each valid action):
-- Path 1 probability: 0.5 × 0.5 = 0.25
-- Path 2 probability: 0.5 × 0.5 = 0.25
-- Total probability of reaching (2,2): 0.25 + 0.25 = 0.5
 
-However, in GFlowNets we also count partial trajectories:
-- Terminal at (1,2): probability 0.5 × 0.5 = 0.25, reward 0
-- Terminal at (2,1): probability 0.5 × 0.5 = 0.25, reward 0
-- Terminal at (2,2): probability 0.5, reward R
+$Z$ sums the reward of each terminal state exactly once, no matter how many trajectories reach it:
 
-Therefore: Z = 0.25×0 + 0.25×0 + 0.5×R = 0.5R
+$$Z = R(1,2) + R(2,1) + R(2,2) = 1.0 + 1.0 + R$$
 
-Wait, this seems wrong. Let me recalculate...
+So $Z = 12.0$ at $R = 10$, and $Z = 3.0$ at $R = 1$. The 3×3 grid with (3,3) $= 10$ gives $Z = 19.0$ the same way. `test/theory/enumerate.jl` computes these ground truths with `can_terminate`, `reward_table` and `exact_Z`.
 
-Actually, with proper GFlowNet formulation where we must reach a terminal state:
-- From (1,1): Can go to (1,2) or (2,1) with equal probability
-- From (1,2): Can only go to (2,2) (forced terminal)
-- From (2,1): Can only go to (2,2) (forced terminal)
-- At (2,2): Terminal with reward R
+### Why This Document Used to Claim Z = 4R
 
-So all paths lead to (2,2), each with probability 0.5:
-Z = 2 paths × 0.5 probability × R reward = R
+Earlier revisions recorded an anomaly and left it open: the code learned roughly $4R$ (22.0 at $R = 10$), and the text concluded that "the implementation might be counting something differently". It was. The trajectory balance loss in `src/training/losses.jl` skipped its $\sum \log P_B$ term whenever `model.backward_policy === nothing`, which sets $P_B \equiv 1$ unnormalised. $P_B \equiv 1$ is a distribution only when every state has exactly one parent; (2,2) has two, reached from (1,2) and from (2,1).
 
-But LEARNABLE_ESTIMATION learns Z = 4R. This suggests the implementation might be counting something differently, possibly:
-- Bidirectional flows in the trajectory balance
-- Or a different reward scaling factor
+With the backward term absent, the loss is minimised at
+
+$$Z = \sum_x n_\text{paths}(x) \, R(x)$$
+
+and the sampled terminal law becomes $n(x) R(x) / \sum_y n(y) R(y)$, biased toward states reachable by more paths. Measured before the repair: $Z = 22.000$ on the 2×2 at $R = 10$ against a true 12.0, and $Z = 77.928$ on the 3×3 against a true 19.0. The 2×2 path counts are $n(1,2) = n(2,1) = 1$ and $n(2,2) = 2$, giving $1.0 + 1.0 + 2R = 22.0$ at $R = 10$; the 3×3 counts give 78.0. So "$4R$" was an artefact of reading $2R + 2$ at the single value $R = 10$, not a law.
+
+The loss now falls back to uniform-over-parents, $P_B = 1/|\text{parents}|$, when no backward policy is present. Measured after the repair: 2×2 forward-only $Z = 12.000$ (0.0% error), 3×3 forward-only $Z = 18.955$ (0.2% error), 3×3 with a learned backward policy $Z = 19.008$. The two $P_B$ arms collapse onto the same $Z$, which is the invariance trajectory balance demands: the objective is valid for any fixed normalised $P_B$.
 
 ## Conclusion
 

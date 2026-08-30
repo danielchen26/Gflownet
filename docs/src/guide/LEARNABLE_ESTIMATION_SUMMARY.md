@@ -70,19 +70,31 @@ ComponentArray(
 ```julia
 # With LEARNABLE_ESTIMATION
 log_Z = params.log_Z  # Trainable
-loss = (log_Z + log_P_F - log_R)²
+loss = (log_Z + log_P_F - log_P_B - log_R)²
 
-# With SIMPLE_ESTIMATION  
+# With SIMPLE_ESTIMATION
 log_Z = 0.0  # Fixed (Z = 1)
-loss = (log_P_F - log_R)²
+loss = (log_P_F - log_P_B - log_R)²
 ```
+
+The `log_P_B` term is not optional. Dropping it sets $P_B \equiv 1$ unnormalised, which is
+a distribution only when every state has exactly one parent. `src/training/losses.jl` used
+to drop it when no backward policy was configured; it now falls back to
+uniform-over-parents, $P_B = 1/|\text{parents}|$.
 
 ## Performance Results
 
 ### 2×2 Grid World
-- True Z = 4R (mathematical exact value)
-- LEARNABLE_ESTIMATION: Learns Z ≈ 4R with <1% error
+With the reward corner at $R = 10$, the exact $Z = \sum_x R(x)$ over terminable states is
+$1.0 + 1.0 + 10 = 12.0$; (1,1) cannot terminate, so its reward of 0.1 is excluded.
+- LEARNABLE_ESTIMATION, forward policy only: Z = 12.000 (0.0% error)
+- 3×3 grid, exact Z = 19.0: 18.955 forward-only (0.2% error), 19.008 with a learned backward policy
 - SIMPLE_ESTIMATION: Assumes Z = 1 (incorrect)
+
+Earlier revisions of this page reported "true Z = 4R" and a learned Z of about 22.0 at
+$R = 10$. That was the path-count-biased optimum $\sum_x n_\text{paths}(x) R(x)$ of a
+trajectory balance loss missing its backward term, measured at 22.000 on the 2×2 and
+77.928 on the 3×3 (true 19.0), not the partition function.
 
 ### Complex Environments
 - 42% improvement in mode discovery
