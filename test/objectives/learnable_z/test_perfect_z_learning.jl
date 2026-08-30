@@ -22,28 +22,42 @@ Random.seed!(42)
 @testset "Perfect Z Learning Validation" begin
     
     @testset "Theoretical Z Calculation" begin
-        @test begin
-            # For a 2x2 grid from (1,1) to (2,2), there are exactly 2 paths:
-            # Path 1: (1,1) → (1,2) → (2,2)  [Right then Down]
-            # Path 2: (1,1) → (2,1) → (2,2)  [Down then Right]
-            
-            # Under uniform policy, each action has probability 0.5
-            # Each path has probability 0.5 * 0.5 = 0.25
-            # Total flow: Z = R * (0.25 + 0.25) = R * 0.5
-            
-            reward = 10.0
-            theoretical_z = reward * 0.5
-            
-            # Verify this matches the compute_exact_z_2x2 function
-            @test theoretical_z == 5.0
-            
-            # Test with different rewards
-            for r in [1.0, 10.0, 100.0, 1000.0]
-                @test r * 0.5 == r / 2.0  # Z = R/2 for 2x2 grid
-            end
-            
-            true
-        end
+        # This testset used to assert `reward * 0.5 == 5.0` and then, for four reward
+        # values, `r * 0.5 == r / 2.0`. The second is arithmetic about Float64, true for
+        # every r, and neither statement touches a model. It was a TAUTOLOGY wearing the
+        # name of a partition-function check, and it was the third mutually inconsistent
+        # hand-rolled Z formula in this repo (the others claimed 4R and
+        # sum n_paths(x) R(x)).
+        #
+        # The derivation above it was wrong in the same way as the others: it fixed
+        # P_F at a uniform 0.5 -- P_F is LEARNED -- and counted only the (2,2) reward,
+        # when `reward_positions` merely OVERRIDES that cell and (1,2)/(2,1) keep the
+        # distance-based default 1.0.
+        #
+        # Z is defined as sum over terminal states of R(x), and grid world forbids
+        # terminating at the start state, so (1,1) is excluded. Enumerate it against the
+        # live reward table rather than asserting a formula.
+        create_grid_world_gflownet(grid_size = 2,
+                                   reward_positions = Dict((2, 2) => 10.0),
+                                   hidden_dim = 16,
+                                   partition_function_method = LEARNABLE_ESTIMATION)
+
+        terminable = [(i, j) for i in 1:2, j in 1:2
+                      if GFlowNet.is_applicable(GFlowNet.Terminate(),
+                                                GridState(i, j, false))]
+        @test Set(terminable) == Set([(1, 2), (2, 1), (2, 2)])   # (1,1) cannot terminate
+
+        Z = sum(GFlowNet.reward(GridState(i, j, true)) for (i, j) in terminable)
+        @test Z ≈ 12.0        # 1.0 + 1.0 + 10.0, measured from the live reward table
+
+        # R enters Z with coefficient 1, so Z is affine in R with slope 1 -- which is
+        # what rules out every c*R formula, including the R/2 this test used to assert.
+        create_grid_world_gflownet(grid_size = 2,
+                                   reward_positions = Dict((2, 2) => 100.0),
+                                   hidden_dim = 16,
+                                   partition_function_method = LEARNABLE_ESTIMATION)
+        Z100 = sum(GFlowNet.reward(GridState(i, j, true)) for (i, j) in terminable)
+        @test Z100 - Z ≈ 90.0
     end
     
     @testset "Path Enumeration Verification" begin

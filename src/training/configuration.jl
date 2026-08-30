@@ -42,23 +42,38 @@ The partition function appears in trajectory balance objectives:
 
 # Available Methods
 
-## SIMPLE_ESTIMATION
-- Sets Z = 1 (fixed)
-- Valid when starting from a fixed initial state
-- Default method for simplicity
-
-## LEARNABLE_ESTIMATION (Recommended)
+## LEARNABLE_ESTIMATION (DEFAULT)
 - Learns Z = exp(log_Z) as a trainable parameter
 - Improves exploration (~42% better mode discovery)
-- Ensures theoretical correctness of trajectory balance
-- Prepares for future multi-start GFlowNets
+- REQUIRED for SUB_TRAJECTORY_BALANCE, which anchors F(s_0) = Z; with Z pinned the
+  sampler collapses onto a single terminal state (measured TV 0.9474)
 
-## SAMPLING_ESTIMATION (Not implemented)
-- Would estimate Z ≈ (1/N) Σᵢ R(sᵢᵀ) / ∏P_F(sᵢ)
-- Monte Carlo estimation from samples
+## SIMPLE_ESTIMATION
+- Sets Z = 1 (fixed)
+- Correct ONLY when the rewards sum to 1. The trajectory-balance residual is
+  (log Z + sum log P_F - log R - sum log P_B)^2; summing its optimum over all
+  trajectories reaching x gives p(x) = R(x)/Z, and p is a distribution, so a fixed
+  Z = 1 is satisfiable iff sum_x R(x) = 1. Otherwise the residual has a floor it
+  can never close: measured 28.021 -> 36.939, i.e. RISING, on a 3-action grid.
+- That statement REQUIRES sum_tau P_B(tau|x) = 1, i.e. a normalised backward policy.
+  It was silently false for forward-only models until losses.jl:535 was repaired:
+  the loss dropped its backward term entirely, which is P_B == 1 unnormalised, and
+  the satisfiability condition was the path-weighted sum_x n_paths(x) R(x) instead.
+  On the 3x3 grid that is 78.0 against a true Z of 19.0. Uniform-over-parents is now
+  used when no backward policy exists, so the plain condition above holds again for
+  every configuration.
+- Was the default. That made the library's primary objective unsatisfiable out of
+  the box for 26 callers, which is why the default is now LEARNABLE_ESTIMATION.
 
-## ADAPTIVE_ESTIMATION (Not implemented)
+## SAMPLING_ESTIMATION (REJECTED -- not implemented)
+- Would estimate Z ~ (1/N) sum_i R(s_i^T) / prod P_F(s_i)
+- Nothing implements it: no log_Z is allocated and none is updated, so selecting it
+  silently pins Z = 1. validate_training_config now throws rather than let a caller
+  believe Monte-Carlo estimation is happening.
+
+## ADAPTIVE_ESTIMATION (REJECTED -- not implemented)
 - Would switch methods based on training progress
+- Same silent no-op, same refusal.
 
 # Example
 ```julia
@@ -435,6 +450,29 @@ function validate_training_config(config::TrainingConfig, model::GFlowNetModel)
     # with a fixed Z is unsatisfiable but still trains and still moves the policy, and
     # is correct outright when the rewards sum to 1, so it warns. Refusing to run it
     # would break legitimate code-path tests for no mathematical gain.
+    # SAMPLING_ESTIMATION and ADAPTIVE_ESTIMATION are EXPORTED enum values that do
+    # nothing. Both are documented "Not implemented" above, only LEARNABLE_ESTIMATION
+    # allocates log_Z (interface.jl:89, 114, 135, 154, 173), and only it updates log_Z
+    # (training.jl:63). So selecting either silently pins Z = 1 -- the caller believes
+    # they chose Monte-Carlo estimation or adaptive switching and instead gets the
+    # unsatisfiable fixed-Z regime.
+    #
+    # Three live examples were doing exactly this: feature_acquisition/main.jl:1610
+    # paired ADAPTIVE with SUB_TRAJECTORY_BALANCE, i.e. the configuration measured to
+    # collapse onto one terminal state (TV 0.9474); causal_discovery.jl:148 selected
+    # SAMPLING with the comment "Complex graph spaces need sampling", claiming a
+    # benefit from a no-op. Both "passed" because Z = 1 does not crash.
+    #
+    # Refuse rather than warn: unlike a fixed Z chosen deliberately, there is no
+    # configuration in which these two do what their names say.
+    if config.partition_function_method in (SAMPLING_ESTIMATION, ADAPTIVE_ESTIMATION)
+        throw(ArgumentError(
+            "partition_function_method = $(config.partition_function_method) is NOT " *
+            "IMPLEMENTED -- it silently pins Z = 1. Use LEARNABLE_ESTIMATION to train " *
+            "Z as a parameter, or SIMPLE_ESTIMATION to pin Z = 1 deliberately (only " *
+            "correct when the rewards sum to 1)."))
+    end
+
     reqs = _objective_component_requirements(config.objective)
     missing_parts = String[]
 

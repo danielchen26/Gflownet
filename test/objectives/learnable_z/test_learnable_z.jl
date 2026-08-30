@@ -197,28 +197,54 @@ Random.seed!(42)
         end
         
         @testset "Z parameter optimization" begin
+            # This testset used to assert `abs(final_z) < abs(initial_z)` with the
+            # comment "Should get closer to 0". Zero is the WRONG target: log Z = 0 is
+            # Z = 1, which is what SIMPLE_ESTIMATION pins. A learnable Z converges to
+            # log(sum_x R(x)), and for the default 3x3 grid that is log(19) = 2.9444
+            # (8 terminable cells; (1,1) cannot terminate).
+            #
+            # It also used hyperparameters that diverge. learning_rate=0.1 with the
+            # default z_learning_rate_multiplier=10 is an effective step of 1.0 on a
+            # log-scale parameter: measured log_Z from a 5.0 start went 5.92 (10 iters),
+            # 7.72 (100), 10.57 (300), then collapsed to -22.52 (800). And 10 iterations
+            # could not have shown convergence either way.
+            #
+            # Measured with learning_rate=0.005, batch 32, seed 42, starting from the
+            # same suboptimal 5.0: log_Z = 2.9445 at 500 iterations, 2.9444 at 1000,
+            # 2.9446 at 1500. Approaching the target from ABOVE is the point -- it rules
+            # out a sign error in the separate log_Z step, which the old assertion could
+            # not distinguish from divergence.
             model = create_grid_world_gflownet(
                 grid_size=3,
                 partition_function_method=LEARNABLE_ESTIMATION
             )
-            
-            # Set initial Z to a suboptimal value. Same defect as above: the old
-            # rebuild read a :flow field that a default model does not have.
-            model.parameters.log_Z = 5.0  # Start with large Z
+
+            terminable = [(i, j) for i in 1:3, j in 1:3
+                          if GFlowNet.is_applicable(GFlowNet.Terminate(),
+                                                    GridState(i, j, false))]
+            log_Z_target = log(sum(GFlowNet.reward(GridState(i, j, true))
+                                   for (i, j) in terminable))
+            @test log_Z_target ≈ log(19.0)
+
+            model.parameters.log_Z = 5.0  # deliberately above the target
             model.log_partition_function = 5.0
-            
+
             config = TrainingConfig(
-                n_iterations=10,
-                batch_size=8,
-                learning_rate=0.1
+                objective=TRAJECTORY_BALANCE,
+                partition_function_method=LEARNABLE_ESTIMATION,
+                n_iterations=500,
+                batch_size=32,
+                learning_rate=0.005
             )
-            
-            initial_z = model.parameters.log_Z
+
+            initial_gap = abs(model.parameters.log_Z - log_Z_target)
             train_gflownet(model, config; verbose=false)
-            final_z = model.parameters.log_Z
-            
-            # Z should move towards more reasonable value
-            @test abs(final_z) < abs(initial_z)  # Should get closer to 0
+            final_gap = abs(model.parameters.log_Z - log_Z_target)
+
+            # Converges TO the partition function, not toward zero. 0.05 nats against a
+            # measured 0.0001 and an initial gap of 2.06.
+            @test final_gap < 0.05
+            @test final_gap < initial_gap
         end
     end
     

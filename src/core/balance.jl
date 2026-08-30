@@ -307,8 +307,13 @@ function _compute_sub_trajectory_loss_differentiable(
 
         log_forward_prob += log_probs[action_pos]
 
-        # P_B(source | target) for this same transition.
-        if !isnothing(model.backward_policy)
+        # P_B(source | target) for this same transition. Same repair as the TB path:
+        # falling through with log P_B = 0 means P_B == 1 unnormalised, valid only if
+        # every state has a unique parent. Uniform over parents otherwise.
+        if isnothing(model.backward_policy)
+            parents = backward_parent_states(target_state, model.all_actions)
+            isempty(parents) || (log_backward_prob += -log(length(parents)))
+        else
             log_backward_prob += log(max(
                 compute_backward_probability(
                     model.backward_policy, target_state, source_state,
@@ -566,15 +571,34 @@ function _standard_trajectory_balance_loss(model::GFlowNetModel, trajectory::Tra
     end
 
     # Compute sum of log backward probabilities: Σ log(P_B(s_i|s_{i+1}))
+    #
+    # With NO backward policy this used to leave the sum at 0.0, i.e. P_B == 1
+    # unnormalised. The comment justifying it said "deterministic backward (following
+    # unique parent)" -- and that precondition is exactly what fails: it holds only
+    # when every state has ONE parent. Grid world's (2,2) has two, so P_B == 1 is not
+    # a distribution and the residual's zero moves.
+    #
+    # Consequence, measured: TB converges to Z = sum_x n_paths(x) R(x) instead of
+    # sum_x R(x) -- 77.928 against 78.0 on the 3x3 grid where Z is 19.0 -- and the
+    # terminal law becomes n(x)R(x)/sum_y n(y)R(y). The sampler is biased toward
+    # states reachable by more paths, which is the defect
+    # test/theory/test_reward_proportionality.jl calls "the bug that was fixed" while
+    # only ever exercising the analytic helpers, never this loss.
+    #
+    # The same file already had the right convention for DB/FM (line ~1003):
+    # uniform over parents. TB now uses it too. TB is valid for ANY fixed normalised
+    # P_B, and sum_tau P_B(tau|x) = 1 then restores Z = sum_x R(x).
     log_backward_prob_sum = 0.0
-    
-    # Only compute backward probabilities if we have a backward policy
-    # For deterministic backward (following unique parent), P_B = 1, so log P_B = 0
-    if !isnothing(model.backward_policy)
-        for i in 1:(length(trajectory.states)-1)
-            source_state = trajectory.states[i]
-            target_state = trajectory.states[i+1]
-            
+
+    for i in 1:(length(trajectory.states)-1)
+        source_state = trajectory.states[i]
+        target_state = trajectory.states[i+1]
+
+        if isnothing(model.backward_policy)
+            parents = backward_parent_states(target_state, model.all_actions)
+            isempty(parents) && continue          # log P_B = log 1 = 0
+            log_backward_prob_sum += -log(length(parents))
+        else
             # Try to compute backward probability
             try
                 backward_prob = backward_transition_probability(model, target_state, source_state)

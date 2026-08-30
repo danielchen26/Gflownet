@@ -112,12 +112,25 @@ using Random
         @test isfinite(f)
         @test f > 0.0  # the estimator exponentiates a log-flow
 
-        # The exact flow functions enumerate the DAG, so they are independent of
-        # the (untrained) weights: F(s_0) is the partition function, and the 3x3
-        # grid with reward 10 at (3,3) has Z = 19 -- the same constant
-        # test/theory/test_reward_proportionality.jl pins by enumeration.
+        # The exact flow functions enumerate the DAG, so F(s_0) is the partition
+        # function: the 3x3 grid with reward 10 at (3,3) has Z = 19, the same constant
+        # test/theory/test_reward_proportionality.jl pins by enumeration. That value is
+        # invariant to WHICH normalised P_B is used, which is why it holds for an
+        # untrained backward policy.
+        #
+        # atol is 1e-4, not the 1e-6 this used to carry. This model has
+        # include_backward=true, so the recursion weights each child by a P_B read from
+        # a Float32 softmax; that normalisation is exact only to Float32 precision, and
+        # the per-state error compounds along the DAG. eps(Float32(19)) is 1.9e-6, so a
+        # 1e-6 bar sits BELOW the achievable precision and the test failed or passed
+        # depending on the RNG state it inherited -- observed 18.999998828 in a full-suite
+        # run and exactly 19.0 in isolation. With a uniform P_B (no backward policy) the
+        # arithmetic stays Float64 and the deviation is 0.0e+00.
+        #
+        # 1e-4 is still five orders of magnitude tighter than any structural error this
+        # could hide: the path-count-biased value on this grid is 78.0.
         @test GFlowNet.flow(model, s) ≈ GFlowNet.partition_function(model)
-        @test GFlowNet.flow(model, s) ≈ 19.0 atol=1e-6
+        @test GFlowNet.flow(model, s) ≈ 19.0 atol=1e-4
         @test GFlowNet.compute_recursive_flow(model, s) ≈ GFlowNet.flow(model, s)
         @test GFlowNet.validate_flow_conservation(model, s)
     end

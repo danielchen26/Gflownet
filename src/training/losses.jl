@@ -532,16 +532,33 @@ function compute_single_trajectory_loss(model::GFlowNetModel, trajectory::Trajec
 
         log_prob_sum += log_probs[action_pos]
 
-        # P_B(s_i | s_{i+1}) for this same transition. With no backward policy
-        # P_B == 1 and the term is 0, which reproduces the previous behaviour --
-        # kept explicit so it is a stated assumption rather than an omission.
+        # P_B(s_i | s_{i+1}) for this same transition.
+        #
+        # The previous code fell through with log P_B = 0, i.e. P_B == 1, and a comment
+        # here called it "a stated assumption rather than an omission". Stating an
+        # assumption is not checking it: P_B == 1 is a distribution only when every
+        # state has ONE parent. Grid world's (2,2) has two.
+        #
+        # Measured consequence before this repair: TB converged to
+        # sum_x n_paths(x) R(x) instead of sum_x R(x) -- 77.928 vs a true Z of 19.0 on
+        # the 3x3 grid, and 22.0 vs 12.0 on the 2x2 -- so the sampler was biased toward
+        # states reachable by more paths. That is the exact defect
+        # test/theory/test_reward_proportionality.jl calls "the bug that was fixed"
+        # while only ever exercising the analytic helpers in enumerate.jl, never this
+        # loss. The regression test guarded a repair that had never been applied here.
+        #
+        # TB is valid for ANY fixed normalised P_B; uniform-over-parents is the
+        # canonical choice and makes sum_tau P_B(tau|x) = 1, restoring Z = sum_x R(x).
+        child = trajectory.states[i + 1]
         if !isnothing(model.backward_policy) && haskey(params, :backward)
-            child = trajectory.states[i + 1]
             pb = compute_backward_probability(
                 model.backward_policy, child, state,
                 params.backward, model.states.backward, model.all_actions
             )
             log_backward_sum += log(max(pb, 1e-8))
+        else
+            n_parents = Zygote.@ignore length(backward_parent_states(child, model.all_actions))
+            n_parents > 1 && (log_backward_sum += -log(n_parents))
         end
     end
 
