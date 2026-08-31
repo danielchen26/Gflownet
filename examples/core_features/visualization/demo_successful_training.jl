@@ -10,21 +10,24 @@ using GFlowNet
 using Statistics
 using Printf
 
-# Load visualization modules.
-# NOTE: the include order below mirrors src/utils/visualization/api/unified_server.jl.
-# core/training_session.jl's `step!` refers to `MolecularAdapter` (and the oracle
-# helpers) at runtime, so the molecular domain chain must be loaded too — otherwise
-# every training step throws UndefVarError, which `step!` swallows into a
-# status="error" result and the demo silently reports NaN losses.
+# Load visualization modules -- the GRID WORLD chain only.
+#
+# The molecular chain (rdkit_bridge, oracle_bridge, oracle_manager,
+# molecular_generation, domains/molecular) used to be included here to mirror
+# unified_server.jl, on the grounds that `step!` refers to `MolecularAdapter`. This demo
+# never constructs one, and loading that chain pulls in PythonCall, whose interpreter
+# teardown blocks Julia's atexit: the demo finished its work and then hung in
+# `close(::Base.AsyncCondition)` for 25 minutes until killed, which is how it appeared
+# as a timeout rather than a failure.
+#
+# Measured: with the molecular chain, exit 124 at 1500 s. Without it, exit 0 in 50 s
+# with identical results (mean reward 2.17 -> 5.35, mode coverage 100%, loss 8.1 ->
+# -0.01). If a future edit here needs MolecularAdapter, add the chain back AND give the
+# script an explicit exit so the Python teardown cannot hold the process.
 include("../../../src/utils/visualization/core/adapters.jl")
 include("../../../src/utils/visualization/core/metrics.jl")
 include("../../../src/utils/visualization/core/training_session.jl")
 include("../../../src/utils/visualization/domains/grid_world.jl")
-include("../../../src/utils/visualization/python/rdkit_bridge.jl")
-include("../../../src/utils/visualization/python/oracle_bridge.jl")
-include("../../../src/utils/visualization/core/oracle_manager.jl")
-include("../../../src/applications/molecular_generation.jl")
-include("../../../src/utils/visualization/domains/molecular.jl")
 
 # Model creation function
 function create_model_and_adapter(domain_type::String, config::Dict)
