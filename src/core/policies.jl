@@ -237,49 +237,16 @@ end
 # Backward Policy P_B(s|s') - Mathematical Foundation
 # =============================================================================
 
-"""
-    backward_probability(policy::BackwardPolicy, target_state, source_state,
-                        parameters, states)
-
-Compute P_B(s|s') - the probability of having come from source_state given target_state.
-
-# Mathematical Foundation
-The backward policy defines the probability distribution over previous states:
-P_B(s|s') = exp(b_θ(s')[s]) / Σ_s'' exp(b_θ(s')[s''])
-
-where b_θ(s') are the logits for previous states from s'.
-
-# Arguments
-- `policy::BackwardPolicy`: Backward policy network
-- `target_state::S`: Current state s'
-- `source_state::S`: Previous state s to compute probability for
-- `parameters`: Network parameters
-- `states`: Network internal states
-
-# Returns
-- `Float64`: Probability P_B(s|s')
-"""
-function backward_probability(policy::BackwardPolicy, target_state, source_state,
-    parameters, states, dag)
-    # Get target state features
-    features = state_to_features(target_state)
-
-    # Get all possible previous states
-    prev_states = get_previous_states(dag, target_state)
-    if isempty(prev_states) || source_state ∉ prev_states
-        return 0.0
-    end
-
-    # Compute backward logits
-    logits, _ = compute_backward_logits(policy, features, prev_states, parameters, states)
-
-    # Convert to probabilities
-    probs = softmax(logits)
-
-    # Find index of source state in prev_states
-    source_idx = findfirst(s -> s == source_state, prev_states)
-    return isnothing(source_idx) ? 0.0 : Float64(probs[source_idx])
-end
+# `backward_probability` was DELETED here. It was a second implementation of P_B(s|s')
+# alongside `compute_backward_probability` below, with zero production callers, no export,
+# and a broken input contract: it fed only the target state's features into a network that
+# expects the target concatenated with a candidate parent, so it threw
+# `DimensionMismatch: A has dimensions (16,6) but B has dimensions (3,1)` on any real
+# model. Its only reference was a `@test_broken` in test/core/test_core_functions.jl whose
+# comment said the cutover "touches src/core/policies.jl, outside this change's
+# ownership".
+#
+# `compute_backward_probability` is the single implementation.
 
 """
     compute_backward_logits(policy::BackwardPolicy, features::Vector{Float32},

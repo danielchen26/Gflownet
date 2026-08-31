@@ -364,27 +364,23 @@ using Optimisers
             @test backward_transition_probability(model, next_state, state) ≈ p_from_22
         end
 
-        @testset "backward_probability (DEAD, BROKEN — see comment)" begin
-            # DEFECT, reported not fixed: src/core/policies.jl:262
-            # `backward_probability(policy, target, source, parameters, states, dag)`
-            # is a pre-repair leftover superseded by compute_backward_probability
-            # (policies.jl:494). It feeds ONLY the target features into
-            # compute_backward_logits, but the backward network built by
-            # create_backward_policy takes the JOINT (target, parent) vector, and
-            # it emits ONE scalar logit, not one per parent. Both contracts are
-            # violated at once:
-            #   DimensionMismatch: A has dimensions (8,6) but B has dimensions (3,1)
-            # (network input width 6, features width 3, grid_size=3 hidden_dim=8).
-            # It has ZERO callers in src/, examples/ or test/ -- grep confirms --
-            # which is why nothing caught it: its only test was the vacuously
-            # guarded testset this one replaces. The clean cutover is to DELETE it
-            # and keep compute_backward_probability as the single implementation;
-            # that touches src/core/policies.jl, outside this change's ownership.
-            # Marked @test_broken so the day it is fixed or removed, Julia reports
-            # an Unexpected Pass and forces this comment to be dealt with.
-            @test_broken GFlowNet.backward_probability(
+        @testset "backward_probability is gone, not just unused" begin
+            # The cutover this testset's predecessor asked for has been done.
+            # `backward_probability` was a second P_B implementation superseded by
+            # compute_backward_probability: zero callers, no export, and it fed only the
+            # target features into a network that takes the JOINT (target, parent) vector,
+            # so it threw DimensionMismatch on any real model. It is deleted.
+            #
+            # Asserting its ABSENCE rather than its brokenness: a `@test_broken` on a
+            # dead function passes forever whether the function exists or not, so it could
+            # not tell anyone the cleanup had happened.
+            @test !isdefined(GFlowNet, :backward_probability)
+
+            # And the surviving implementation still answers, so the delete removed a
+            # duplicate rather than the capability.
+            @test compute_backward_probability(
                 model.backward_policy, next_state, state,
-                model.parameters.backward, model.states.backward, model
+                model.parameters.backward, model.states.backward, model.all_actions
             ) isa Float64
         end
     end
