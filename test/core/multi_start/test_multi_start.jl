@@ -221,45 +221,38 @@ using GFlowNet: MultiStartGFlowNetModel, sample_initial_state, get_initial_state
     end
     
     @testset "Different Training Objectives" begin
+        # This testset used to train FLOW_MATCHING and DETAILED_BALANCE and assert only
+        # `length(history.losses) == 20`. A vector of twenty NaN satisfies that, and that
+        # is exactly what both produced: every iteration threw a MethodError -- no
+        # `forward_transition_probability` or `flow` method exists for
+        # MultiStartGFlowNetModel -- train_gflownet caught it and pushed NaN. Measured 0
+        # of 10 finite losses for both, with and without a backward policy. So the suite
+        # reported two objectives as working when neither had ever run a single step.
+        #
+        # Both now refuse up front, and that refusal is what gets asserted.
         initial_states = [
             GridState(1, 1, false),
             GridState(2, 2, false)
         ]
-        
-        # Test with FLOW_MATCHING
-        model_fm = create_multi_start_gflownet(
-            initial_states,
-            [MoveRight(), MoveUp(), MoveLeft(), MoveDown(), Terminate()],
-            state_dim = 3,
-            hidden_dim = 32
-        )
-        
-        config_fm = TrainingConfig(
-            objective = FLOW_MATCHING,
-            n_iterations = 20,
-            batch_size = 8
-        )
-        
-        history_fm = train_gflownet(model_fm, config_fm; verbose=false)
-        @test length(history_fm.losses) == 20
-        
-        # Test with DETAILED_BALANCE
-        model_db = create_multi_start_gflownet(
-            initial_states,
-            [MoveRight(), MoveUp(), MoveLeft(), MoveDown(), Terminate()],
-            state_dim = 3,
-            hidden_dim = 32,
-            include_backward = true
-        )
-        
-        config_db = TrainingConfig(
-            objective = DETAILED_BALANCE,
-            n_iterations = 20,
-            batch_size = 8
-        )
-        
-        history_db = train_gflownet(model_db, config_db; verbose=false)
-        @test length(history_db.losses) == 20
+        actions = [MoveRight(), MoveUp(), MoveLeft(), MoveDown(), Terminate()]
+
+        # TRAJECTORY_BALANCE is the one that works, and the assertion is finiteness --
+        # the property whose absence the old length check could not see.
+        model_tb = create_multi_start_gflownet(initial_states, actions;
+                                               state_dim = 3, hidden_dim = 32)
+        history_tb = train_gflownet(model_tb,
+            TrainingConfig(objective = TRAJECTORY_BALANCE, n_iterations = 20,
+                           batch_size = 8); verbose = false)
+        @test length(history_tb.losses) == 20
+        @test count(isfinite, history_tb.losses) == 20
+
+        for obj in (FLOW_MATCHING, DETAILED_BALANCE)
+            model = create_multi_start_gflownet(initial_states, actions;
+                                                state_dim = 3, hidden_dim = 32,
+                                                include_backward = true)
+            config = TrainingConfig(objective = obj, n_iterations = 20, batch_size = 8)
+            @test_throws ArgumentError train_gflownet(model, config; verbose = false)
+        end
     end
 end
 

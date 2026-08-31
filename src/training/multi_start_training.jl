@@ -7,6 +7,9 @@ using Optimisers
 using ..GFlowNet: TrainingConfig, TrainingHistory, TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING
 using ..GFlowNet: compute_gradient_norm, any_invalid, clear_flow_cache!
 using ..GFlowNet: forward_transition_probability, backward_transition_probability
+# Needed for the P_B term in both the TB and DB losses below. backward_parent_states is
+# the uniform-over-parents fallback used when no backward policy exists.
+using ..GFlowNet: compute_backward_probability, backward_parent_states
 using ..GFlowNet: flow, flow_estimate, forward_action_probabilities
 using ..GFlowNet: get_applicable_actions, is_valid_trajectory, is_terminal_state
 
@@ -27,6 +30,34 @@ function compute_trajectory_loss_multi_start(
     params,
     config::TrainingConfig
 )
+    # DETAILED_BALANCE and FLOW_MATCHING are NOT IMPLEMENTED for multi-start models and
+    # must say so here, before the loop, rather than throwing inside it.
+    #
+    # Both branches below dereference methods that do not exist for this type:
+    #   DETAILED_BALANCE -> forward_transition_probability(::MultiStartGFlowNetModel, ...)
+    #   FLOW_MATCHING    -> flow(::MultiStartGFlowNetModel, ...)
+    # so every iteration threw a MethodError, train_gflownet caught it and pushed NaN,
+    # and the run "completed" with a full-length loss history of NaN. Measured: 0 of 10
+    # iterations finite, for BOTH objectives, with and without a backward policy.
+    #
+    # test/core/multi_start/test_multi_start.jl asserted only
+    # `length(history_db.losses) == 20`, which a vector of NaN satisfies, so the suite
+    # reported this as passing.
+    #
+    # Implementing them is a design decision, not a patch: DB's residual needs F(s), and
+    # with several initial states the flow at a shared downstream state has to be defined
+    # before it can be computed. The backward recursion F(s) = R(s) + sum_c F(c) P_B(s|c)
+    # is start-independent and is the natural candidate, but that belongs in a change that
+    # also states what F(s_0^i) = Z_i means for the multi-start partition vector.
+    if config.objective in (DETAILED_BALANCE, FLOW_MATCHING)
+        throw(ArgumentError(
+            "$(config.objective) is not implemented for MultiStartGFlowNetModel. " *
+            "Only TRAJECTORY_BALANCE is supported, which uses the per-initial-state " *
+            "log_Z vector. The missing piece is a flow definition for a state reachable " *
+            "from several initial states; until it exists this objective produced a " *
+            "full history of NaN rather than an error."))
+    end
+
     if config.objective == TRAJECTORY_BALANCE
         # Filter valid trajectories
         valid_data = Zygote.@ignore begin
@@ -115,6 +146,7 @@ function compute_single_trajectory_loss_multi_start(
 )
     # Compute log probability of trajectory
     log_prob_sum = 0.0
+    log_backward_sum = 0.0
     
     for i in 1:(length(trajectory.states)-1)
         state = trajectory.states[i]
@@ -151,21 +183,40 @@ function compute_single_trajectory_loss_multi_start(
         end
         
         log_prob_sum += log_probs[action_pos]
+
+        # P_B(s_i | s_{i+1}). This term was ABSENT ENTIRELY -- not guarded, not
+        # conditional, simply not written -- so this loss was P_B == 1 unconditionally.
+        # That is a distribution only where every state has one parent, and the
+        # single-start version of this same omission made TB converge to
+        # sum_x n_paths(x) R(x) instead of sum_x R(x): measured 77.928 against a true
+        # 19.0 on the 3x3 grid, with the terminal law biased toward states reachable by
+        # more paths. See src/training/losses.jl:535.
+        child = trajectory.states[i + 1]
+        if !isnothing(model.backward_policy) && haskey(params, :backward)
+            pb = compute_backward_probability(
+                model.backward_policy, child, trajectory.states[i],
+                params.backward, model.states.backward, model.all_actions
+            )
+            log_backward_sum += log(max(pb, 1e-8))
+        else
+            n_parents = Zygote.@ignore length(backward_parent_states(child, model.all_actions))
+            n_parents > 1 && (log_backward_sum += -log(n_parents))
+        end
     end
-    
+
     # Get terminal reward
     terminal_state = trajectory.states[end]
     terminal_reward = Zygote.@ignore reward(terminal_state)
-    
+
     if terminal_reward <= 0
         terminal_reward = 1e-8
     end
-    
+
     # Use the correct log Z for this trajectory's initial state
     log_Z = params.log_Z[initial_idx]
-    
-    # Trajectory balance: (log Z + log P_F(τ) - log R)²
-    trajectory_balance_error = log_Z + log_prob_sum - log(terminal_reward)
+
+    # Trajectory balance: (log Z + log P_F(tau) - log R - log P_B(tau|x))^2
+    trajectory_balance_error = log_Z + log_prob_sum - log(terminal_reward) - log_backward_sum
     
     return trajectory_balance_error^2
 end
@@ -185,6 +236,20 @@ function train_gflownet(
     verbose::Bool = false,
     callback = nothing
 )
+    # Refuse unsupported objectives BEFORE the loop. The loop below catches every
+    # exception and pushes NaN, so a throw from inside the loss function is invisible:
+    # that is precisely how DETAILED_BALANCE and FLOW_MATCHING returned a full history of
+    # NaN instead of an error for a MethodError on the first iteration.
+    if config.objective in (DETAILED_BALANCE, FLOW_MATCHING)
+        throw(ArgumentError(
+            "$(config.objective) is not implemented for MultiStartGFlowNetModel. " *
+            "Only TRAJECTORY_BALANCE is supported. Both of these branches dereference " *
+            "methods that do not exist for this type -- " *
+            "forward_transition_probability and flow -- so every iteration threw and was " *
+            "recorded as NaN. The missing piece is a flow definition for a state " *
+            "reachable from several initial states."))
+    end
+
     history = GFlowNet.TrainingHistory()
     
     # Track per-initial-state statistics
@@ -348,9 +413,18 @@ function compute_detailed_balance_loss_batch(model::MultiStartGFlowNetModel, sta
         # Compute forward probability
         forward_prob = forward_transition_probability(model, source, target)
         
-        # Compute backward probability
+        # Compute backward probability.
+        #
+        # The fallback was 1.0, i.e. P_B == 1 unnormalised, and this path is reachable by
+        # default: create_multi_start_gflownet defaults include_backward = false
+        # (multi_start.jl:257) and multi-start training does NOT go through
+        # validate_training_config -- MultiStartGFlowNetModel is not a GFlowNetModel, so
+        # the up-front component check does not dispatch to it. Uniform over parents is
+        # the same convention the single-start DB/FM residual already used
+        # (balance.jl:1027).
         backward_prob = if isnothing(model.backward_policy)
-            1.0
+            parents = Zygote.@ignore backward_parent_states(target, model.all_actions)
+            isempty(parents) ? 1.0 : 1.0 / length(parents)
         else
             backward_transition_probability(model, target, source)
         end

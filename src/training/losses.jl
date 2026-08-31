@@ -137,9 +137,15 @@ function compute_trajectory_loss(model::GFlowNetModel, trajectories::Vector{Traj
                         end
                     end
                     
-                    # Backward probability
+                    # Backward probability. Uniform over parents, not 1.0: P_B == 1 is a
+                    # distribution only where every state has a unique parent. This
+                    # branch is normally unreachable because validate_training_config
+                    # requires a backward policy for DETAILED_BALANCE, but
+                    # compute_trajectory_loss is also called directly (utils/validation.jl)
+                    # where that check has not run.
                     backward_prob = if isnothing(model.backward_policy)
-                        1.0
+                        parents = Zygote.@ignore backward_parent_states(target, model.all_actions)
+                        isempty(parents) ? 1.0 : 1.0 / length(parents)
                     else
                         compute_backward_probability(
                             model.backward_policy, target, source,

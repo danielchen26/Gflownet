@@ -467,7 +467,12 @@ function GFlowNet.find_parent_for_action(target_state::GridState, action::MoveLe
     if target_state.is_terminal
         return nothing
     end
-    grid_size = GRID_CONFIG[].grid_size
+    # Guarded, like is_applicable at line 90 and reward at line 151. These two parent
+    # helpers read GRID_CONFIG[] bare, which throws UndefRefError whenever the Ref has
+    # not been assigned -- and create_multi_start_gflownet never assigns it, so any
+    # backward_parent_states call on a multi-start grid model crashed. Three sites in
+    # this file guarded and two did not; the default matches the guarded ones.
+    grid_size = isassigned(GRID_CONFIG) ? GRID_CONFIG[].grid_size : 5
     if target_state.x >= grid_size
         return nothing  # Can't have moved left to reach max x
     end
@@ -484,7 +489,7 @@ function GFlowNet.find_parent_for_action(target_state::GridState, action::MoveDo
     if target_state.is_terminal
         return nothing
     end
-    grid_size = GRID_CONFIG[].grid_size
+    grid_size = isassigned(GRID_CONFIG) ? GRID_CONFIG[].grid_size : 5   # see MoveLeft above
     if target_state.y >= grid_size
         return nothing  # Can't have moved down to reach max y
     end
