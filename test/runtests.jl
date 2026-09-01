@@ -113,6 +113,13 @@ test_groups = [
         "applications/grid_world/test_grid_world.jl",
         "applications/grid_world/test_grid_world_versions.jl"
     ]),
+    ("Causal Discovery Application", [
+        # Parent enumeration, and the partition function it makes reachable. The P_B repair
+        # was INERT here until `find_parent_for_action` had DAGState methods: the parent set
+        # came back empty, so the loss stayed pre-repair and TB converged to 30.88 against a
+        # true Z of 13.667 -- 0.055% from the BIASED value.
+        "applications/causal_discovery/test_dag_parents.jl"
+    ]),
     ("Molecular Generation", [
         # FIRST in this group, deliberately. It pins the tree structure of the
         # fragment DAG, which is what makes the constant P_B = 1 returned for
