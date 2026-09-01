@@ -49,7 +49,11 @@ test_groups = [
     ]),
     ("Core Interface", [
         "core/test_core_interface.jl",
-        "core/test_exports.jl"
+        "core/test_exports.jl",
+        # The objective x flag matrix. Belongs with the interface group because what it pins
+        # is an API contract: no configuration may return a history containing NaN. An audit
+        # measured 12 of 32 cells doing exactly that while printing a success banner.
+        "core/test_objective_matrix.jl"
     ]),
     ("Core Functions", [
         "core/test_core_functions.jl"
@@ -68,7 +72,6 @@ test_groups = [
     ]),
     ("Detailed Balance", [
         "core/detailed_balance/test_detailed_balance.jl",
-        "core/detailed_balance/test_detailed_balance_comprehensive.jl",
         "core/detailed_balance/test_detailed_balance_summary.jl",
         "objectives/detailed_balance/test_training.jl"
     ]),

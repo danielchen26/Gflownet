@@ -346,6 +346,29 @@ struct TrainingConfig
         if entropy_weight < 0 || parameter_regularization < 0
             throw(ArgumentError("regularization weights must be non-negative"))
         end
+
+        # SAMPLING_ESTIMATION and ADAPTIVE_ESTIMATION are exported enum values that do
+        # NOTHING. Both are documented "Not implemented" above; only LEARNABLE_ESTIMATION
+        # allocates log_Z (interface.jl:89, 114, 135, 154, 173) and only it is stepped
+        # (training.jl:398). Selecting either silently pins Z = 1, so the caller believes
+        # they chose Monte-Carlo estimation or adaptive switching and gets the unsatisfiable
+        # fixed-Z regime instead.
+        #
+        # REFUSED HERE, IN THE CONSTRUCTOR, and that placement is the point. The refusal used
+        # to live in `validate_training_config`, which is reached only from single-start
+        # `train_gflownet` -- one of six entry points. An API audit measured that
+        # `create_gflownet`, `create_grid_world_gflownet`, `TrainingConfig`, `train_step!`,
+        # `compute_trajectory_loss` and the multi-start `train_gflownet` all accepted these
+        # values and silently pinned Z = 1. Every one of them needs a TrainingConfig, so
+        # refusing at construction closes all six at once and cannot be bypassed by reaching
+        # a loss function directly.
+        if partition_function_method in (SAMPLING_ESTIMATION, ADAPTIVE_ESTIMATION)
+            throw(ArgumentError(
+                "partition_function_method = $partition_function_method is NOT IMPLEMENTED " *
+                "-- it silently pins Z = 1. Use LEARNABLE_ESTIMATION to train Z as a " *
+                "parameter, or SIMPLE_ESTIMATION to pin Z = 1 deliberately (correct only " *
+                "when the rewards sum to 1)."))
+        end
         if !(0.0 <= epsilon <= 1.0)
             throw(ArgumentError("epsilon must be in [0.0, 1.0]"))
         end
@@ -527,6 +550,36 @@ function validate_training_config(config::TrainingConfig, model::GFlowNetModel)
             "correct when the rewards sum to 1)."))
     end
 
+    # Objectives the declarative table marks as not trainable at all. Before the table had a
+    # `refuse` field it could only express MISSING COMPONENTS, so an objective with no
+    # implementation declared zero requirements and sailed through -- DIRECT_FLOW_OBJECTIVE
+    # and COMBINED_OBJECTIVES both did, measured at 0 of 5 finite losses on every one of
+    # their four flag combinations, with the success banner printed each time.
+    let reqs0 = _objective_component_requirements(config.objective)
+        if get(reqs0, :refuse, false)
+            throw(ArgumentError(
+                "$(config.objective) cannot be trained. " * reqs0.why))
+        end
+    end
+
+    # MULTI_OBJECTIVE_TB is refused per MODEL rather than per objective: MOGFN is real, but
+    # its loss dereferences a preference encoder and a Z network that a plain GFlowNetModel
+    # leaves as `nothing`, so on one it threw every iteration and the loop recorded NaN.
+    # Measured 0 of 5 finite losses on all four flag combinations of a plain model.
+    #
+    # The check is on the VALUES, not `hasproperty`: both fields exist on every
+    # GFlowNetModel and are simply nothing unless create_mogfn_gflownet filled them, so a
+    # hasproperty test is always true and refused nothing. Caught by re-measuring the matrix
+    # after the first attempt -- 12 bad cells became 4, not 0.
+    if config.objective == MULTI_OBJECTIVE_TB &&
+       (isnothing(model.preference_encoder) || isnothing(model.z_network))
+        throw(ArgumentError(
+            "MULTI_OBJECTIVE_TB requires a model built by create_mogfn_gflownet: it needs a " *
+            "preference encoder and a Z network, which a plain GFlowNetModel does not carry. " *
+            "Refused here rather than inside the training loop, which converts the resulting " *
+            "throw into a NaN entry and reports the run as complete."))
+    end
+
     reqs = _objective_component_requirements(config.objective)
     missing_parts = String[]
 
@@ -620,7 +673,7 @@ function _objective_component_requirements(objective::TrainingObjective)
         # train would break legitimate code-path tests and anyone whose rewards
         # genuinely sum to 1. Contrast SUB_TRAJECTORY_BALANCE below, where a fixed Z
         # collapses the sampler onto one state deterministically -- that one errors.
-        return (backward = false, flow = false, learnable_z = false,
+        return (backward = false, flow = false, refuse = false, learnable_z = false,
                 warn_learnable_z = true,
                 why = "TB balances log Z + sum log P_F against log R + sum log P_B. " *
                       "With Z pinned to 1 the residual cannot reach zero unless the " *
@@ -633,7 +686,7 @@ function _objective_component_requirements(objective::TrainingObjective)
         # gradient is zero, but the objective still works and the reward still enters
         # through the terminal boundary F(x) = R(x). Claiming it as required broke
         # five existing DB tests that deliberately exercise that path.
-        return (backward = true, flow = false, learnable_z = false,
+        return (backward = true, flow = false, refuse = false, learnable_z = false,
                 why = "DB enforces P_F(s'|s) F(s) = P_B(s|s') F(s'), so it needs P_B. " *
                       "A flow estimator is optional: with one, F is learned; without " *
                       "one, F is the recursive flow and carries no gradient. Z does " *
@@ -643,14 +696,14 @@ function _objective_component_requirements(objective::TrainingObjective)
         # Flow estimator is genuinely REQUIRED here, unlike for DB. FM's entire
         # content is the conservation law on F, and losses.jl has no non-estimator
         # path that can train it -- without one there is nothing to optimise.
-        return (backward = false, flow = true, learnable_z = false,
+        return (backward = false, flow = true, refuse = false, learnable_z = false,
                 why = "FM enforces sum over parents of F(p) P_F(s|p) = F(s) with " *
                       "F(x) = R(x), so F must exist and be trainable. P_B does not " *
                       "appear in the residual, and Z does not either -- F(s0) plays " *
                       "that role.")
 
     elseif objective == SUB_TRAJECTORY_BALANCE
-        return (backward = true, flow = true, learnable_z = true,
+        return (backward = true, flow = true, refuse = false, learnable_z = true,
                 why = "SubTB balances log F(s_i) + sum log P_F against " *
                       "log F(s_j) + sum log P_B, anchored at F(s_0) = Z and " *
                       "F(x) = R(x). Under a fixed Z = 1 the root anchor contradicts " *
@@ -660,26 +713,45 @@ function _objective_component_requirements(objective::TrainingObjective)
     elseif objective == TRAJECTORY_LIKELIHOOD_MAXIMIZATION
         # Same severity reasoning as TB: it shares TB's trajectory residual, so a
         # fixed Z makes it unsatisfiable but not degenerate. Warn, do not refuse.
-        return (backward = true, flow = false, learnable_z = false,
+        return (backward = true, flow = false, refuse = false, learnable_z = false,
                 warn_learnable_z = true,
                 why = "TLM trains the backward policy directly, so P_B must exist, " *
                       "and it shares TB's trajectory residual, so a fixed Z leaves " *
                       "that residual with a floor it cannot close.")
 
     elseif objective == MULTI_OBJECTIVE_TB
-        return (backward = false, flow = false, learnable_z = false,
+        # NOT unconditionally refused: MOGFN is trainable, but only on a model that carries
+        # a preference encoder and a Z network, and those are not fields of a plain
+        # GFlowNetModel. The model-dependent half of this check lives in
+        # validate_training_config, because this function sees only the objective.
+        return (backward = false, flow = false, learnable_z = false, refuse = false,
                 why = "MOGFN needs a preference encoder and a Z network, which only " *
-                      "create_mogfn_gflownet builds; that is checked in its own loss " *
-                      "branch because the components are not fields of a plain model.")
+                      "create_mogfn_gflownet builds.")
 
     elseif objective == DIRECT_FLOW_OBJECTIVE
-        return (backward = false, flow = false, learnable_z = false,
+        # REFUSED. The `why` below was already here, recording that the objective does
+        # nothing -- and the branch still declared zero requirements, so
+        # validate_training_config found nothing missing and let it through. Measured: every
+        # one of the four flag combinations returns 0 of 5 finite losses, i.e. a full history
+        # of NaN with a success banner. A table that documents "disabled" in prose while
+        # declaring no requirement cannot refuse anything; hence the `refuse` field.
+        return (backward = false, flow = false, learnable_z = false, refuse = true,
                 why = "DIRECT_FLOW_OBJECTIVE is disabled: its loss was constant with " *
-                      "respect to the parameters, so training under it did nothing. " *
-                      "Use TRAJECTORY_BALANCE.")
+                      "respect to the parameters, so Zygote returned nothing and training " *
+                      "under it did nothing. Use TRAJECTORY_BALANCE.")
+
+    elseif objective == COMBINED_OBJECTIVES
+        # REFUSED. There is NO branch for this objective in compute_trajectory_loss at all,
+        # so it could never have trained. Measured: 0 of 5 finite losses on all four flag
+        # combinations. It also had no branch HERE, falling through to the "no declared
+        # requirements" default, which is how an objective with no implementation passed
+        # validation.
+        return (backward = false, flow = false, learnable_z = false, refuse = true,
+                why = "COMBINED_OBJECTIVES has no loss branch in compute_trajectory_loss. " *
+                      "Train the individual objectives instead.")
 
     else
-        return (backward = false, flow = false, learnable_z = false,
+        return (backward = false, flow = false, learnable_z = false, refuse = false,
                 why = "No declared component requirements.")
     end
 end
