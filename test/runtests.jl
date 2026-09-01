@@ -62,10 +62,23 @@ test_groups = [
         "core/flow_computation/test_flow_functions.jl"
     ]),
     ("Policies", [
-        "core/policies/test_backward_policy.jl"
+        "core/policies/test_backward_policy.jl",
+        # P_B contracts. The exported normalisation validator passed SWAPPED arguments and
+        # reported sum = 2.0 with is_normalized = false on a policy whose true parent-sum is
+        # 1.0000000298 -- it could fail a correct policy and certify a broken one. It also
+        # returned a silent pass for any state with no parent enumeration, which is the
+        # normal case for three of five domains.
+        "core/policies/test_backward_contracts.jl"
     ]),
     ("Training Infrastructure", [
-        "integration/test_training.jl"
+        "integration/test_training.jl",
+        # Replay parity. train_step! and train_step_weighted! each carried their own copy of
+        # the parameter-update tail and the copies diverged: the replay one fed the scaled
+        # log_Z gradient to Adam (a no-op, Adam divides the scale out) and skipped gradient
+        # clipping, so use_replay_buffer=true silently reverted two repairs. Measured
+        # dlog_Z 0.010000 at multipliers 1 AND 10 on the replay path against 0.060095 and
+        # 0.600954 on the other.
+        "training/test_replay_parity.jl"
     ]),
     ("Training Reorganization", [
         "reorganization/test_training_reorganization.jl"

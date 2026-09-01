@@ -353,6 +353,63 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
 
     return history
 end
+"""
+    _apply_gradient_step!(model, g, config) -> nothing
+
+The parameter update shared by `train_step!` and `train_step_weighted!`.
+
+FACTORED, not copied, because the copy is what broke. `train_step_weighted!` -- the replay
+path -- carried its own tail that scaled the log_Z gradient and fed it to Adam, and skipped
+`clip_gradients!` entirely. Both of those had already been repaired in `train_step!`, so
+enabling `use_replay_buffer` silently reverted two fixes at once.
+
+MEASURED, one step on a 4x4 grid with reward 10 at (4,4), seed 7:
+
+    path         dlog_Z at multiplier 1    at multiplier 10    ratio
+    non-replay          0.060095               0.600954         10.0
+    replay              0.010000               0.010000          1.0
+
+`z_learning_rate_multiplier` was a provable no-op on the replay path. The cause is that Adam
+divides by the gradient's own second moment, so scaling a gradient before handing it to Adam
+cancels: the multiplier had no route to the step size. That is why `train_step!` takes log_Z
+OUT of the Adam update and steps it explicitly, and why the two functions must not each own a
+copy of that reasoning.
+
+Three responsibilities, in order:
+  1. Hold log_Z out of the Adam update and remember its raw gradient.
+  2. Clip the network gradients if `gradient_clip_norm > 0`.
+  3. Step log_Z explicitly at `learning_rate * z_learning_rate_multiplier`, and synchronise
+     the mirrored `model.log_partition_function` field.
+"""
+function _apply_gradient_step!(model::GFlowNetModel, g, config::TrainingConfig)
+    has_logZ = haskey(g, :log_Z)
+    dZ = has_logZ ? g.log_Z : 0.0
+
+    grads_for_adam = if has_logZ
+        gc = copy(g)
+        gc.log_Z = 0.0          # keep log_Z out of the Adam update
+        gc
+    else
+        copy(g)
+    end
+
+    if config.gradient_clip_norm > 0
+        clip_gradients!(grads_for_adam, config.gradient_clip_norm)
+    end
+
+    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters,
+                                                   grads_for_adam)
+    model.optimizer = optimizer_state
+    model.parameters = parameters
+
+    if has_logZ
+        lr_Z = config.learning_rate * config.z_learning_rate_multiplier
+        model.parameters.log_Z = model.parameters.log_Z - lr_Z * dZ
+        model.log_partition_function = model.parameters.log_Z
+    end
+
+    return nothing
+end
 
 """
     train_step!(model, trajectories, config)
@@ -394,51 +451,13 @@ function train_step!(model::GFlowNetModel, trajectories::Vector{Trajectory}, con
     #
     # A plain scaled step IS magnitude-sensitive, so a large TB residual closes
     # quickly and a small one barely moves.
-    g = grads[1]
-    has_logZ = haskey(g, :log_Z)
-    dZ = has_logZ ? g.log_Z : 0.0
 
-    grads_for_adam = if has_logZ
-        gc = copy(g)
-        gc.log_Z = 0.0          # keep log_Z out of the Adam update
-        gc
-    else
-        copy(g)
-    end
 
-    # APPLY gradient clipping. `clip_gradients!` and `gradient_clip_norm` both
-    # existed, the config validated the value and printed it in its summary, and
-    # nothing ever called it -- so the documented stability guarantee was
-    # absent. Clipping is applied to the network gradients only; log_Z has its
-    # own explicit step below and its magnitude sensitivity is the point of it.
-    # TrainingConfig has no separate on/off flag: the constructor already
-    # rejects gradient_clip_norm <= 0, so a positive value means clip.
-    # MEASURED EFFECT, so nobody relies on this for safety: with Adam the effect
-    # is nearly nil, because Adam divides by the gradient's own second moment
-    # and a global-norm clip is a single uniform rescale, which cancels exactly
-    # on a fresh step. Over 40 steps, clip_norm 1e6 vs 1e-6 gave total parameter
-    # movement 1.2488 vs 1.2518 -- a 0.25% difference, arising only because the
-    # per-step norms differ. It is wired because the config promises it, not
-    # because it confers real stability here; NaN/Inf spikes are caught by the
-    # any_invalid guard above instead.
-    if config.gradient_clip_norm > 0
-        clip_gradients!(grads_for_adam, config.gradient_clip_norm)
-    end
-
-    # Update network parameters using Optimisers.jl
-    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters,
-                                                   grads_for_adam)
-
-    # Update model state (mutation after gradient computation is safe)
-    model.optimizer = optimizer_state
-    model.parameters = parameters
-
-    # Explicit log_Z step, and synchronise the mirrored field.
-    if has_logZ
-        lr_Z = config.learning_rate * config.z_learning_rate_multiplier
-        model.parameters.log_Z = model.parameters.log_Z - lr_Z * dZ
-        model.log_partition_function = model.parameters.log_Z
-    end
+    # The tail -- holding log_Z out of Adam, clipping the network gradients, and stepping
+    # log_Z explicitly -- is shared with train_step_weighted! via _apply_gradient_step!.
+    # It used to be inlined here and duplicated (divergently) there, which is how the replay
+    # path silently reverted both repairs.
+    _apply_gradient_step!(model, grads[1], config)
 
     return loss_val, gradient_norm
 end
@@ -525,27 +544,18 @@ function train_step_weighted!(model::GFlowNetModel, trajectories::Vector{Traject
         return Inf, 0.0
     end
 
-    # Compute gradient norm (before scaling)
+    # Compute gradient norm (before the update)
     gradient_norm = compute_gradient_norm(grads[1])
 
-    # Apply z_learning_rate_multiplier by scaling the log_Z gradient
-    scaled_grads = if haskey(grads[1], :log_Z) && config.z_learning_rate_multiplier != 1.0
-        scale_z_gradient(grads[1], config.z_learning_rate_multiplier)
-    else
-        grads[1]
-    end
-
-    # Update parameters using Optimisers.jl
-    optimizer_state, parameters = Optimisers.update(model.optimizer, model.parameters, scaled_grads)
-
-    # Update model state
-    model.optimizer = optimizer_state
-    model.parameters = parameters
-
-    # Synchronize log_Z if using LEARNABLE_ESTIMATION
-    if haskey(parameters, :log_Z)
-        model.log_partition_function = parameters.log_Z
-    end
+    # SAME tail as train_step!. This function used to carry its own copy, which scaled the
+    # log_Z gradient and handed it to Adam -- a no-op, because Adam divides by the gradient's
+    # own second moment -- and skipped clip_gradients! entirely. Both had already been
+    # repaired in train_step!, so turning on use_replay_buffer silently reverted two fixes.
+    #
+    # MEASURED before this change, one step on a 4x4 grid with reward 10 at (4,4), seed 7:
+    #   non-replay  dlog_Z = 0.060095 at multiplier 1, 0.600954 at 10  -> ratio 10.0
+    #   replay      dlog_Z = 0.010000 at multiplier 1, 0.010000 at 10  -> ratio  1.0
+    _apply_gradient_step!(model, grads[1], config)
 
     return loss_val, gradient_norm
 end
