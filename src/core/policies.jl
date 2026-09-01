@@ -416,17 +416,25 @@ end
 Compute P_B(s|s') - probability of having transitioned from source to target state.
 """
 function backward_transition_probability(model::GFlowNetModel, target_state, source_state)
-    # Check if backward policy exists
+    # No backward policy: uniform over the parents of target_state, NOT 1.0.
+    #
+    # This returned 1.0 with the comment "assume deterministic backward for
+    # tree-structured spaces where each state has a unique parent". That precondition is
+    # the thing that fails: grid world's (2,2) has two parents, and P_B == 1 is then not a
+    # distribution. It is the same defect that made the TB loss converge to
+    # sum_x n_paths(x) R(x) instead of sum_x R(x) -- measured 77.928 against a true 19.0
+    # on the 3x3 grid. flows.jl:186 already used uniform-over-parents; this wrapper and
+    # six other sites did not.
     if isnothing(model.backward_policy)
-        # Default: assume deterministic backward for tree-structured spaces
-        # where each state has a unique parent (P_B = 1)
-        return 1.0
+        parents = backward_parent_states(target_state, model.all_actions)
+        return isempty(parents) ? 1.0 : 1.0 / length(parents)
     end
 
     # Check if parameters exist for backward policy
     if !haskey(model.parameters, :backward)
-        @warn "Backward policy exists but no parameters found. Using deterministic backward."
-        return 1.0
+        @warn "Backward policy exists but no parameters found. Using uniform over parents."
+        parents = backward_parent_states(target_state, model.all_actions)
+        return isempty(parents) ? 1.0 : 1.0 / length(parents)
     end
 
     # Use learned backward policy
@@ -493,14 +501,28 @@ function compute_backward_probability(policy::BackwardPolicy, target_state, sour
     # valid GFlowNet. Returning 0.0 injected a constant log(1e-8) = -18.4 per
     # transition instead. This matches compute_recursive_flow and both flow
     # validators, which treat an unknown parent set as a unique parent.
+    #
+    # Note what this case CANNOT do: with no parent set there is nothing to test
+    # `source_state` against, so a non-parent gets 1.0 here too. That is why
+    # validate_backward_policy_normalization reports an empty parent set as
+    # :no_parent_enumeration -- unverifiable, not satisfied.
     isempty(parents) && return 1.0
+
+    idx = Zygote.@ignore findfirst(p -> p == source_state, parents)
+
+    # A state that is not a parent of `target_state` gets exactly 0.0, the answer the
+    # multi-parent case has always given (asserted in test/core/test_core_functions.jl:358).
+    # This test used to sit BELOW the unique-parent shortcut, so `length(parents) == 1`
+    # returned 1.0 for ANY `source_state` whatsoever. Measured on the 3x3 grid:
+    # P_B(GridState(3,3,false) | GridState(2,1,false)) == 1.0, where the only parent of
+    # (2,1) is (1,1). A probability of 1 for an impossible transition silently corrupts
+    # every residual it enters -- and it is what made the normalisation validator below
+    # report a parent-sum of 2.0.
+    idx === nothing && return 0.0
 
     # Unique parent: P_B is exactly 1, not a learned quantity. This is the
     # definition, not a shortcut.
     length(parents) == 1 && return 1.0
-
-    idx = Zygote.@ignore findfirst(p -> p == source_state, parents)
-    idx === nothing && return 0.0
 
     target_features = Zygote.@ignore state_to_features(target_state)
     Zygote.@ignore begin
@@ -563,16 +585,39 @@ end
 """
     validate_backward_policy_normalization(model, state, all_actions; tolerance=1e-3)
 
-Validate that backward policy probabilities sum to 1 for all parent states.
+Check the defining invariant of a backward policy at one state:
 
-# Mathematical Property
-For any state s', the backward probabilities should satisfy:
-∑_{s ∈ parents(s')} P_B(s|s') = 1
+    ∑_{p ∈ parents(state)} P_B(p | state) = 1
+
+The parent set is `backward_parent_states(state, all_actions)` -- the set
+`compute_backward_probability` actually normalises over -- and no other. Summing over a
+different set answers a different question. The limit of that choice, stated rather than
+hidden: a hook that enumerates SOME of a state's parents still sums to 1 over the subset,
+so this check cannot detect partial enumeration, only total absence of it.
 
 # Returns
-- `is_valid::Bool`: Whether normalization is satisfied
-- `total_prob::Float64`: Actual sum of probabilities
-- `parent_states::Vector`: List of parent states checked
+A NamedTuple. The first three fields keep the historical positional order, so
+`is_normalized, total_prob, parent_states = validate_backward_policy_normalization(...)`
+still destructures.
+
+- `is_normalized::Bool`: true only when the invariant was CHECKED and holds
+- `total_prob::Float64`: the measured sum, `NaN` when there was nothing to sum
+- `parent_states::Vector`: the parents the sum ran over
+- `status::Symbol`: which case below applied
+
+`status` values:
+- `:normalized` -- sum within `tolerance` of 1
+- `:violated` -- sum outside `tolerance`; `total_prob` says by how much
+- `:source_state` -- `state` is the model's initial state, which has no parents by
+  construction. Vacuously fine, and known to be fine.
+- `:no_parent_enumeration` -- the parent set is empty for a state that is not the source.
+  Either the domain does not implement `find_parent_for_action` (the default at
+  interface.jl:874 returns `nothing`, and only grid_world, causal_discovery and
+  molecular_generation override it) or `state` is unreachable. Either way there is no
+  parent set to sum over and the invariant is UNVERIFIABLE here, not satisfied. This
+  case previously returned `(true, 0.0, [])`, certifying domains it had never checked.
+- `:no_backward_policy` -- nothing learned to check. `backward_transition_probability`
+  then serves uniform-over-parents, which is normalised by construction.
 """
 function validate_backward_policy_normalization(
     model::GFlowNetModel,
@@ -580,43 +625,53 @@ function validate_backward_policy_normalization(
     all_actions::Vector{<:AbstractAction};
     tolerance::Float64 = 1e-3
 )
-    # Skip validation if no backward policy
-    if isnothing(model.backward_policy)
-        return true, 1.0, AbstractState[]
-    end
-    
-    # Skip terminal states (no parents)
-    if is_terminal_state(state)
-        return true, 0.0, AbstractState[]
-    end
-    
-    # Find all parent states (states that can transition to current state)
-    parent_states = AbstractState[]
-    for potential_parent in Zygote.@ignore get_all_states_in_dag(model, all_actions)
-        if is_valid_backward_transition(potential_parent, state, all_actions)
-            push!(parent_states, potential_parent)
-        end
-    end
-    
-    # If no parents (initial state), it's valid
+    # There is deliberately no `is_terminal_state` skip. A terminal state DOES have
+    # parents -- the same position before Terminate -- and the sum over them is
+    # checkable: for grid world's (3,3,true) the parent set is [(3,3,false)] and the
+    # sum is exactly 1. The old skip returned `(true, 0.0, [])` for every terminal,
+    # which is the silent-pass shape, not a check.
+    parent_states = Zygote.@ignore backward_parent_states(state, all_actions)
+
     if isempty(parent_states)
-        return true, 0.0, parent_states
+        if state == model.initial_state
+            return (is_normalized = true, total_prob = 0.0,
+                    parent_states = parent_states, status = :source_state)
+        end
+        return (is_normalized = false, total_prob = NaN,
+                parent_states = parent_states, status = :no_parent_enumeration)
     end
-    
-    # Compute sum of backward probabilities
+
+    if isnothing(model.backward_policy)
+        return (is_normalized = true, total_prob = 1.0,
+                parent_states = parent_states, status = :no_backward_policy)
+    end
+
     total_prob = 0.0
     for parent in parent_states
-        prob = compute_backward_probability(
-            model.backward_policy, parent, state,
+        # Argument order is (policy, CHILD, PARENT, ...). This call read
+        # (policy, parent, state, ...) -- swapped -- so it summed P_B(state | parent)
+        # over unrelated distributions instead of P_B(parent | state) over one.
+        # Measured on the 3x3 grid: at GridState(2,2,false), whose true parent-sum is
+        # 1.0000000298, the swap reported 2.0 and is_normalized = false; at
+        # GridState(3,2,false), whose true sum is 0.9999999404, it reported exactly 1.0
+        # and passed. It could fail a correct policy AND certify a broken one.
+        total_prob += compute_backward_probability(
+            model.backward_policy, state, parent,
             model.parameters.backward, model.states.backward, all_actions
         )
-        total_prob += prob
     end
-    
-    # Check if normalized within tolerance
-    is_valid = abs(total_prob - 1.0) < tolerance
-    
-    return is_valid, total_prob, parent_states
+
+    # tolerance defaults to 1e-3. The true deviation for a freshly initialised grid-world
+    # backward policy is 3.0e-8 (softmax round-off in Float32), so 1e-3 rejects anything
+    # that is not a softmax over the parent set -- the swapped-argument sums above (2.0,
+    # error 1.0) and the pre-repair independent-sigmoid sums (1.1967 to 1.2922 on
+    # multi-parent states, 0.51 to 0.68 on single-parent ones) all fail it by 2 to 5
+    # orders of magnitude.
+    is_normalized = abs(total_prob - 1.0) < tolerance
+
+    return (is_normalized = is_normalized, total_prob = total_prob,
+            parent_states = parent_states,
+            status = is_normalized ? :normalized : :violated)
 end
 
 """
@@ -625,9 +680,10 @@ end
 Validate backward policy consistency across a batch of trajectories.
 
 # Checks performed:
-1. All backward transitions have positive probability
-2. Invalid transitions have near-zero probability
-3. Normalization constraint is satisfied
+1. Every backward transition actually taken has positive probability
+2. The normalization constraint holds at every state visited
+3. States where the constraint cannot be checked at all are counted and reported,
+   never folded into a pass
 
 # Returns
 NamedTuple with validation results and statistics.
@@ -648,40 +704,50 @@ function validate_backward_policy_consistency(
     
     # Collect statistics
     valid_transition_probs = Float64[]
-    invalid_transition_probs = Float64[]
     normalization_errors = Float64[]
-    
+    # States whose parent set is empty and which are not the source: nothing to sum, so
+    # the invariant is unverifiable there. Counted separately and made to fail the
+    # verdict, because folding them into `normalization_errors` would misreport them as
+    # violations and dropping them silently would misreport them as passes.
+    n_unverifiable = 0
+
     # Check each trajectory
     for traj in trajectories
         for i in 2:length(traj.states)
             prev_state = traj.states[i-1]
             curr_state = traj.states[i]
-            
-            # Valid transition probability
+
+            # P_B(prev | curr) for the edge prev -> curr: the CHILD is `curr_state` and
+            # goes first. This read (prev_state, curr_state), the same swap as the
+            # normalisation validator, so it scored the reverse edge -- a quantity no
+            # GFlowNet defines -- and then called the result "valid transition
+            # probability".
             prob = compute_backward_probability(
-                model.backward_policy, prev_state, curr_state,
+                model.backward_policy, curr_state, prev_state,
                 model.parameters.backward, model.states.backward, model.all_actions
             )
             push!(valid_transition_probs, prob)
-            
+
             # Check normalization for current state
-            is_normalized, total_prob, _ = validate_backward_policy_normalization(
+            result = validate_backward_policy_normalization(
                 model, curr_state, model.all_actions; tolerance=tolerance
             )
-            if !is_normalized
-                push!(normalization_errors, abs(total_prob - 1.0))
+            if result.status === :no_parent_enumeration
+                n_unverifiable += 1
+            elseif !result.is_normalized
+                push!(normalization_errors, abs(result.total_prob - 1.0))
             end
         end
     end
-    
+
     # Compute summary statistics
     min_valid_prob = isempty(valid_transition_probs) ? 0.0 : minimum(valid_transition_probs)
     mean_valid_prob = isempty(valid_transition_probs) ? 0.0 : mean(valid_transition_probs)
     max_norm_error = isempty(normalization_errors) ? 0.0 : maximum(normalization_errors)
-    
+
     # Determine overall validity
-    is_valid = min_valid_prob > 1e-8 && max_norm_error < tolerance
-    
+    is_valid = min_valid_prob > 1e-8 && max_norm_error < tolerance && n_unverifiable == 0
+
     message = if is_valid
         "Backward policy validation passed"
     else
@@ -692,9 +758,14 @@ function validate_backward_policy_consistency(
         if max_norm_error >= tolerance
             push!(issues, "Normalization constraint violated (max error: $(round(max_norm_error, digits=4)))")
         end
+        if n_unverifiable > 0
+            push!(issues, "Normalization unverifiable at $n_unverifiable of " *
+                          "$(length(valid_transition_probs)) transitions: no parent " *
+                          "enumeration (the domain must implement find_parent_for_action)")
+        end
         "Backward policy validation failed: " * join(issues, ", ")
     end
-    
+
     return (
         is_valid = is_valid,
         message = message,
@@ -703,7 +774,8 @@ function validate_backward_policy_consistency(
             mean_valid_prob = mean_valid_prob,
             max_norm_error = max_norm_error,
             n_transitions_checked = length(valid_transition_probs),
-            n_normalization_errors = length(normalization_errors)
+            n_normalization_errors = length(normalization_errors),
+            n_unverifiable = n_unverifiable
         )
     )
 end
@@ -727,58 +799,48 @@ function monitor_backward_policy_learning(
     
     metrics = Dict{String, Any}()
     
-    # Check normalization for each validation state
+    # Check normalization for each validation state. Terminal states are included: they
+    # have a parent (the same position before Terminate) and the sum over it is
+    # checkable.
     norm_errors = Float64[]
+    n_unverifiable = 0
     for state in validation_states
-        if !is_terminal_state(state)
-            is_valid, total_prob, parents = validate_backward_policy_normalization(
-                model, state, model.all_actions
-            )
-            if !isempty(parents)
-                push!(norm_errors, abs(total_prob - 1.0))
-            end
+        result = validate_backward_policy_normalization(model, state, model.all_actions)
+        if result.status === :normalized || result.status === :violated
+            push!(norm_errors, abs(result.total_prob - 1.0))
+        elseif result.status === :no_parent_enumeration
+            n_unverifiable += 1
         end
     end
-    
-    # Compute metrics
-    metrics["mean_normalization_error"] = isempty(norm_errors) ? 0.0 : mean(norm_errors)
-    metrics["max_normalization_error"] = isempty(norm_errors) ? 0.0 : maximum(norm_errors)
+
+    # Compute metrics. NaN, not 0.0, when nothing could be checked: a zero error reads as
+    # a perfectly normalised policy, which is exactly the wrong answer for a domain whose
+    # parent set could not be enumerated at all.
+    metrics["mean_normalization_error"] = isempty(norm_errors) ? NaN : mean(norm_errors)
+    metrics["max_normalization_error"] = isempty(norm_errors) ? NaN : maximum(norm_errors)
     metrics["states_checked"] = length(validation_states)
     metrics["states_with_parents"] = length(norm_errors)
-    
+    metrics["states_unverifiable"] = n_unverifiable
+
     if verbose
         println("\n🔍 Backward Policy Monitoring:")
         println("   - Mean norm error: $(round(metrics["mean_normalization_error"], digits=6))")
         println("   - Max norm error: $(round(metrics["max_normalization_error"], digits=6))")
         println("   - States checked: $(metrics["states_checked"])")
+        println("   - States normalization could not be checked: $n_unverifiable")
     end
     
     return metrics
 end
 
-# Helper function to get all states in DAG (for validation)
-function get_all_states_in_dag(model::GFlowNetModel, all_actions::Vector{<:AbstractAction})
-    # This is a simplified version - in practice, you might want to
-    # explore the state space more systematically
-    states = Set{AbstractState}([model.initial_state])
-    to_explore = [model.initial_state]
-    
-    while !isempty(to_explore) && length(states) < 1000  # Limit exploration
-        current = popfirst!(to_explore)
-        if !is_terminal_state(current)
-            applicable = get_applicable_actions(current, all_actions)
-            for action in applicable
-                next_state = apply_action(action, current)
-                if next_state ∉ states
-                    push!(states, next_state)
-                    push!(to_explore, next_state)
-                end
-            end
-        end
-    end
-    
-    return collect(states)
-end
+# `get_all_states_in_dag` was DELETED here. Its only caller was
+# `validate_backward_policy_normalization`, which used it to find parents by walking the
+# whole reachable state space and testing every state with `is_valid_backward_transition`
+# -- a set that can disagree with the set `compute_backward_probability` normalises over,
+# and one truncated at a hardcoded 1000 states. The validator now sums over
+# `backward_parent_states`, the set P_B is actually a distribution on. It was unexported
+# and has no other reference in src, test, or examples; `get_previous_states`
+# (core/graphs.jl:216) is the surviving brute-force parent enumeration.
 
 # =============================================================================
 # Safe Model Call - Neural Network Wrapper
@@ -877,16 +939,29 @@ function validate_policy_consistency(model::GFlowNetModel)
 
     # Test backward policy if present
     if !isnothing(model.backward_policy) && haskey(model.parameters, :backward)
-        try
-            # Test with a simple self-transition (may not be valid but tests the network)
-            compute_backward_probability(
-                model.backward_policy, test_state, test_state,
-                model.parameters.backward, model.states.backward,
-                model.all_actions
-            )
-        catch e
-            # Backward policy validation is non-critical
-            @debug "Backward policy validation note: $e"
+        # This used to call P_B(s|s) on the initial state, commented "may not be valid but
+        # tests the network". It tested nothing: (s,s) is not an edge, so
+        # compute_backward_probability short-circuits on the parent set -- empty for the
+        # initial state -- and returns 1.0 without ever reaching the network. Any error it
+        # could have raised was then swallowed by @debug. Use a real edge out of the
+        # initial state, require the result to be a probability, and fail loudly, as the
+        # forward and flow branches already do.
+        applicable = get_applicable_actions(test_state, model.all_actions)
+        if !isempty(applicable)
+            child = apply_action(first(applicable), test_state)
+            prob = try
+                compute_backward_probability(
+                    model.backward_policy, child, test_state,
+                    model.parameters.backward, model.states.backward,
+                    model.all_actions
+                )
+            catch e
+                throw(ArgumentError("Backward policy validation failed: $e"))
+            end
+
+            if !isfinite(prob) || prob < 0.0 || prob > 1.0
+                throw(ArgumentError("Backward policy produced invalid probability: $prob"))
+            end
         end
     end
 

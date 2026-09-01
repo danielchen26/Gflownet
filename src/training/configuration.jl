@@ -128,6 +128,18 @@ min_θ 𝔼[L(θ, τ)] where L is the chosen objective and τ are trajectories.
 - `n_iterations::Int`: Number of optimization steps
 - `batch_size::Int`: Number of trajectories per gradient estimate
 - `learning_rate::Float64`: Step size α in θ_{t+1} = θ_t - α∇L(θ_t)
+    - `train_gflownet` applies this to the model's optimiser (`Optimisers.adjust`,
+      moment buffers preserved), so it governs the network parameters AND the
+      explicit log_Z step. It overrides the rate the model was built with by
+      `create_*_gflownet(learning_rate = ...)`, which remains the initial value and
+      the operative rate for callers that drive `train_step!` themselves.
+    - This did nothing before that was wired: two FLOW_MATCHING runs with
+      `learning_rate` 1e-12 and 10.0 gave bit-identical loss traces, max abs
+      difference 0.0. Read `GFlowNet.optimizer_learning_rate(model)` to see the
+      rate a model is actually training at.
+    - Note that `create_gflownet` defaults to 0.01 while this defaults to 1e-3, so
+      the default `train_gflownet` path now trains 10x slower than it did before
+      the knob was live.
 
 # Regularization Parameters
 - `entropy_weight::Float64`: Entropy regularization coefficient (default 0.01)
@@ -136,7 +148,49 @@ min_θ 𝔼[L(θ, τ)] where L is the chosen objective and τ are trajectories.
     - 0.01-0.1 = recommended range for exploration (AISTATS 2024)
     - Adds -λH(π) to loss, encouraging diverse policies and preventing mode collapse
     - Set to 0.0 explicitly if you need exact backward compatibility
-- `parameter_regularization::Float64`: L2 regularization on parameters
+    - **BIAS FLOOR ON Z, AND IT APPLIES AT THE DEFAULT.** The term is added to TB,
+      DB, FM and TLM alike. The TB residual is a sum of squares with attainable
+      minimum 0, so its gradient vanishes at the TB optimum while the entropy
+      gradient does not. The TB optimum is therefore NOT a stationary point of the
+      default objective, and Z != Σ_x R(x) at the true optimum of what the library
+      minimises by default.
+      MEASURED by numerically minimising the exact default objective over the full
+      policy space (not by training):
+        3x3 grid, entropy_weight 0.01 (the default):
+            Z 19.00000000 -> 18.99997809, rel err -1.153e-06,
+            TV(terminal law, R/Z) 0.00054
+        3x3 grid, entropy_weight 0.1:
+            Z -> 18.99841823, rel err -8.325e-05, TV 0.00594
+        4x4 grid, entropy_weight 0.01:
+            Z 39.00000000 -> 38.99996452, rel err -9.099e-07
+      Consequence for test authors: an assertion of the form `learned Z == exact_Z`
+      at a relative tolerance tighter than about 2e-6 is FALSE under library
+      defaults, no matter how well training converges. Either pass
+      `entropy_weight = 0.0` or keep the tolerance above the floor.
+      Live confirmation the term is really in the loss: with the default config the
+      DB loss is 0.515720044091 against a pure DB loss of 0.522863312664, a
+      difference of exactly 0.01 * entropy_loss; at `entropy_weight = 0.0` the two
+      agree to 0.000e+00.
+- `parameter_regularization::Float64`: L2 regularization on the network parameters,
+  (λ/2) Σ_i θ_i², added to whichever objective is selected (default 0.0)
+    - Covers the forward policy, backward policy and flow estimator blocks. log_Z is
+      deliberately EXCLUDED: an L2 penalty on log_Z pulls Z towards 1, which is the
+      `SIMPLE_ESTIMATION` failure mode this library already had to remove as a
+      default.
+    - Was a dead knob until wired into `train_step!`: declared, validated, printed
+      and set by two presets, while the training loop assembled the loss as exactly
+      `compute_trajectory_loss(model, trajectories, ps, config)`. The only caller of
+      `parameter_regularization_loss` reads `regularization_weight`, a field of the
+      unrelated `ObjectiveConfig`. That helper also reads `model.parameters` rather
+      than the differentiated `ps`, so routing this knob through it would have added
+      a gradient-free constant -- a dead knob in a costume. The live term is
+      differentiated w.r.t. `ps`.
+    - Default is 0.0, NOT the former 1e-4. Since the term had no effect before, 0.0
+      is the only default that leaves every existing caller's fixed point where it
+      was; a nonzero default would have silently added a second bias on Z alongside
+      `entropy_weight`, and unlike `entropy_weight` nothing in this repo cites a
+      value. `create_default_config(FLOW_MATCHING)` (1e-3) and
+      `create_robust_config()` (1e-4) ask for it explicitly and now get it.
 - `gradient_clip_norm::Float64`: Maximum gradient norm for stability
 
 # Exploration Parameters (Critical for Mode Discovery!)
@@ -499,25 +553,36 @@ function validate_training_config(config::TrainingConfig, model::GFlowNetModel)
         ))
     end
 
-    # The partition-function method has to agree between model and config, because
-    # train_step! reads it from the CONFIG when deciding whether to update log_Z.
-    # Setting it on only one of the two silently freezes Z at its initial value, which
-    # looks like slow convergence rather than a misconfiguration -- and a model can
-    # carry a log_Z parameter that never moves, which is the most confusing state of
-    # all.
+    # THE MODEL IS AUTHORITATIVE FOR THE PARTITION-FUNCTION METHOD. The config field is
+    # advisory, and this block used to say the opposite.
+    #
+    # The comment here previously claimed "train_step! reads it from the CONFIG when
+    # deciding whether to update log_Z", and the throw below repeated it. Both were FALSE,
+    # and I wrote them without checking. train_step! gates the log_Z step on
+    # `haskey(grads[1], :log_Z)` (training.jl:398) -- that is, on whether the model's
+    # PARAMETER VECTOR carries log_Z, which is fixed at construction by the model's own
+    # method. `config.partition_function_method` is never read there.
+    #
+    # So the warned-about consequence does not occur: measured, a model with a learnable
+    # log_Z trained under a config saying SIMPLE_ESTIMATION still moves log_Z from 0.0 to
+    # 0.8645532, byte-identical to the LEARNABLE run. The old text would have sent someone
+    # hunting a frozen Z that was never frozen.
+    #
+    # A mismatch is still worth flagging, because it means the caller believes something
+    # untrue about their own run -- but it is a documentation defect in the caller, not a
+    # training defect, so it warns and names which side wins.
     if config.partition_function_method != LEARNABLE_ESTIMATION &&
        haskey(model.parameters, :log_Z)
-        if reqs.learnable_z
-            throw(ArgumentError(
-                "$(config.objective) requires partition_function_method = " *
-                "LEARNABLE_ESTIMATION on the TrainingConfig as well as on the model; " *
-                "got $(config.partition_function_method). train_step! reads the " *
-                "method from the config, so Z would stay frozen at its initial value."
-            ))
-        else
-            @warn "Model has a learnable log_Z but the config says $(config.partition_function_method), so Z will NOT be updated" fix = "set partition_function_method = LEARNABLE_ESTIMATION on the TrainingConfig too"
-        end
+        @warn "Model carries a learnable log_Z, so Z WILL be updated regardless of " *
+              "config.partition_function_method = $(config.partition_function_method). " *
+              "The model decides; the config field is not read when stepping log_Z." fix =
+              "set partition_function_method = LEARNABLE_ESTIMATION on the TrainingConfig " *
+              "too, so the config describes what actually happens"
     end
+
+    # The converse mismatch is a real error: the objective needs a learnable Z and the MODEL
+    # does not have one. That is caught by the `reqs.learnable_z` check above, which reads
+    # `haskey(model.parameters, :log_Z)` -- the same predicate train_step! uses.
 
     # Numeric sanity. Warnings, not errors: these are unusual, not impossible.
     if config.temperature < 0.1 || config.temperature > 10.0

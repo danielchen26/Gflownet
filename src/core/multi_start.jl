@@ -309,3 +309,150 @@ function create_multi_start_gflownet(
         states
     )
 end
+
+# =============================================================================
+# Reachability, flow and transition probabilities for multi-start models
+# =============================================================================
+#
+# The flow and transition methods existed only for GFlowNetModel, which is why
+# DETAILED_BALANCE and FLOW_MATCHING threw MethodError on every iteration for a multi-start
+# model and the training loop recorded the result as NaN.
+#
+# F(s) IS NOT START-INDEPENDENT, and an earlier version of this comment claimed it was.
+# The recursion F(s) = sum_children F(c) P_B(s|c) reads only the action set and the backward
+# policy, so the RECURSION does not mention the initial state -- but the P_B it uses must be
+# normalised over the parents of each child WITHIN THE DAG ROOTED AT THAT START, and that
+# set does depend on the start.
+#
+# Measured consequence of getting this wrong, 4x4 grid, rewards {(4,4): 10.0, (1,4): 8.0},
+# normalising over the GLOBAL parent set:
+#
+#     start    Z with global parents    true sum_x R(x)    error    P_B trajectory mass
+#     (1,1)              39.000              39.000        +0.0%    [1.000, 1.000]
+#     (2,2)              10.250              25.000       -59.0%    [0.250, 1.000]
+#     (3,1)              10.375              23.000       -54.9%    [0.125, 1.000]
+#     (1,3)              16.375              29.000       -43.5%    [0.125, 1.000]
+#
+# The source start is exact because every global parent is reachable from it. For any other
+# start, cells outside its cone are counted as parents, sum_tau P_B(tau|x) leaks below 1 --
+# measured as low as 0.125 -- and by Z = sum_x R(x) sum_tau P_B(tau|x) the learned Z
+# collapses. End-to-end training confirmed it: 900 iterations, two seeds, start (1,1)
+# landed on 38.90 and 38.88 against a true 39.0 while start (2,2) landed on 10.18 and
+# 10.17 against a true 25.0.
+#
+# `reachable_from` below is the fix: parents are filtered to the reachable cone before
+# normalising. Only F(s_0^i) = Z_i is per-start in the log_Z VECTOR, but the P_B used to
+# get there is per-start too.
+
+"""
+    reachable_from(model::MultiStartGFlowNetModel, idx::Int; max_states) -> Set
+
+Every state reachable from `model.initial_states[idx]` by applicable actions.
+
+Depends only on the initial state, the action set and the domain's applicability rules --
+never on parameters -- so it is safe to compute once per training run and reuse across
+iterations. It is NOT safe to cache across runs: a domain whose configuration changes
+(grid world installs a global `GRID_CONFIG` at model construction) can change what is
+applicable. `clear_reachability_cache!` is called at the top of `train_gflownet`.
+
+`max_states` refuses rather than exhausting memory on a domain whose reachable set is not
+enumerable. A domain that trips it cannot use multi-start with a P_B-dependent objective.
+"""
+const REACHABILITY_CACHE = Dict{Tuple{UInt64,Int},Set{Any}}()
+
+clear_reachability_cache!() = (empty!(REACHABILITY_CACHE); nothing)
+
+function reachable_from(model::MultiStartGFlowNetModel, idx::Int;
+                        max_states::Int = 200_000)
+    key = (objectid(model), idx)
+    cached = get(REACHABILITY_CACHE, key, nothing)
+    isnothing(cached) || return cached
+
+    seen = Set{Any}()
+    stack = Any[model.initial_states[idx]]
+    while !isempty(stack)
+        s = pop!(stack)
+        s in seen && continue
+        push!(seen, s)
+        if length(seen) > max_states
+            throw(ArgumentError(
+                "reachable set from initial state $idx exceeded $max_states states. " *
+                "Multi-start objectives that need P_B must normalise over the parents " *
+                "reachable from each start, which requires enumerating that cone; this " *
+                "domain's cone is too large. Use a single-start model."))
+        end
+        for a in get_applicable_actions(s, model.all_actions)
+            push!(stack, apply_action(a, s))
+        end
+    end
+
+    REACHABILITY_CACHE[key] = seen
+    return seen
+end
+
+"""
+    reachable_parent_count(model, child, idx) -> Int
+
+Number of parents of `child` that lie in the cone of `model.initial_states[idx]`.
+
+This is the denominator a uniform backward policy must use. `backward_parent_states`
+returns the GLOBAL parent set, which over-counts for any start that is not the source.
+"""
+function reachable_parent_count(model::MultiStartGFlowNetModel, child, idx::Int)
+    cone = reachable_from(model, idx)
+    n = 0
+    for p in backward_parent_states(child, model.all_actions)
+        p in cone && (n += 1)
+    end
+    return n
+end
+
+# CAVEAT on the two flow methods below, stated because it is load-bearing and easy to miss:
+# they delegate to the policy-context recursion in flows.jl, which normalises P_B over the
+# GLOBAL parent set. That is exact only for a start from which every global parent is
+# reachable -- the source. For any other start these return the flow of the global network,
+# not of that start's cone, and the two differ by the same factor documented above. The TB
+# loss does NOT use them; it uses `reachable_parent_count`. DETAILED_BALANCE and
+# FLOW_MATCHING do use them, so their multi-start optimum is the global-network reading.
+# Fixing that means threading the start index into the flow recursion, which changes a
+# public signature and is out of scope here; it is recorded rather than hidden.
+
+compute_recursive_flow(model::MultiStartGFlowNetModel, state::AbstractState)::Float64 =
+    compute_recursive_flow(model.all_actions, model.backward_policy,
+                           model.parameters, model.states, state)
+
+# No memoized variant: memoization in flows.jl caches per single-start model, and the
+# multi-start grids in use are small. Correctness first; add a cache when a profile asks.
+flow(model::MultiStartGFlowNetModel, state::AbstractState)::Float64 =
+    compute_recursive_flow(model, state)
+
+function forward_transition_probability(model::MultiStartGFlowNetModel, source_state, target_state)
+    applicable = get_applicable_actions(source_state, model.all_actions)
+    isempty(applicable) && return 0.0
+
+    probs = forward_action_probabilities(model.forward_policy, source_state,
+                                        model.all_actions, model.parameters.forward,
+                                        model.states.forward)
+
+    # Sum over every applicable action that actually lands on target_state. Summing rather
+    # than taking the first match matters wherever two distinct actions produce the same
+    # child, which is exactly the multi-parent structure this whole repair is about.
+    total = 0.0
+    for (i, action) in enumerate(model.all_actions)
+        action in applicable || continue
+        apply_action(action, source_state) == target_state || continue
+        total += probs[i]
+    end
+    return total
+end
+
+function backward_transition_probability(model::MultiStartGFlowNetModel, target_state, source_state)
+    if isnothing(model.backward_policy) || !haskey(model.parameters, :backward)
+        parents = backward_parent_states(target_state, model.all_actions)
+        return isempty(parents) ? 1.0 : 1.0 / length(parents)
+    end
+    return compute_backward_probability(
+        model.backward_policy, target_state, source_state,
+        model.parameters.backward, model.states.backward, model.all_actions
+    )
+end

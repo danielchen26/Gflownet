@@ -202,6 +202,71 @@ function create_gflownet(
     )
 end
 
+# =============================================================================
+# Optimiser Learning Rate - Accessor and Mutator
+# =============================================================================
+
+"""
+    optimizer_learning_rate(model::GFlowNetModel)::Float64
+
+Return the step size the model's optimiser will ACTUALLY use for the network
+parameters.
+
+`Optimisers.setup` bakes the rate into the optimiser state at construction, so
+`create_gflownet(learning_rate = ...)` is the only thing that determines it until
+something changes it. This accessor exists because there was previously no way to
+ask a model what rate it was training at, and that is what let
+`TrainingConfig.learning_rate` sit dead for so long: the two numbers could
+disagree by any factor and nothing could observe the disagreement. The library's
+own defaults disagree -- `create_gflownet` defaults to 0.01 while
+`TrainingConfig` defaults to 1e-3, a 10x gap -- so the verbose banner printing
+`config.learning_rate` was reporting a rate no parameter was moving at.
+
+Throws if the optimiser tree carries more than one distinct rate, which cannot
+arise from `create_gflownet` and means the state was assembled by hand.
+"""
+function optimizer_learning_rate(model::GFlowNetModel)::Float64
+    etas = Float64[]
+    Optimisers.fmap(model.optimizer; exclude = x -> x isa Optimisers.Leaf) do leaf
+        push!(etas, Float64(leaf.rule.eta))
+        leaf
+    end
+
+    if isempty(etas)
+        throw(ArgumentError("model.optimizer contains no Optimisers.Leaf; cannot read a learning rate"))
+    end
+
+    unique_etas = unique(etas)
+    if length(unique_etas) > 1
+        throw(ArgumentError(
+            "model.optimizer carries $(length(unique_etas)) distinct learning rates " *
+            "$(unique_etas); a single scalar rate is not defined for this model"
+        ))
+    end
+
+    return unique_etas[1]
+end
+
+"""
+    set_learning_rate!(model::GFlowNetModel, learning_rate::Real)
+
+Set the step size the model's optimiser uses for the network parameters, and
+return the model.
+
+Implemented with `Optimisers.adjust`, which rewrites the rule's `eta` while
+PRESERVING the accumulated moment buffers. That distinction matters: rebuilding
+the optimiser with `Optimisers.setup` would reset Adam's first and second moments
+to zero, and doing that on every step would leave Adam permanently on its
+bias-corrected first step -- an update of fixed magnitude eta in the direction of
+the gradient's sign, which is a different algorithm, not a rate change. So the
+rate is adjusted, never re-setup.
+"""
+function set_learning_rate!(model::GFlowNetModel, learning_rate::Real)
+    learning_rate > 0 || throw(ArgumentError("learning_rate must be positive, got $learning_rate"))
+    model.optimizer = Optimisers.adjust(model.optimizer, Float64(learning_rate))
+    return model
+end
+
 """
     create_forward_policy(state_dim::Int, hidden_dim::Int, n_actions::Int, rng)
 

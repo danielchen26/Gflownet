@@ -560,17 +560,117 @@ function GFlowNet.apply_action(action::TerminateMolAction, state::MolState)::Mol
 end
 
 # ============================================
-# TLM Backward Support
+# Backward Transitions: REFUSED, NOT ASSUMED
 # ============================================
 
-# For molecular generation, we cannot efficiently reverse a fragment join.
-# Return nothing → TLM uses trajectory-based backward sampling.
+"""
+    MolecularBackwardUnavailable <: Exception
+
+Thrown by `find_parent_for_action` for every `MolState`. Fragment-based molecular
+generation cannot name the parents of a state, so it cannot supply the P_B(s | s')
+that Trajectory Balance, Detailed Balance, Flow Matching and Sub-TB all need.
+
+These two methods used to `return nothing`, and an EMPTY parent set is read as
+"unique parent, so P_B = 1" by every consumer (policies.jl:504, losses.jl:566,
+balance.jl:313, flows.jl:185, multi_start_training.jl:161). P_B = 1 is a
+distribution only when every state has exactly one parent. The header of
+test/applications/molecular/test_fragment_dag_is_tree.jl asserted that this DAG is
+such a tree; it is not, and the numbers below are what the assumption costs.
+
+# What was measured
+
+Exhaustive enumeration of the instance built from fragment library entries
+[1, 2, 5, 41, 42, 43, 44, 45] plus `TerminateMolAction`. Exhaustive rather than
+depth-truncated: all five starters expose two attachment points and fragments 1, 2
+and 5 expose none, so `is_applicable` rejects every fragment action after three
+joins.
+
+    91 canonical nodes, 41 of them terminal
+    19 nodes have more than one parent -- in-degree 2: 15, 3: 3, 4: 1
+      15 non-terminal (joins that commute), 4 terminal (finalize_smiles collapse)
+    Z_true = sum_x R(x)            = 28.4957
+    Z_PB1  = sum_x n_paths(x) R(x) = 45.4131   (ratio 1.5937)
+    TV(R/Z , n R / sum n R)        = 0.1965
+
+Trajectory Balance on that instance, 1000 iterations, batch 32, lr 0.005,
+z_learning_rate_multiplier 10, seed 20260828:
+
+    with these methods returning nothing (P_B = 1)   learned Z = 45.40
+    with the enumerated parent set supplied as P_B    learned Z = 28.49
+
+So the objective was not approximately right here, it was solving for the
+path-count-biased law -- the same defect losses.jl:566 repaired for grid world, left
+inert in this domain by the `return nothing` above.
+
+# Why the parent set is not recoverable from a MolState
+
+1. Terminate erases the attachment bookkeeping. `apply_action(::TerminateMolAction,
+   s)` stores `finalize_smiles(s.smiles)`, and `_finalize` (rdkit_bridge.jl:217)
+   deletes every remaining dummy atom, after which the state carries
+   `attachment_points = Int[]`. Measured: the terminal node `c1ccccc1` has three
+   distinct parents -- `*c1ccccc1*`, `*c1ccc(*)cc1` and `*c1cccc(*)c1`, the states
+   left by starters 41, 42 and 43 -- and the child records neither how many dummies
+   were deleted nor where they sat. Recovering them is not the reversal of one
+   action: it is a retrosynthetic enumeration of every assembly of the molecule from
+   the library, and each candidate then has to be filtered by reachability under the
+   "always join at `attachment_points[1]`" rule, which is a property of the whole
+   build order rather than of the child.
+
+2. A MolState is its build history, not its molecule. `join_fragment` parses the
+   incoming fragment with `MolFromSmarts`, so the stored SMILES keeps that
+   fragment's query bonds: order [41, 1, 2] stores
+   `C1:C:C:C(c2ccccc2-c2ccccc2):N:C:1` and order [41, 2, 1] stores
+   `C1:C:C:C(c2ccccc2-c2ccccn2):C:C:1` for the same molecule, and `==` compares raw
+   SMILES, so those are two nodes. Graph surgery on a child can only ever hand back
+   the canonical string -- `*c1ccccc1-c1ccccc1` where the sampler stored
+   `*c1ccccc1C1:C:C:C:C:C:1` -- so an enumerator cannot name the node the trajectory
+   actually visited.
+
+3. The construction that does work is the global one: enumerate the reachable DAG
+   and read off the in-degrees. That is what produced the 28.49 above, so this is an
+   engineering limit and not a mathematical one. It does not scale to the shipped
+   library. Distinct canonical nodes reachable in exactly 1, 2, 3 actions with all 50
+   fragments: 10, 382, 11169 (11491 distinct overall, 255 terminal, 68 of those
+   multi-path, biphenyl `c1ccc(-c2ccccc2)cc1` reachable 9 ways) -- a factor of 29 per
+   join, with `MAX_FRAGMENTS = 8` joins allowed and ten two-attachment linkers that
+   keep the attachment stack from draining.
+
+# What a caller should do
+
+Either restrict the fragment library to an instance small enough to enumerate and
+feed the resulting parent sets in, or change the representation so that a parent is
+local: make canonical SMILES the node identity and allow `TerminateMolAction` only
+when no attachment point remains, which stops terminate destroying information and
+reduces a join reversal to one substructure match plus a forward re-check. Do not
+catch this exception and carry on. The value it replaces is 1, and 1 is wrong for 19
+of the 91 nodes above.
+"""
+struct MolecularBackwardUnavailable <: Exception
+    smiles::String
+    action_name::String
+end
+
+function Base.showerror(io::IO, e::MolecularBackwardUnavailable)
+    print(io, """
+          MolecularBackwardUnavailable: cannot enumerate the parents of a MolState.
+
+            state  : $(isempty(e.smiles) ? "<initial>" : e.smiles)
+            action : $(e.action_name)
+
+          Fragment-based molecular generation cannot reverse a join or a terminate, so
+          it cannot supply P_B(s | s'). The objective you are running needs it and
+          would otherwise use P_B = 1, which is a distribution only if every state has
+          one parent. Measured on the [1, 2, 5, 41, 42, 43, 44, 45] instance: 19 of 91
+          nodes have more than one parent, and P_B = 1 converges to Z = 45.40 against
+          a true Z = 28.4957. See the MolecularBackwardUnavailable docstring.""")
+end
+
 function GFlowNet.find_parent_for_action(state::MolState, action::FragmentAction)
-    return nothing
+    throw(MolecularBackwardUnavailable(state.smiles, "join " * action.fragment_name))
 end
 
 function GFlowNet.find_parent_for_action(state::MolState, action::TerminateMolAction)
-    return nothing
+    throw(MolecularBackwardUnavailable(state.smiles, "terminate"))
 end
 
 # ============================================

@@ -107,17 +107,42 @@ Sample n trajectories with importance weights for off-policy correction.
 
 Returns tuple of (trajectories, importance_weights, indices).
 
-The importance weights are computed as:
-    w_i = (N × P(i))^(-1)
+Indices are drawn i.i.d. WITH replacement from
+    P(i) = p_i^alpha / sum_j p_j^alpha
+so a trajectory may appear more than once in one batch, and exactly `n`
+trajectories are always returned as long as the buffer is non-empty.
 
+The importance weights are then
+    w_i = (N * P(i))^(-1)
 normalized by max weight to ensure w_max = 1.0.
+
+# Why with replacement
+This draw used to be `replace=false`, which broke the function in two ways at
+once.
+
+First, the weight formula above is Schaul et al. (2016) with beta = 1, and its
+precondition is that index i is selected with probability P(i). That holds for an
+i.i.d. draw. Under sampling without replacement the marginal inclusion
+probability of i is not P(i) -- it depends on n and on every other priority --
+so the correction applied was not the correction derived.
+
+Second, and this is the reachable one: without replacement the draw needs
+n <= current_size, so `n` was clamped to the buffer size, and when n reached the
+buffer size the draw returned EVERY stored trajectory regardless of priority.
+`replay_priority_alpha` then had no effect at all. That is reachable from the
+public config: train_gflownet only enters the replay branch once
+length(buffer) >= batch_size, and replay_ratio = 1.0 asks for n = batch_size.
+MEASURED on a 10-entry buffer with priorities [1,1,1,1,1,1,1,1,1,100], drawing
+n = 10 two thousand times: the high-priority entry's share of the drawn indices
+was 0.100 at alpha = 0.0 AND 0.100 at alpha = 1.0 -- the uniform 1/10 both
+times, because every draw returned the whole buffer. With the i.i.d. draw below
+the same measurement gives 0.100 at alpha = 0.0 and 0.917 at alpha = 1.0,
+against the closed-form 0.1 and 100/109 = 0.9174.
 """
 function sample_with_weights(buffer::ReplayBuffer, n::Int)
     if buffer.current_size == 0
         return Trajectory[], Float64[], Int[]
     end
-
-    n = min(n, buffer.current_size)
 
     # Get active priorities
     active_priorities = buffer.priorities[1:buffer.current_size]
@@ -126,8 +151,8 @@ function sample_with_weights(buffer::ReplayBuffer, n::Int)
     probs = active_priorities .^ buffer.alpha
     probs ./= sum(probs)
 
-    # Sample indices without replacement
-    indices = sample(1:buffer.current_size, Weights(probs), n; replace=false)
+    # Sample indices i.i.d. from P(i) -- see "Why with replacement" above.
+    indices = sample(1:buffer.current_size, Weights(probs), n; replace=true)
 
     # Compute importance sampling weights
     # w_i = (N × P(i))^(-β) where β=1 for full correction

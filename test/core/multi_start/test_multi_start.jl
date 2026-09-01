@@ -222,37 +222,89 @@ using GFlowNet: MultiStartGFlowNetModel, sample_initial_state, get_initial_state
     
     @testset "Different Training Objectives" begin
         # This testset used to train FLOW_MATCHING and DETAILED_BALANCE and assert only
-        # `length(history.losses) == 20`. A vector of twenty NaN satisfies that, and that
-        # is exactly what both produced: every iteration threw a MethodError -- no
-        # `forward_transition_probability` or `flow` method exists for
-        # MultiStartGFlowNetModel -- train_gflownet caught it and pushed NaN. Measured 0
-        # of 10 finite losses for both, with and without a backward policy. So the suite
-        # reported two objectives as working when neither had ever run a single step.
+        # `length(history.losses) == 20`. Twenty NaN satisfy that, and twenty NaN is exactly
+        # what both produced: no `forward_transition_probability` or `flow` method existed
+        # for MultiStartGFlowNetModel, so every iteration threw a MethodError,
+        # train_gflownet caught it and pushed NaN. Measured 0 of 20 finite losses for both.
+        # The suite reported two objectives as working when neither had run a single step.
         #
-        # Both now refuse up front, and that refusal is what gets asserted.
+        # All three work now, and the assertions are the two properties the old length check
+        # could not see: every iteration FINITE, and every gradient norm NON-ZERO. The
+        # second one matters on its own -- DETAILED_BALANCE passed the finiteness check while
+        # still computing P_F from `model.parameters` instead of the differentiated `params`,
+        # which made the loss independent of what was being optimised and left the gradient
+        # at exactly 0.0. A finite loss with a zero gradient is not training.
         initial_states = [
             GridState(1, 1, false),
             GridState(2, 2, false)
         ]
-        actions = [MoveRight(), MoveUp(), MoveLeft(), MoveDown(), Terminate()]
 
-        # TRAJECTORY_BALANCE is the one that works, and the assertion is finiteness --
-        # the property whose absence the old length check could not see.
-        model_tb = create_multi_start_gflownet(initial_states, actions;
-                                               state_dim = 3, hidden_dim = 32)
-        history_tb = train_gflownet(model_tb,
-            TrainingConfig(objective = TRAJECTORY_BALANCE, n_iterations = 20,
-                           batch_size = 8); verbose = false)
-        @test length(history_tb.losses) == 20
-        @test count(isfinite, history_tb.losses) == 20
+        # TWO action sets, because they are not interchangeable and the original single
+        # cyclic set hid that.
+        #
+        # acyclic: MoveRight/MoveUp only, so the state graph is a monotone lattice.
+        # cyclic:  all four moves, so the start state acquires parents and the backward
+        #          chain is never absorbed at s_0.
+        acyclic = [MoveRight(), MoveUp(), Terminate()]
+        cyclic  = [MoveRight(), MoveUp(), MoveLeft(), MoveDown(), Terminate()]
 
-        for obj in (FLOW_MATCHING, DETAILED_BALANCE)
-            model = create_multi_start_gflownet(initial_states, actions;
+        # On an ACYCLIC graph all three objectives train, and the assertions are the two
+        # properties a length check cannot see: every iteration FINITE, and every gradient
+        # norm NON-ZERO. The second matters on its own -- DETAILED_BALANCE passed finiteness
+        # while still reading P_F from `model.parameters` instead of the differentiated
+        # `params`, which left the gradient at exactly 0.0. A finite loss with a zero
+        # gradient is not training.
+        for obj in (TRAJECTORY_BALANCE, DETAILED_BALANCE, FLOW_MATCHING),
+            include_backward in (false, true)
+
+            model = create_multi_start_gflownet(initial_states, acyclic;
                                                 state_dim = 3, hidden_dim = 32,
-                                                include_backward = true)
-            config = TrainingConfig(objective = obj, n_iterations = 20, batch_size = 8)
-            @test_throws ArgumentError train_gflownet(model, config; verbose = false)
+                                                include_backward = include_backward)
+            history = train_gflownet(model,
+                TrainingConfig(objective = obj, n_iterations = 20, batch_size = 8);
+                verbose = false)
+
+            @test length(history.losses) == 20
+            @test count(isfinite, history.losses) == 20
+            @test count(g -> isfinite(g) && g > 0, history.gradient_norms) == 20
         end
+
+        # On a CYCLIC graph the three objectives SPLIT, and that split is the finding.
+        #
+        # TB carries its partition function as a learned parameter, so cycles are absorbed
+        # into log_Z and it trains. DB and FM need a finite F(s), which they obtain from the
+        # conservation recursion -- and on a cyclic graph that recursion has no solution:
+        # the backward transfer matrix has spectral radius exactly 1, sigma_min(I - W') is
+        # 1.5e-16, and the partial sums for sum_tau P_B(tau|x) diverge as
+        # 2.0/12.0/49.5/249.5/999.5 at horizons 10/50/200/1000/4000 where the value must be
+        # 1. So they must refuse, and before the cycle guard they crashed with
+        # StackOverflowError which the training loop recorded as NaN.
+        #
+        # This testset previously used the cyclic set for ALL SIX combinations and asserted
+        # they all train. Four of them cannot.
+        model_tb_cyclic = create_multi_start_gflownet(initial_states, cyclic;
+                                                     state_dim = 3, hidden_dim = 32)
+        history_tb_cyclic = train_gflownet(model_tb_cyclic,
+            TrainingConfig(objective = TRAJECTORY_BALANCE, n_iterations = 20, batch_size = 8);
+            verbose = false)
+        @test count(isfinite, history_tb_cyclic.losses) == 20
+
+        for obj in (DETAILED_BALANCE, FLOW_MATCHING)
+            @test_throws ArgumentError train_gflownet(
+                create_multi_start_gflownet(initial_states, cyclic;
+                                            state_dim = 3, hidden_dim = 32),
+                TrainingConfig(objective = obj, n_iterations = 5, batch_size = 4);
+                verbose = false)
+        end
+
+        # An objective with no multi-start branch must be refused up front, not discovered
+        # as NaN inside the loop -- the loop converts any throw into a NaN entry and reports
+        # the run as complete.
+        @test_throws ArgumentError train_gflownet(
+            create_multi_start_gflownet(initial_states, acyclic;
+                                        state_dim = 3, hidden_dim = 32),
+            TrainingConfig(objective = SUB_TRAJECTORY_BALANCE, n_iterations = 5,
+                           batch_size = 4); verbose = false)
     end
 end
 

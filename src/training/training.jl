@@ -81,6 +81,38 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
     # mathematical reason, so this fails in one line before any work happens.
     validate_training_config(config, model)
 
+    # config.learning_rate NOW DRIVES THE NETWORK OPTIMISER. Before this line it
+    # did not, and that made it a documented knob with no effect.
+    #
+    # Optimisers.setup bakes eta into the optimiser state inside
+    # create_*_gflownet, train_step! updates through model.optimizer, and
+    # config.learning_rate was read only for the explicit log_Z step and for the
+    # banner below. MEASURED before this line existed: two FLOW_MATCHING runs on
+    # the 3x3 grid, identical seeds, config.learning_rate 1e-12 and 10.0 -- a
+    # 1e13-fold change -- produced BIT-IDENTICAL loss traces
+    # 2.1585945939056956, 0.7134921918167256, 1.6056850745859614,
+    # 1.191195398744913, 0.8159034958585434, max abs difference exactly 0.0.
+    # The banner meanwhile printed whichever number the config carried, so the
+    # reported rate was not the rate any parameter moved at. The library's own
+    # defaults disagree by 10x (create_gflownet 0.01, TrainingConfig 1e-3), which
+    # is why a warn-on-mismatch was rejected: it would fire on the default
+    # configuration and so carry no information.
+    #
+    # The config wins because it is the per-run description of the optimisation
+    # and its own docstring defines learning_rate as the alpha in
+    # theta_{t+1} = theta_t - alpha grad L. The model's rate remains the initial
+    # value and governs callers that drive train_step! themselves.
+    #
+    # Applied ONCE here, not per step, and with Optimisers.adjust rather than
+    # Optimisers.setup: adjust rewrites eta and keeps Adam's moment buffers,
+    # whereas a per-step re-setup would zero them every step and pin Adam on its
+    # bias-corrected first update, which is a different algorithm rather than a
+    # rate.
+    model_learning_rate = optimizer_learning_rate(model)
+    if model_learning_rate != config.learning_rate
+        set_learning_rate!(model, config.learning_rate)
+    end
+
     history = TrainingHistory()
 
     # Initialize replay buffer if configured (JMLR 2023: Off-policy learning)
@@ -96,7 +128,11 @@ function train_gflownet(model::GFlowNetModel, config::TrainingConfig; verbose::B
         println("     - Objective: $(config.objective)")
         println("     - Iterations: $(config.n_iterations)")
         println("     - Batch size: $(config.batch_size)")
-        println("     - Learning rate: $(config.learning_rate)")
+        if model_learning_rate != config.learning_rate
+            println("     - Learning rate: $(config.learning_rate) (config; overrides the $(model_learning_rate) the model was built with)")
+        else
+            println("     - Learning rate: $(config.learning_rate)")
+        end
         println("     - Temperature: $(config.temperature)")
         println("     - Epsilon (ε-uniform): $(config.epsilon)$(config.epsilon_decay ? " (annealed)" : "")")
         println("     - Entropy weight: $(config.entropy_weight)")

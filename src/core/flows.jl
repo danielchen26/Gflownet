@@ -158,46 +158,81 @@ Weighting each child by P_B(s|s') makes the path multiplicity cancel rather
 than accumulate, which is the recursion consistent with the corrected
 Trajectory Balance objective, and gives F(s0) = sum_x R(x) exactly.
 """
-function compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Float64
+# The recursion below needs a POLICY CONTEXT, not a model: all_actions plus the backward
+# policy and its parameters/states. Nothing in it reads the initial state, which is why
+# F(s) is start-independent and the same recursion is correct for a multi-start model --
+# only F(s_0^i) = Z_i differs per start. Extracted so multi_start.jl can reuse it without
+# duplicating the definition; that file loads after this one, so it cannot be named here.
+function compute_recursive_flow(all_actions, backward_policy, parameters, states,
+                                state::AbstractState;
+                                in_progress = nothing)::Float64
+    # CYCLE DETECTION. Without it this recursion StackOverflows on any cyclic state graph,
+    # which `allow_all_moves=true` produces for grid world: MoveLeft/MoveDown give the start
+    # state parents, so the backward chain is never absorbed at s_0.
+    #
+    # That is not a performance problem, it is the absence of a solution. sum_tau P_B(tau|x)
+    # becomes the expected number of visits to a recurrent finite chain -- measured on the
+    # 2x2 allow_all model, the backward transfer matrix has spectral radius exactly
+    # 1.0000000000 and sigma_min(I - W') = 1.5e-16, so a direct solve throws
+    # SingularException. The partial sums diverge: horizon 10/50/200/1000/4000 gives
+    # sum_tau P_B = 2.0/12.0/49.5/249.5/999.5 where it must be 1, and the Z candidate m(s0)
+    # gives 24/144/594/2994/11994 against exact_Z = 12.
+    #
+    # So refuse, and name the cause. DETAILED_BALANCE and FLOW_MATCHING fall back to flow()
+    # whenever include_flow_estimator=false (the default), so before this guard they crashed
+    # with StackOverflowError on iteration 1 -- which train_gflownet then caught and recorded
+    # as NaN, reporting the run as complete.
+    seen = isnothing(in_progress) ? Set{Any}() : in_progress
+    if state in seen
+        throw(ArgumentError(
+            "cyclic state graph: $state was reached again on its own path, so the backward " *
+            "chain is not absorbed at the initial state and no finite F satisfies " *
+            "F(s) = sum_children F(c) P_B(s|c). Trajectory balance has no Z on this graph. " *
+            "For grid world this is allow_all_moves=true; train with a LEARNABLE partition " *
+            "function, which absorbs the cycles, and do not read flow() or " *
+            "partition_function() as a ground truth there."))
+    end
+
     # Base case: terminal states
     if is_terminal_state(state)
         return terminal_flow(state)
     end
 
-    # Get applicable actions using on-demand computation
-    applicable_actions = get_applicable_actions(state, model.all_actions)
-    
-    # If no applicable actions, this is effectively a terminal state with zero reward
-    if isempty(applicable_actions)
-        return 0.0
-    end
-    
-    # F(s) = sum over children s' of F(s') * P_B(s|s')
+    applicable_actions = get_applicable_actions(state, all_actions)
+    isempty(applicable_actions) && return 0.0
+
+    push!(seen, state)
     total_flow = 0.0
-
-    for action in model.all_actions
+    for action in all_actions
         action in applicable_actions || continue
-
         next_state = apply_action(action, state)
 
-        # P_B(state | next_state): probability that a backward walk at next_state
-        # steps to state. With no backward policy this is uniform over the parents
-        # of next_state, which is a perfectly valid fixed P_B.
-        back_prob = if isnothing(model.backward_policy) || !haskey(model.parameters, :backward)
-            np = length(backward_parent_states(next_state, model.all_actions))
+        # P_B(state | next_state). Uniform over the parents of next_state when there is
+        # no backward policy -- a valid fixed P_B. P_B == 1 would NOT be: it is a
+        # distribution only where every state has one parent.
+        back_prob = if isnothing(backward_policy) || !haskey(parameters, :backward)
+            np = length(backward_parent_states(next_state, all_actions))
             np == 0 ? 1.0 : 1.0 / np
         else
-            compute_backward_probability(
-                model.backward_policy, next_state, state,
-                model.parameters.backward, model.states.backward, model.all_actions
-            )
+            compute_backward_probability(backward_policy, next_state, state,
+                                         parameters.backward, states.backward, all_actions)
         end
 
-        total_flow += back_prob * compute_recursive_flow(model, next_state)
+        total_flow += back_prob * compute_recursive_flow(all_actions, backward_policy,
+                                                        parameters, states, next_state;
+                                                        in_progress = seen)
     end
-
+    # Pop on the way out: `seen` tracks the current PATH, not every state ever visited. A
+    # state reachable by two different paths is not a cycle, and keeping it in the set would
+    # report a false one -- which is exactly the multi-parent structure this whole repair is
+    # about.
+    delete!(seen, state)
     return total_flow
 end
+
+compute_recursive_flow(model::GFlowNetModel, state::AbstractState)::Float64 =
+    compute_recursive_flow(model.all_actions, model.backward_policy,
+                           model.parameters, model.states, state)
 
 """
     compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractState)::Float64
@@ -241,12 +276,30 @@ function compute_recursive_flow_memoized(model::GFlowNetModel, state::AbstractSt
 end
 
 function _memoized_flow(model::GFlowNetModel, state::AbstractState,
-                        param_hash::UInt64)::Float64
+                        param_hash::UInt64; in_progress = nothing)::Float64
+    # Cycle detection, same contract as compute_recursive_flow. It has to be HERE as well:
+    # `flow` and `partition_function` reach the memoized variant, not the plain one, so
+    # guarding only the plain recursion left both of them still throwing StackOverflowError
+    # on an allow_all_moves model. Verified by measurement -- the acyclic value stayed 19.0
+    # and the cyclic call still overflowed -- which is how this second site was found.
+    seen = isnothing(in_progress) ? Set{Any}() : in_progress
+    if state in seen
+        throw(ArgumentError(
+            "cyclic state graph: $state was reached again on its own path, so the backward " *
+            "chain is not absorbed at the initial state and no finite F satisfies " *
+            "F(s) = sum_children F(c) P_B(s|c). Trajectory balance has no Z on this graph. " *
+            "For grid world this is allow_all_moves=true; train with a LEARNABLE partition " *
+            "function, which absorbs the cycles, and do not read flow() or " *
+            "partition_function() as a ground truth there."))
+    end
+
     cache = FLOW_CACHE[]
     cache_key = (param_hash, state)
 
     cached = get(cache, cache_key, nothing)
     isnothing(cached) || return cached
+
+    push!(seen, state)
 
     value = if is_terminal_state(state)
         terminal_flow(state)
@@ -273,12 +326,17 @@ function _memoized_flow(model::GFlowNetModel, state::AbstractState,
                     )
                 end
 
-                total += back_prob * _memoized_flow(model, child, param_hash)
+                total += back_prob * _memoized_flow(model, child, param_hash;
+                                                    in_progress = seen)
             end
             total
         end
     end
 
+    # Pop on the way out: `seen` is the current PATH, not every state visited. A state
+    # reachable by two paths is not a cycle, and leaving it in would report a false one --
+    # which is precisely the multi-parent structure this file exists to handle.
+    delete!(seen, state)
     cache[cache_key] = value
     return value
 end

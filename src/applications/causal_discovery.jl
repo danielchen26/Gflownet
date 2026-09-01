@@ -29,6 +29,37 @@ struct DAGState <: AbstractState
 end
 
 """
+    Base.:(==)(a::DAGState, b::DAGState)
+    Base.hash(state::DAGState, h::UInt)
+
+Structural equality and hashing for DAG states.
+
+REQUIRED, and the absence of these was not cosmetic. Julia's default `==` on a
+struct is `===`, which compares fields by identity, and `adjacency_matrix` is a
+`Matrix` -- so two states holding equal but distinct matrices compared UNEQUAL.
+Every consumer that asks "is this the same state" therefore answered no. In
+particular `is_valid_backward_transition` (policies.jl:560) decides parenthood by
+`apply_action(action, parent) == child`, so it rejected genuinely valid
+transitions and `backward_parent_states` came back EMPTY no matter what
+`find_parent_for_action` returned. Measured before these methods existed, on the
+3-node initial state s0 and a = AddEdgeAction(1, 2):
+
+    apply_action(a, s0) == apply_action(a, s0)              false
+    is_valid_backward_transition(s0, apply_action(a, s0))   false
+    length(backward_parent_states(apply_action(a, s0), …))  0
+
+`node_names` is part of the identity because `state_to_features` is not the whole
+state: two DAGs over different variables are different states.
+"""
+Base.:(==)(a::DAGState, b::DAGState) =
+    a.is_terminal == b.is_terminal &&
+    a.adjacency_matrix == b.adjacency_matrix &&
+    a.node_names == b.node_names
+
+Base.hash(state::DAGState, h::UInt) =
+    hash(state.is_terminal, hash(state.node_names, hash(state.adjacency_matrix, h)))
+
+"""
     DAGAction <: AbstractAction
 
 Action representation for causal DAG building.
@@ -364,19 +395,41 @@ function reward(state::DAGState)
 end
 
 """
-    create_dag_actions(n_nodes::Int)
+    create_dag_actions(n_nodes::Int; allow_edge_removal::Bool = false)
 
-Create a set of possible DAG building actions.
+Create the DAG building action set: one `AddEdgeAction` per ordered node pair
+plus `TerminateDAGAction`, and `RemoveEdgeAction` only when asked for.
+
+ACYCLIC BY DEFAULT, which is what a GFlowNet requires of its state graph, and
+the reason `allow_edge_removal` is opt-in rather than always on. Add-then-remove
+is a 2-cycle: `apply_action(RemoveEdgeAction(1, 2), apply_action(AddEdgeAction(1, 2), s))`
+returns `s`. Enumerating the 3-node space with removals included therefore has no
+topological order and no finite path count -- the enumeration in
+test/applications/causal_discovery/test_dag_parents.jl refuses it with
+"state graph is not acyclic: (1 edge, non-terminal) -> (0 edges, non-terminal)".
+With no path count there is no Z either: `sum_x n(x) R(x)` diverges, so nothing
+the trainer converges to can be checked against a ground truth.
+
+This mirrors `create_grid_world_gflownet`'s `allow_all_moves` (grid_world.jl:264):
+`MoveLeft`/`MoveDown` exist and have backward parents, but the default action set
+is "only up and right moves to prevent cycles", and every verified grid number
+(Z = 19.0 on the 3x3) was measured on that acyclic set.
+
+Measured cost of the old default on the 3-node instance, 1000 iterations at
+batch 32, lr 0.005, z_learning_rate_multiplier 10, seed 20260828: learned
+Z 30.88 against an enumerated Z_true of 13.667470 -- exactly the add-only
+path-count-biased Z_PB1 = 30.864859, because Trajectory Balance can only satisfy
+itself on a cyclic graph by driving every removal probability to zero, which
+leaves the add-only paths and their multiplicity behind.
 """
-function create_dag_actions(n_nodes::Int)
+function create_dag_actions(n_nodes::Int; allow_edge_removal::Bool = false)
     actions = DAGAction[]
 
-    # Add edge actions
     for i in 1:n_nodes
         for j in 1:n_nodes
             if i != j
                 push!(actions, AddEdgeAction(i, j))
-                push!(actions, RemoveEdgeAction(i, j))
+                allow_edge_removal && push!(actions, RemoveEdgeAction(i, j))
             end
         end
     end
@@ -407,4 +460,101 @@ function create_initial_dag_state(n_nodes::Int, node_names::Vector{String}=Strin
     end
 
     return DAGState(adjacency_matrix, node_names, false)
+end
+
+# =============================================================================
+# Backward Sampling Support
+# =============================================================================
+#
+# `backward_parent_states` (policies.jl:540) builds the parent set by asking
+# `find_parent_for_action` once per action in the model's action set, and the
+# DEFAULT for that hook (interface.jl:809) returns `nothing`. Only grid_world.jl
+# and molecular_generation.jl overrode it, so this domain's parent set was empty,
+# `n_parents > 1` in the Trajectory Balance loss (losses.jl:567) never fired, and
+# log P_B stayed identically 0 -- P_B == 1, which is a distribution only where
+# every state has a unique parent. A DAG with k edges has k of them.
+#
+# Note the QUALIFIED names, for the reason spelled out above
+# `GFlowNet.is_terminal_state`: this file's `using ..GFlowNet: ...` list does not
+# import `find_parent_for_action`.
+
+"""
+    GFlowNet.find_parent_for_action(target_state::DAGState, action::AddEdgeAction)
+
+Inverse of `apply_action(::AddEdgeAction, ::DAGState)`: the parent is `target`
+with that one edge deleted, and it exists only if `target` actually has the edge.
+
+A DAG is the same state whichever order its edges arrived in, so a `target` with
+k edges has exactly k parents this way -- one per edge. Each is reachable: every
+subgraph of an acyclic graph is acyclic, so `is_applicable(AddEdgeAction(i, j), parent)`
+holds for the deleted edge, which is what `backward_parent_states` re-checks.
+
+`nothing` for a terminal `target`, because `apply_action(::AddEdgeAction, ·)`
+always returns `is_terminal = false`; only `TerminateDAGAction` reaches a terminal
+state.
+"""
+function GFlowNet.find_parent_for_action(target_state::DAGState, action::AddEdgeAction)
+    target_state.is_terminal && return nothing
+
+    n_nodes = size(target_state.adjacency_matrix, 1)
+    (1 <= action.from_node <= n_nodes && 1 <= action.to_node <= n_nodes) || return nothing
+    action.from_node == action.to_node && return nothing
+
+    # The edge has to be present, or this action did not produce `target`.
+    target_state.adjacency_matrix[action.from_node, action.to_node] || return nothing
+
+    parent_matrix = copy(target_state.adjacency_matrix)
+    parent_matrix[action.from_node, action.to_node] = false
+
+    return DAGState(parent_matrix, copy(target_state.node_names), false)
+end
+
+"""
+    GFlowNet.find_parent_for_action(target_state::DAGState, action::RemoveEdgeAction)
+
+Inverse of `apply_action(::RemoveEdgeAction, ::DAGState)`: the parent is `target`
+with that one edge added back, and it exists only if `target` lacks the edge.
+
+Consulted ONLY when the caller opted into `create_dag_actions(n; allow_edge_removal = true)`;
+the default action set contains no `RemoveEdgeAction`, so this method never runs
+there. It is defined for the same reason grid_world.jl defines parents for
+`MoveLeft`/`MoveDown` (grid_world.jl:466, :488), which its own default action set
+also omits: an action that can occur must have its inverse enumerated, or P_B is
+normalised over an incomplete parent set.
+
+The acyclicity guard is NOT redundant. `is_applicable(::RemoveEdgeAction, ·)`
+checks only that the edge is present, so `backward_parent_states` would accept a
+cyclic parent -- yet `is_applicable(::AddEdgeAction, ·)` refuses every
+cycle-creating edge, so no cyclic graph is reachable forward from
+`create_initial_dag_state`. Handing one back would put P_B mass on a state no
+trajectory can occupy.
+"""
+function GFlowNet.find_parent_for_action(target_state::DAGState, action::RemoveEdgeAction)
+    target_state.is_terminal && return nothing
+
+    n_nodes = size(target_state.adjacency_matrix, 1)
+    (1 <= action.from_node <= n_nodes && 1 <= action.to_node <= n_nodes) || return nothing
+    action.from_node == action.to_node && return nothing
+
+    # The edge has to be absent, or this action did not produce `target`.
+    target_state.adjacency_matrix[action.from_node, action.to_node] && return nothing
+
+    parent_matrix = copy(target_state.adjacency_matrix)
+    parent_matrix[action.from_node, action.to_node] = true
+    has_cycle(parent_matrix) && return nothing
+
+    return DAGState(parent_matrix, copy(target_state.node_names), false)
+end
+
+"""
+    GFlowNet.find_parent_for_action(target_state::DAGState, action::TerminateDAGAction)
+
+Inverse of `apply_action(::TerminateDAGAction, ::DAGState)`: the same graph, not
+yet terminal. `nothing` for a non-terminal `target`, since terminating is the only
+way into a terminal state and it never leaves one non-terminal. Mirrors
+grid_world.jl:505.
+"""
+function GFlowNet.find_parent_for_action(target_state::DAGState, action::TerminateDAGAction)
+    target_state.is_terminal || return nothing
+    return DAGState(copy(target_state.adjacency_matrix), copy(target_state.node_names), false)
 end
