@@ -580,6 +580,43 @@ function validate_training_config(config::TrainingConfig, model::GFlowNetModel)
             "throw into a NaN entry and reports the run as complete."))
     end
 
+    # A domain whose parents are not enumerable cannot supply a valid P_B, and the objectives
+    # that need one are then training against a biased terminal law. Say so ONCE, here, where
+    # it is visible -- not per-edge inside the loss, where the training loop catches
+    # everything and records NaN. That mistake was made and measured: throwing from
+    # `find_parent_for_action` took molecular TB from training to 0 of 5 finite losses, i.e.
+    # the refusal became the silent failure it was meant to prevent.
+    #
+    # `backward_parent_states` returning empty on a NON-initial state is the signal:
+    # `find_parent_for_action` has a default that returns nothing, so a domain that never
+    # overrode it looks parentless everywhere. Grid world and causal discovery have overrides;
+    # molecular_generation deliberately returns nothing because a MolState does not store its
+    # join history, and molecular_design and active_learning have none at all.
+    let needs_pb = _objective_component_requirements(config.objective)
+        if isnothing(model.backward_policy) &&
+           (needs_pb.learnable_z || needs_pb.backward ||
+            config.objective == TRAJECTORY_BALANCE)
+            probe = model.initial_state
+            first_child = nothing
+            for a in model.all_actions
+                is_applicable(a, probe) || continue
+                c = apply_action(a, probe)
+                c == probe && continue
+                first_child = c
+                break
+            end
+            if !isnothing(first_child) &&
+               isempty(backward_parent_states(first_child, model.all_actions))
+                @warn "This domain cannot enumerate parents, so P_B is taken as 1 and the " *
+                      "sampled terminal law is biased toward states reachable by more " *
+                      "action orders. The bias is n(x), the number of distinct paths to x." domain =
+                      typeof(probe) fix = "implement GFlowNet.find_parent_for_action for " *
+                      "this state type; measured on the molecular fragment DAG the bias is " *
+                      "1.59x in partition-function terms (45.41 against a true 28.50)"
+            end
+        end
+    end
+
     reqs = _objective_component_requirements(config.objective)
     missing_parts = String[]
 

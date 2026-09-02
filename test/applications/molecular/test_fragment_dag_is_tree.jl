@@ -206,41 +206,86 @@ end
 histogram(xs) = (h = Dict{Int,Int}(); for x in xs; h[x] = get(h, x, 0) + 1; end; h)
 
 # ============================================================================
-# 1. The backward path refuses. Needs no chemistry.
+# 1. The backward path is UNAVAILABLE, and the consequence is warned about
+#    where it can be seen. Needs no chemistry.
 # ============================================================================
 
-@testset "MolState refuses to supply P_B instead of assuming it is 1" begin
-    # An empty parent set means "unique parent, P_B = 1" to every consumer
-    # (policies.jl:504, losses.jl:566, balance.jl:313, flows.jl:185,
-    # multi_start_training.jl:161). Returning `nothing` here produced exactly that,
-    # and the measured cost on this instance is Z = 45.41 against a true 28.50.
-    # Anyone restoring the `nothing` fails here rather than in a training curve.
+@testset "MolState parents are unrecoverable, and that is surfaced not hidden" begin
+    # A MolState cannot recover its parents: the join history is not stored -- only the
+    # canonical SMILES, the open attachment points and their labels. So neither P_B = 1 nor
+    # uniform-over-parents is computable, and P_B = 1 is NOT valid here because the fragment
+    # DAG is not a tree. Measured on the [1, 2, 5, 41, 42, 43, 44, 45] subset with
+    # TerminateMolAction included and states compared by CANONICAL smiles: 41 terminals, 19
+    # of them multi-path, max n(x) = 4, Z with P_B = 1 is 45.4131 against a true 28.4957 --
+    # a 1.5937x bias toward states reachable by more join orders.
+    #
+    # AN EARLIER VERSION OF THIS TESTSET ASSERTED THAT find_parent_for_action THROWS, and the
+    # source threw MolecularBackwardUnavailable from it. That design was reverted, and the
+    # reason is worth keeping because it is the same mistake this repo has been unwinding all
+    # along.
+    #
+    # find_parent_for_action is a STRUCTURAL QUERY -- "which state precedes this one under
+    # this action" -- reached from backward_parent_states, reached from inside the loss,
+    # reached from inside a training loop that catches every exception and records NaN.
+    # Throwing there produced molecular TB training at 0 of 5 finite losses: the refusal was
+    # correct in substance and INVISIBLE in effect, because the loop converted it into
+    # precisely the silent failure it was meant to prevent. A full history of NaN, with the
+    # completion banner printed.
+    #
+    # So the query returns `nothing`, and the consequence is stated ONCE at training entry by
+    # validate_training_config, where a user reads it. Measured after the revert: molecular TB
+    # 5/5 finite, grid TB 5/5 finite with no warning (grid enumerates parents).
     state = MolState("*c1ccccc1", [0], Int[], 1, false, zeros(Float32, FINGERPRINT_DIM))
     terminal = MolState("c1ccccc1", Int[], Int[], 1, true, zeros(Float32, FINGERPRINT_DIM))
 
-    @test_throws MolecularBackwardUnavailable GFlowNet.find_parent_for_action(
-        state, FRAGMENT_LIBRARY[1])
-    @test_throws MolecularBackwardUnavailable GFlowNet.find_parent_for_action(
-        terminal, TerminateMolAction())
+    # The query answers rather than throwing.
+    @test isnothing(GFlowNet.find_parent_for_action(state, FRAGMENT_LIBRARY[1]))
+    @test isnothing(GFlowNet.find_parent_for_action(terminal, TerminateMolAction()))
 
-    # The chokepoint every objective actually calls.
     all_actions = AbstractAction[FRAGMENT_LIBRARY[1], FRAGMENT_LIBRARY[41],
                                  TerminateMolAction()]
-    @test_throws MolecularBackwardUnavailable GFlowNet.backward_parent_states(
-        terminal, all_actions)
+    @test isempty(GFlowNet.backward_parent_states(terminal, all_actions))
 
-    # The message has to say what is wrong, not just that something is.
-    err = try
-        GFlowNet.find_parent_for_action(state, FRAGMENT_LIBRARY[1])
-        nothing
-    catch e
-        e
+    # THE WARNING AND THE TRAINING RUN NEED RDKIT, and they are gated for a measured reason.
+    # Without it every `apply_action` fails with UndefVarError(:RDKitBridge) and warns, so the
+    # captured log fills with those warnings instead of the P_B one and no trajectory can be
+    # built -- the run then gives 0 of 3 finite losses for a reason that has nothing to do
+    # with what is being tested. The parent-query assertions above need no chemistry and stay
+    # ungated.
+    if !RDKIT_AVAILABLE
+        @warn "P_B surfacing NOT CHECKED -- no RDKit" reason = rdkit_reason()
+    else
+        # The WARNING is what carries the finding. This is the assertion that fails if someone
+        # deletes the surfacing and leaves the silent P_B = 1 -- the state this domain was
+        # actually in before any of this. Its CONTENT is asserted, not merely its existence: a
+        # warning that fires without naming the cause or the fix is not a surfacing.
+        model = create_molecular_gflownet(hidden_dim = 8,
+                                          partition_function_method = LEARNABLE_ESTIMATION)
+        config = TrainingConfig(objective = TRAJECTORY_BALANCE,
+                                partition_function_method = LEARNABLE_ESTIMATION,
+                                n_iterations = 1, batch_size = 2)
+        buf = IOBuffer()
+        Base.CoreLogging.with_logger(
+            Base.CoreLogging.SimpleLogger(buf, Base.CoreLogging.Warn)) do
+            try
+                GFlowNet.validate_training_config(config, model)
+            catch
+            end
+        end
+        text = String(take!(buf))
+        @test occursin("cannot enumerate parents", text)
+        @test occursin("P_B", text)
+        @test occursin("find_parent_for_action", text)
+
+        # Training itself must still WORK. Throwing from find_parent_for_action broke it:
+        # measured 0 of 5 finite losses, because the training loop caught the refusal and
+        # recorded NaN.
+        history = train_gflownet(model,
+            TrainingConfig(objective = TRAJECTORY_BALANCE,
+                           partition_function_method = LEARNABLE_ESTIMATION,
+                           n_iterations = 3, batch_size = 2); verbose = false)
+        @test count(isfinite, history.losses) == 3
     end
-    @test err isa MolecularBackwardUnavailable
-    text = sprint(showerror, err)
-    @test occursin("P_B", text)
-    @test occursin("more than one parent", text)
-    @test occursin("*c1ccccc1", text)
 end
 
 # ============================================================================

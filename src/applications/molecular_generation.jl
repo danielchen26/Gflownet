@@ -665,13 +665,35 @@ function Base.showerror(io::IO, e::MolecularBackwardUnavailable)
           a true Z = 28.4957. See the MolecularBackwardUnavailable docstring.""")
 end
 
-function GFlowNet.find_parent_for_action(state::MolState, action::FragmentAction)
-    throw(MolecularBackwardUnavailable(state.smiles, "join " * action.fragment_name))
-end
-
-function GFlowNet.find_parent_for_action(state::MolState, action::TerminateMolAction)
-    throw(MolecularBackwardUnavailable(state.smiles, "terminate"))
-end
+# These return `nothing`, and they must NOT throw.
+#
+# `find_parent_for_action` is a STRUCTURAL QUERY -- "which state precedes this one under this
+# action" -- called from `backward_parent_states`, which is called from inside the loss, which
+# is called from inside a training loop that catches everything and records NaN. An earlier
+# version threw MolecularBackwardUnavailable from here, and the measured result was molecular
+# TB training at 0 of 5 finite losses: the refusal was correct in substance and invisible in
+# effect, because the loop converted it into the exact silent failure it was meant to prevent.
+#
+# The substance is real and is recorded rather than hidden. A MolState cannot recover its
+# parents: the join history is not stored -- only the canonical SMILES, the open attachment
+# points and their labels -- so neither P_B = 1 nor uniform-over-parents is computable here.
+# And P_B = 1 is NOT valid, because the fragment DAG is not a tree. Measured on the
+# [1, 2, 5, 41, 42, 43, 44, 45] fragment subset with TerminateMolAction included and states
+# compared by CANONICAL smiles:
+#
+#     41 terminal states, 19 of them reachable by more than one action sequence
+#     max n(x) = 4, mean 1.59, 46.3% multi-path
+#     Z with P_B = 1  45.4131      true sum_x R(x)  28.4957      ratio 1.5937
+#
+# So the molecular terminal law is biased toward states reachable by more join orders, by
+# about 1.6x in partition-function terms. That is warned about ONCE at training entry, where
+# it is visible, instead of thrown per-edge where it is not.
+#
+# THE FIX, when it is worth doing: store the join sequence on MolState so a parent is
+# recoverable, then return the real parent here and let the uniform-over-parents fallback do
+# its job. That is a state-representation change, not a patch.
+GFlowNet.find_parent_for_action(state::MolState, action::FragmentAction) = nothing
+GFlowNet.find_parent_for_action(state::MolState, action::TerminateMolAction) = nothing
 
 # ============================================
 # Model Factory
